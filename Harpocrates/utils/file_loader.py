@@ -1,5 +1,5 @@
 import re
-from Harpocrates.scanner.entropy import looks_like_secret 
+from Harpocrates.scanner.entropy import looks_like_secret, shannon_entropy
 
 def scan_file_for_entropy(path: str, threshold: float = 4.0):
     findings = []
@@ -12,5 +12,6 @@ def scan_file_for_entropy(path: str, threshold: float = 4.0):
                     findings.append({
                         "line": line_no,
                         "token": token,
-                        "entropy": token
+                        "entropy": shannon_entropy(token)
                     })
+    return findings
