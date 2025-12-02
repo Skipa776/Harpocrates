@@ -7,12 +7,15 @@ from .models import Finding
 
 class BaseScanner(ABC):
     '''
-    Docstring for BaseScanner
+    Abstract base class for all secret scanners.
+    
+    Subclasses must implement the `scan` method to analyze content
+    and return a list of Finding instances.
     '''
     
     def __init__(self, name: str | None = None, **kwargs: Any)-> None:
         self.name = name or self.__class__.__name__
-        self.__init__kwargs = kwargs
+        self._init_kwargs = kwargs
     
     @abstractmethod
     def scan(self, content: str, context: Dict[str, Any]) -> List[Finding]:

@@ -24,10 +24,5 @@ class Finding:
 
         Positive values increase confidence, negative decrease it.
         '''
-        new_value = self.confidence_score + amount
-        if new_value < 0.0:
-            new_value = 0.0
-        elif new_value > 1.0:
-            new_value = 1.0
-        self.confidence_score = new_value
+        self.confidence_score = max(0.0, min(1.0, self.confidence_score + amount))
         

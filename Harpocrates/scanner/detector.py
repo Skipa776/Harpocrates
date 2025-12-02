@@ -25,8 +25,8 @@ class Detector:
         re.VERBOSE,
     )
     
-    def __init__(self, scanner: Optional[list[BaseScanner]] = None) -> None:
-        self.scanners: list[BaseScanner] = scanner or [
+    def __init__(self, scanners: Optional[list[BaseScanner]] = None) -> None:
+        self.scanners: list[BaseScanner] = scanners or [
             RegexScanner(signatures=SIGNATURES),
             EntropyScanner(),
         ]
@@ -56,7 +56,7 @@ class Detector:
         
         lines: list[str] = []
         for _, line in iter_text_lines(path_obj, max_bytes=max_bytes):
-            lines.append(line.rstrip("\n"))
+            lines.append(line)
         text = "\n".join(lines)
         return self.scan_text(text, file_path=file_name)
     
@@ -94,7 +94,7 @@ def detect_text(text: str, threshold: float = 4.0) -> List[Finding]:
     for now it's unused to keep the signature stable.
     '''
     detector = Detector(
-        scanner=[
+        scanners=[
             RegexScanner(signatures=SIGNATURES),
             EntropyScanner(entropy_threshold=threshold),
         ]
@@ -106,7 +106,7 @@ def detect_file(path: str | Path, threshold: float = 4.0, max_bytes: Optional[in
     Backwards-compatible wrapper around Detector.scan_file.
     """
     detector = Detector(
-        scanner=[
+        scanners=[
             RegexScanner(signatures=SIGNATURES),
             EntropyScanner(entropy_threshold=threshold),
         ]

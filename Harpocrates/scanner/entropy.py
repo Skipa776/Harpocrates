@@ -87,7 +87,7 @@ def looks_like_secret(s: str, threshold: float = 4.0) -> bool:
     
     return shannon_entropy(s) >= threshold
 
-__all__ = ["shannon_entropy", "looks_like_secret"]
+__all__ = ["EntropyScanner", "looks_like_secret", "shannon_entropy"]
 
 class EntropyScanner(BaseScanner):
     '''
@@ -109,15 +109,13 @@ class EntropyScanner(BaseScanner):
         for lineno, line in enumerate(content.splitlines(), start=1):
             stripped = line.strip()
             for token in _TOKEN_RE.findall(stripped):
-                if not looks_like_secret(token, threshold=self.entropy_threshold):
-                    continue
                 entropy_val = shannon_entropy(token)
-                if entropy_val < self.entropy_threshold:
+                if not looks_like_secret(token, threshold=self.entropy_threshold):
                     continue
                 
                 confidence = min(
                     1.0,
-                    self.base_confidence + max(0.0, entropy_val - (self.entropy_threshold * 0.05)),
+                    self.base_confidence + max(0.0, entropy_val - self.entropy_threshold),
                 )
                 
                 column = line.find(token)
