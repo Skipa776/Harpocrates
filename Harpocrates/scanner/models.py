@@ -19,11 +19,12 @@ class Finding:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def enhance_confidence(self, amount: float) -> None:
-        '''
-        Adjust confidence by `amount`, clamped into [0.0, 1.0].
-
-        Positive values increase confidence, negative decrease it.
-        '''
+        """
+        Adjust the finding's confidence score by a given amount and clamp the result to the range 0.0–1.0.
+        
+        Parameters:
+            amount (float): Amount to add to the current confidence score; positive values increase confidence, negative values decrease it. The confidence_score is updated in place.
+        """
         new_value = self.confidence_score + amount
         if new_value < 0.0:
             new_value = 0.0

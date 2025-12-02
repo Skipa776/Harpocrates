@@ -42,6 +42,15 @@ DEFAULT_IGNORE_FILE = ".harpocratesignore"
 GITIGNORE_FILE = ".gitignore"
 
 def _read_ignore_file(path: Path) -> list[str]:
+    """
+    Read ignore patterns from a text file, returning non-empty, non-comment lines.
+    
+    Parameters:
+        path (Path): Path to the ignore file to read.
+    
+    Returns:
+        list[str]: List of ignore pattern strings (each line trimmed). Returns an empty list if the file cannot be read.
+    """
     out: List[str] = []
     try:
         for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -55,15 +64,20 @@ def _read_ignore_file(path: Path) -> list[str]:
 
 def _pattern_matches(rel_str: str, is_dir: bool, patterns: str) -> bool:
     """
-    Minimal gitignore-like matching against a relative posix path string.
-
-    Semantics:
-      - Leading '/' anchors to repo root.
-      - Trailing '/' indicates a directory pattern; matches the directory and anything under it.
-      - Otherwise, pattern is treated as unanchored and may match any path segment.
-      - We use fnmatch with two tries to emulate unanchored behavior:
-          1) direct match on rel_str
-          2) '**/' + pattern (so 'dist/' can match nested 'pkg/dist/')
+    Determine whether a single ignore pattern matches a POSIX-style path relative to the repository root.
+    
+    The pattern follows minimal gitignore-like semantics:
+    - A leading '/' anchors the pattern to the repository root.
+    - A trailing '/' denotes a directory pattern and matches the directory and any descendant paths.
+    - Patterns without a leading '/' may match any path segment (they are treated as unanchored).
+    
+    Parameters:
+        rel_str (str): Path relative to the repository root, using POSIX separators (e.g., 'src/app/file.py').
+        is_dir (bool): True when the target path is a directory.
+        patterns (str): The single ignore pattern to test, possibly anchored ('/pat'), a directory pattern ('pat/'), or a negated form is handled elsewhere.
+    
+    Returns:
+        bool: `True` if the pattern matches the target path (taking directory semantics into account), `False` otherwise.
     """
     anchored = patterns.startswith("/")
     dir_pat = patterns.endswith("/")
@@ -84,14 +98,18 @@ def load_ignore_patterns(
     extra_ignore_file: Optional[Path] = None
 ) -> list[str]:
     """
-    Load ordered ignore patterns from .gitignore and/or a Harpocrates ignore file.
-
-    - root: repository root (all matches evaluated against paths relative to this root)
-    - respect_gitignore: if True and .gitignore exists at root, include its patterns
-    - extra_ignore_file: if provided and exists, include; otherwise try '.harpocratesignore' at root
-
-    Returns a flat, ordered list of patterns. Negations ('!pattern') are preserved; later
-    entries take precedence during evaluation.
+    Load ordered ignore patterns from repository ignore files.
+    
+    Parameters:
+        root (Path): Repository root; patterns are evaluated relative to this path.
+        respect_gitignore (bool): If True and a `.gitignore` exists at `root`, include its patterns.
+        extra_ignore_file (Optional[Path]): Optional alternate ignore file; if provided and exists its
+            patterns are appended. If not provided or not found, `.harpocratesignore` at `root` is used
+            when present.
+    
+    Returns:
+        list[str]: Flat, ordered list of ignore pattern strings. Negated patterns (those starting with
+        '!') are preserved and later entries override earlier ones.
     """
     patterns: List[str] = []
     
@@ -116,21 +134,19 @@ def should_scan_path(
     follow_symlinks:bool = False
 ) -> bool:
     """
-    Decide whether 'path' should be scanned.
-
-    Rules (in order):
-      1) Normalize to a path relative to 'root'. If not under root: skip.
-      2) Skip symlinks unless follow_symlinks=True (dir symlink loops are common).
-      3) Skip if any ancestor directory is in DEFAULT_SKIP_DIRS.
-      4) If file and default_skip_exts=True, skip if extension in DEFAULT_SKIP_EXTS.
-      5) Apply ordered ignore patterns (gitignore-ish semantics with negation).
-      6) Default: include.
-
-    Notes:
-      - Patterns are evaluated against posix-style relative paths (e.g., 'src/app/file.py').
-      - A leading '/' in a pattern anchors it to root (e.g., '/secrets.txt').
-      - A trailing '/' denotes a directory pattern (e.g., 'logs/').
-      - Negations '!pattern' re-include matches; later lines win.
+    Decide whether a filesystem path should be included for scanning relative to a repository root.
+    
+    Evaluation applies repository-relative normalization, optional symlink following, default directory and file-extension exclusions, and ordered ignore patterns with gitignore-like semantics (anchoring with leading '/', directory patterns with trailing '/', and negation with leading '!').
+    
+    Parameters:
+        path (Path): Path to test.
+        root (Path): Repository root used to compute a POSIX-style relative path for pattern matching.
+        ignores (list[str]): Ordered ignore patterns; later entries override earlier ones.
+        default_skip_exts (bool): If True, skip files with extensions listed in DEFAULT_SKIP_EXTS.
+        follow_symlinks (bool): If False, symlinks are skipped.
+    
+    Returns:
+        bool: `True` if the path should be scanned, `False` otherwise.
     """
     
     root_resolved = root.resolve()

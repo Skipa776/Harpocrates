@@ -57,11 +57,28 @@ class RegexScanner(BaseScanner):
     '''
     
     def __init__(self, signatures: Dict[str, Pattern], base_confidence: float = 0.9) -> None:
+        """
+        Initialize the RegexScanner with a set of regex signatures and a baseline confidence.
+        
+        Parameters:
+            signatures (Dict[str, Pattern]): Mapping of signature name to compiled regex pattern; if falsy, the module-level SIGNATURES mapping is used.
+            base_confidence (float): Baseline confidence score applied to findings, typically between 0.0 and 1.0.
+        """
         super().__init__(name="RegexScanner")
         self.signatures = signatures or SIGNATURES
         self.base_confidence = base_confidence
         
     def scan(self, content: str, context: Dict[str, Any]) -> List[Finding]:
+        """
+        Scan text content for known secret patterns and produce Findings for each match.
+        
+        Parameters:
+            content (str): The text to scan; scanned line-by-line.
+            context (Dict[str, Any]): Optional metadata used for findings (expects "file_path" for location).
+        
+        Returns:
+            List[Finding]: A list of Finding objects for every regex match. Each Finding includes the signature name, file path (from context), line and column of the match, the raw matched token, a masked version of the token, a confidence score, and metadata with `type`, a 200-character snippet of the line, and `evidence` set to `"regex"`.
+        """
         file_path = context.get("file_path")
         finding: List[Finding] = []
         
@@ -91,9 +108,17 @@ class RegexScanner(BaseScanner):
 
     @staticmethod
     def _mask(value: str)-> str:
-        '''
-        Simple masking helper: keep first and last 2 characters, mask the rest.
-        '''
+        """
+        Mask a sensitive string by replacing its middle characters with asterisks.
+        
+        For strings longer than four characters, preserve the first two and last two characters and replace all characters in between with `*`. For strings of length four or less, replace every character with `*`.
+        
+        Parameters:
+            value (str): The input string to mask.
+        
+        Returns:
+            masked_value (str): The masked string.
+        """
         if len(value) <= 4:
             return "*" * len(value)
         return value[:2] + "*" * (len(value) - 4) + value[-2:]
