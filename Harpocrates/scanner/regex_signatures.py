@@ -90,7 +90,7 @@ class RegexScanner(BaseScanner):
         return findings
 
     @staticmethod
-    def _mask(value: str)-> str:
+    def _mask(value: str) -> str:
         '''
         Simple masking helper: keep first and last 2 characters, mask the rest.
         '''

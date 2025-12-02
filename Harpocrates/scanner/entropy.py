@@ -103,7 +103,7 @@ class EntropyScanner(BaseScanner):
         self.entropy_threshold = entropy_threshold
         
     def scan(self, content: str, context: Dict[str, Any]) -> List[Finding]:
-        file_path = context.get("file_path")
+        file_path = str(context.get("file_path", ""))
         findings: List[Finding] = []
         
         for lineno, line in enumerate(content.splitlines(), start=1):

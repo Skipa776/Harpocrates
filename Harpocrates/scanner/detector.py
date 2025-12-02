@@ -66,11 +66,8 @@ class Detector:
         for f in findings:
             if f.scanner_name != "EntropyScanner":
                 continue
-            if f.line_number is None:
-                continue
-            
-            idx = f.line_number -1
-            if not( 0<= idx < len(lines)):
+            idx = f.line_number - 1
+            if not (0 <= idx < len(lines)):
                 continue
             line = lines[idx]
             if self._looks_like_assignment(line, f.raw_text):

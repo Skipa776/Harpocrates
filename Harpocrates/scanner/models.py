@@ -25,4 +25,3 @@ class Finding:
         Positive values increase confidence, negative decrease it.
         '''
         self.confidence_score = max(0.0, min(1.0, self.confidence_score + amount))
-        
