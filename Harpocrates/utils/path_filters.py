@@ -66,8 +66,7 @@ def _pattern_matches(rel_str: str, is_dir: bool, patterns: str) -> bool:
           2) '**/' + pattern (so 'dist/' can match nested 'pkg/dist/')
     """
     anchored = patterns.startswith("/")
-    dir_pat = patterns.endswith("/")
-    pat_core = patterns.rstrip("/")
+    pat_core = patterns.lstrip("/").rstrip("/")
     target = rel_str if not is_dir else rel_str + "/"
     
     if anchored:
@@ -136,7 +135,7 @@ def should_scan_path(
     root_resolved = root.resolve()
     try:
         rel = path.resolve().relative_to(root_resolved)
-    except Exception:
+    except ValueError:
         return False
     
     if rel==Path('.'):

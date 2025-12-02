@@ -58,19 +58,19 @@ class RegexScanner(BaseScanner):
     
     def __init__(self, signatures: Dict[str, Pattern], base_confidence: float = 0.9) -> None:
         super().__init__(name="RegexScanner")
-        self.signatures = signatures or SIGNATURES
+        self.signatures = signatures if signatures is not None else SIGNATURES
         self.base_confidence = base_confidence
         
     def scan(self, content: str, context: Dict[str, Any]) -> List[Finding]:
-        file_path = context.get("file_path")
-        finding: List[Finding] = []
+        file_path = str(context.get("file_path", ""))
+        findings: List[Finding] = []
         
         for lineno, line in enumerate(content.splitlines(), start=1):
             for sig_name, pattern in self.signatures.items():
                 for match in pattern.finditer(line):
                     token = match.group(0)
                     column = match.start()
-                    finding.append(
+                    findings.append(
                         Finding(
                             scanner_name=self.name,
                             signature_name=sig_name,
@@ -87,7 +87,7 @@ class RegexScanner(BaseScanner):
                             },
                         )
                     )
-        return finding
+        return findings
 
     @staticmethod
     def _mask(value: str)-> str:
