@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from Harpocrates.scanner.detector import detect_file, detect_text
+from Harpocrates.scanner.models import Finding
 
 
 def test_detect_text_finds_github_token_and_entropy() -> None:
@@ -16,9 +17,23 @@ def test_detect_text_finds_github_token_and_entropy() -> None:
     )
 
     findings = detect_text(text)
+
+    # We should get at least one finding
     assert findings
-    assert any("GITHUB" in str(f["type"]) for f in findings)
-    assert any(f["evidence"] == "entropy" for f in findings)
+    # All findings should be Finding instances
+    assert all(isinstance(f, Finding) for f in findings)
+
+    # At least one regex-based GitHub token finding
+    assert any(
+        "GITHUB" in str(f.metadata.get("type", ""))
+        for f in findings
+    )
+
+    # At least one entropy-based finding
+    assert any(
+        f.metadata.get("evidence") == "entropy"
+        for f in findings
+    )
 
 
 def test_detect_file_smoke(tmp_path: Path) -> None:
@@ -29,6 +44,15 @@ def test_detect_file_smoke(tmp_path: Path) -> None:
 
     findings = detect_file(file_path)
 
+    # We should get at least one finding
     assert findings
-    assert any("GITHUB" in str(f["type"]) for f in findings)
-    assert all(str(file_path) == f["file"] for f in findings)
+    assert all(isinstance(f, Finding) for f in findings)
+
+    # At least one GitHub-type finding
+    assert any(
+        "GITHUB" in str(f.metadata.get("type", ""))
+        for f in findings
+    )
+
+    # All findings should report the correct file path
+    assert all(str(file_path) == f.file_path for f in findings)

@@ -2,111 +2,113 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-from Harpocrates.scanner.entropy import shannon_entropy, looks_like_secret
-from Harpocrates.scanner.regex_signatures import SIGNATURES
+from Harpocrates.scanner.base import BaseScanner
+from Harpocrates.scanner.models import Finding
+from Harpocrates.scanner.entropy import EntropyScanner
+from Harpocrates.scanner.regex_signatures import RegexScanner, SIGNATURES
 from Harpocrates.utils.file_loader import iter_text_lines
 
-Finding = Dict[str, object]
 
-_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-.]{8,}")
-
-def _make_finding(
-    type_: str,
-    file: Optional[str],
-    line: Optional[int],
-    snippet: str,
-    entropy: Optional[float],
-    evidence: str,
-) -> Finding:
-    return {
-        "type": type_,
-        "file": file,
-        "line": line,
-        "snippet": snippet,
-        "entropy": entropy,
-        "evidence": evidence,
-    }
+class Detector:
+    '''
+    Orchestrates all scanners and applies cross-scanner post_processing.
+    '''
+    ASSIGNMENT_PATTERN = re.compile(
+        r"""
+        ^\s*
+        (?P<name>[A-Za-z_][A-Za-z0-9_]*)
+        \s*=\s*
+        (?P<value>["'].*["']|[A-Za-z0-9+/_=.-]+)
+        """,
+        re.VERBOSE,
+    )
     
-def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
-    """Scan a single line for regex signatures and entropy-based canditates"""
-    findings: List[Finding] = []
-    stripped = line.strip()
+    def __init__(self, scanner: Optional[list[BaseScanner]] = None) -> None:
+        self.scanners: list[BaseScanner] = scanner or [
+            RegexScanner(signatures=SIGNATURES),
+            EntropyScanner(),
+        ]
     
-    for sig_name, pattern in SIGNATURES.items():
-        for match in pattern.finditer(stripped):
-            token = match.group()
-            entropy_val = shannon_entropy(token) if token else 0.0
-            findings.append(
-                _make_finding(
-                    type_=sig_name,
-                    file=file,
-                    line=lineno,
-                    snippet=stripped[:200],
-                    entropy=entropy_val,
-                    evidence="regex",
-                ),
-            )
+    def scan_text(self, text: str, file_path: Optional[str] = None) -> List[Finding]:
+        '''
+        Scan a text blob and return Findings.
+        '''
+        context = {'file_path': file_path}
+        findings: List[Finding] = []
+        for scanner in self.scanners:
+            findings.extend(scanner.scan(text, context))
+            
+        self._post_process(findings, text)
+        return findings
+    
+    def scan_file(
+        self,
+        path: str | Path,
+        max_bytes: Optional[int] = None,
+    ) -> List[Finding]:
+        """
+        Scan a file and return Findings.
+        """
+        path_obj = Path(path)
+        file_name = str(path_obj)
+        
+        lines: list[str] = []
+        for _, line in iter_text_lines(path_obj, max_bytes=max_bytes):
+            lines.append(line.rstrip("\n"))
+        text = "\n".join(lines)
+        return self.scan_text(text, file_path=file_name)
+    
+    def _post_process(self, findings: List[Finding], full_text: str) -> None:
+        lines = full_text.splitlines()
+        
+        for f in findings:
+            if f.scanner_name != "EntropyScanner":
+                continue
+            if f.line_number is None:
+                continue
+            
+            idx = f.line_number -1
+            if not( 0<= idx < len(lines)):
+                continue
+            line = lines[idx]
+            if self._looks_like_assignment(line, f.raw_text):
+                f.enhance_confidence(0.2)
 
-    for token in _TOKEN_RE.findall(stripped):
-        if looks_like_secret(token):
-            findings.append(
-                _make_finding(
-                    type_="ENTROPY_CANDIDATE",
-                    file=file,
-                    line=lineno,
-                    snippet=stripped[:200],
-                    entropy=shannon_entropy(token),
-                    evidence="entropy",
-                )
-            )
-    return findings
+    def _looks_like_assignment(self, line: str, raw_text: str) -> bool:
+        '''
+        Heuristic: does this line look like name = value and contain raw text?
+        '''
+        match = self.ASSIGNMENT_PATTERN.match(line)
+        if not match:
+            return False
+        value = match.group("value")
+        return raw_text in value
 
-def detect_text(
-    text: str,
-    threshold: float = 4.0,
-) -> List[Finding]:
+def detect_text(text: str, threshold: float = 4.0) -> List[Finding]:
+    '''
+    Backwards-compatible wrapper around Detector.scan_text.
+
+    `threshold` can be plumbed into EntropyScanner in the future;
+    for now it's unused to keep the signature stable.
+    '''
+    detector = Detector(
+        scanner=[
+            RegexScanner(signatures=SIGNATURES),
+            EntropyScanner(entropy_threshold=threshold),
+        ]
+    )
+    return detector.scan_text(text, file_path=None)
+
+def detect_file(path: str | Path, threshold: float = 4.0, max_bytes: Optional[int] = None) -> List[Finding]:
     """
-    Dectect secrets in a text blob and return a list of uniform findings.
-    
-    Returns findings of the form:
-    {
-      "type": str,
-      "file": str | None,
-      "line": int | None,
-      "snippet": str,
-      "entropy": float | None,
-      "evidence": "regex" | "entropy"
-    }
+    Backwards-compatible wrapper around Detector.scan_file.
     """
-    _ = threshold
-    findings: List[Finding] = []
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        findings.extend(_scan_line(line, lineno, file = None))
-    return findings
-
-def detect_file(
-    path: str | Path,
-    threshold: float = 4.0,
-    max_bytes: Optional[int] = None,
-) -> List[Finding]:
-    """
-    Detects secrets in a file on disk using safe text iteration (binary-aware).
-    
-    Args:
-        path (str | Path): path to scan
-        threshold (float, optional): reserved for future tuning. Defaults to 4.0.
-        max_bytes (Optional[int], optional): maximum number of bytes to read from the file. Defaults to None.
-
-    Returns:
-        List[Finding]: list of findings detected in the file
-    """
-    _ = threshold
-    path_obj = Path(path)
-    file_name = str(path_obj)
-    
-    findings: List[Finding] = []
-    for lineno, line in iter_text_lines(path_obj, max_bytes=max_bytes):
-        findings.extend(_scan_line(line, lineno, file=file_name))
-    return findings
+    detector = Detector(
+        scanner=[
+            RegexScanner(signatures=SIGNATURES),
+            EntropyScanner(entropy_threshold=threshold),
+        ]
+    )
+    return detector.scan_file(path, max_bytes=max_bytes)
