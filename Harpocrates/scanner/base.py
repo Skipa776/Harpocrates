@@ -13,7 +13,7 @@ class BaseScanner(ABC):
     and return a list of Finding instances.
     '''
     
-    def __init__(self, name: str | None = None, **kwargs: Any)-> None:
+    def __init__(self, name: str | None = None, **kwargs: Any) -> None:
         self.name = name or self.__class__.__name__
         self._init_kwargs = kwargs
     
@@ -36,4 +36,4 @@ class BaseScanner(ABC):
         List[Finding]:
             Zero or more Finding instances.
         """
-        raise NotImplementedError()
+        pass
