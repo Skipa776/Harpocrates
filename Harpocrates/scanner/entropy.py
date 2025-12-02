@@ -12,24 +12,15 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-.]{8,}")
 
 def shannon_entropy(s: str) -> float:
     """
-    Compute Shannon entropy (base-2) for a string.
+    Calculate the Shannon entropy (base 2) of a string.
     
-    Notes:
-        - Returns 0.0 for empty strings.
-        - Uses O(n) counting via collections.Counter
-        - Entropy is higher when character distribution is uniformly distributed
+    Returns 0.0 for an empty string. Higher values indicate a more uniform character distribution.
     
-    Examples: 
-        >>> round(shannon_entropy("aaaaaaa"), 3)
-        0.0
-        >>> round(shannon_entropy("Aa1Aa1Aa1"), 3) >= 3.0
-        True
-        
-    Args:
-        s (str): The input string.
-
+    Parameters:
+        s (str): The input string to measure.
+    
     Returns:
-        float: The Shannon entropy of the input string.
+        float: The Shannon entropy of `s` in bits.
     """
     if not s:
         return 0.0
@@ -44,32 +35,20 @@ def shannon_entropy(s: str) -> float:
 
 def looks_like_secret(s: str, threshold: float = 4.0) -> bool:
     """
-    Heuristic to decide if a string looks like a secret.
-
-    Conditions (all must pass):
-        - Length >=2
-        - Character diversity: > 3 unique characters
-        - At least 2 character classes among: [lowercase, uppercase, digits, special]
-        - Shannon entropy >= threshold (default: 4.0)
-
-    Rationale:
-      These rules suppress many config-ish or English-like strings while
-      still surfacing most machine-generated tokens.
-
-    Examples:
-        >>> looks_like_secret("just_a_normal_config_value", threshold=3.0)
-        False
-        >>> looks_like_secret("AKIAIOSFODNN7EXAMPLE", threshold=3.5)
-        True
-        >>> looks_like_secret("aaaaaaaaaaaaaaaaaaaaaaaa", threshold=3.0)
-        False
-        
-    Args:
-        s (str): The input string.
-        threshold (float, optional): The entropy threshold. Defaults to 4.0.
-
+    Determine whether a string resembles a secret token using length, character-class, and entropy heuristics.
+    
+    The string is considered a potential secret only if all of the following hold:
+    - length is at least 20 characters;
+    - contains more than 3 unique characters;
+    - contains at least two of these character classes: lowercase, uppercase, digits, non-alphanumeric (special);
+    - Shannon entropy (base-2) is greater than or equal to `threshold`.
+    
+    Parameters:
+        s (str): Input string to evaluate.
+        threshold (float, optional): Entropy cutoff; defaults to 4.0.
+    
     Returns:
-        bool: True if the string looks like a secret, False otherwise.
+        bool: `True` if the string meets the heuristic criteria for a secret, `False` otherwise.
     """
     if len(s) < 20:
         return False
@@ -98,11 +77,28 @@ class EntropyScanner(BaseScanner):
         entropy_threshold: float = 4.0,
         base_confidence: float = 0.4,
     ) -> None:
+        """
+        Initialize the EntropyScanner.
+        
+        Parameters:
+            entropy_threshold (float): Minimum Shannon entropy required for a token to be considered a potential secret.
+            base_confidence (float): Baseline confidence score (0.0–1.0) used when computing each finding's confidence.
+        """
         super().__init__(name="EntropyScanner")
         self.base_confidence = base_confidence
         self.entropy_threshold = entropy_threshold
         
     def scan(self, content: str, context: Dict[str, Any]) -> List[Finding]:
+        """
+        Scan the provided text for high-entropy tokens and produce findings for candidates that resemble secrets.
+        
+        Parameters:
+            content (str): The text to scan, processed line-by-line.
+            context (Dict[str, Any]): Additional context used when creating findings. If present, the key `"file_path"` will be included in each Finding.
+        
+        Returns:
+            List[Finding]: A list of Finding objects representing tokens that passed the heuristic and entropy thresholds; each Finding includes location, masked text, confidence score, and metadata (including entropy and a snippet).
+        """
         file_path = context.get("file_path")
         findings: List[Finding] = []
         
@@ -143,7 +139,15 @@ class EntropyScanner(BaseScanner):
     
     @staticmethod
     def _mask(value: str) -> str:
-        """Mask helper that keeps the first/last two characters."""
+        """
+        Mask a string preserving the first two and last two characters.
+        
+        Parameters:
+            value (str): The string to mask.
+        
+        Returns:
+            str: The masked string with middle characters replaced by asterisks. If `value` length is 4 or less, returns a string of asterisks of the same length.
+        """
         if len(value) <= 4:
             return "*" * len(value)
         return value[:2] + "*" * (len(value) - 4) + value[-2:]
