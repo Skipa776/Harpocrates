@@ -10,21 +10,22 @@ from Harpocrates.scanner.models import Finding
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-.]{8,}")
 
+
 def shannon_entropy(s: str) -> float:
     """
     Compute Shannon entropy (base-2) for a string.
-    
+
     Notes:
         - Returns 0.0 for empty strings.
         - Uses O(n) counting via collections.Counter
         - Entropy is higher when character distribution is uniformly distributed
-    
-    Examples: 
+
+    Examples:
         >>> round(shannon_entropy("aaaaaaa"), 3)
         0.0
         >>> round(shannon_entropy("Aa1Aa1Aa1"), 3) >= 3.0
         True
-        
+
     Args:
         s (str): The input string.
 
@@ -63,7 +64,7 @@ def looks_like_secret(s: str, threshold: float = 4.0) -> bool:
         True
         >>> looks_like_secret("aaaaaaaaaaaaaaaaaaaaaaaa", threshold=3.0)
         False
-        
+
     Args:
         s (str): The input string.
         threshold (float, optional): The entropy threshold. Defaults to 4.0.
@@ -73,7 +74,7 @@ def looks_like_secret(s: str, threshold: float = 4.0) -> bool:
     """
     if len(s) < 20:
         return False
-    
+
     if len(set(s)) <= 3:
         return False
 
@@ -81,12 +82,15 @@ def looks_like_secret(s: str, threshold: float = 4.0) -> bool:
     has_lower = any(c.islower() for c in s)
     has_digit = any(c.isdigit() for c in s)
     has_special = any(not c.isalnum() for c in s)
-    
+
     if sum([has_upper, has_lower, has_digit, has_special]) < 2:
         return False
-    
+
     return shannon_entropy(s) >= threshold
 
+<<<<<<< HEAD:Harpocrates/detectors/entropy_detector.py
+__all__ = ["shannon_entropy", "looks_like_secret"]
+=======
 __all__ = ["EntropyScanner", "looks_like_secret", "shannon_entropy"]
 
 class EntropyScanner(BaseScanner):
@@ -145,3 +149,4 @@ class EntropyScanner(BaseScanner):
         if len(value) <= 4:
             return "*" * len(value)
         return value[:2] + "*" * (len(value) - 4) + value[-2:]
+>>>>>>> origin/main:Harpocrates/scanner/entropy.py
