@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from Harpocrates.scanner.detector import detect_file, detect_text
+from Harpocrates.core.detector import detect_file, detect_text
 
 
 def test_detect_text_finds_github_token_and_entropy() -> None:

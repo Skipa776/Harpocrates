@@ -13,34 +13,28 @@ SIGNATURES: Dict[str, Pattern] = {
     "AWS_ACCESS_KEY_ID": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     # Secret Access Key: 40 base64-like characters
     # Replace your AWS secret entry with this:
-"AWS_SECRET_ACCESS_KEY": re.compile(r"(?<![A-Za-z0-9/+])[A-Za-z0-9/+][A-Za-z0-9/+=]{39}(?![A-Za-z0-9/+=])"),
+    "AWS_SECRET_ACCESS_KEY": re.compile(r"(?<![A-Za-z0-9/+])[A-Za-z0-9/+][A-Za-z0-9/+=]{39}(?![A-Za-z0-9/+=])"),
 
-    
     # --- GitHub ---
     # Personal Access Token (classic). We'll start with the common 'ghp_' prefix.
     # (Fine-grained tokens have different prefixes; will add later)
     "GITHUB_TOKEN": re.compile(r"\bghp_[0-9a-zA-Z]{36}\b"),
-    
     # --- GCP ---
     # API key often embedded in client_side code; starts with "AIza" and is 39 characters long.
     "GCP_API_KEY": re.compile(r"\bAIza[0-9A-Za-z-_]{35}\b"),
-    
     # --- AZURE ---
     # API Key Vault URL; prescence often correlates with secrets nearby in config.
     "AZURE_KEY_VAULT_URL": re.compile(r"\bhttps://[a-z0-9-]+\.vault\.azure\.net", re.IGNORECASE),
-    
     # --- JWT ---
     # Very loose match of header.payload.signature (URL-safe base64 segments separated by dots)
     "JWT": re.compile(r"\beyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]*\b"),
-    
-    # --- Slack --- 
+    # --- Slack ---
     # Common Slack tokens (team/app/bot/etc.)
     "SLACK_TOKEN": re.compile(r"\bxox[baprs]-[0-9A-Za-z-]+\b"),
 
     # --- Stripe ---
     # Live secret key (test keys use sk_test_)
     "STRIPE_SECRET_KEY": re.compile(r"\bsk_live_[0-9A-Za-z]{24}\b"),
-    
     # --- OpenAI ---
     # API key format for OpenAI usually starts with "sk-" followed by 48 alphanumeric characters
     "OPENAI_API_KEY": re.compile(r"\bsk-[0-9a-zA-Z]{48}\b"),
