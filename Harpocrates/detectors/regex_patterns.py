@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import re
 from re import Pattern
-from typing import Dict
+from typing import Dict, List, Any
+
+from Harpocrates.scanner.base import BaseScanner
+from Harpocrates.scanner.models import Finding
 
 # Base regex signatures for common secret formats
 # Keep patterns PRECOMPILED for performance; keep them strict enough to reduce noise
@@ -41,3 +44,53 @@ SIGNATURES: Dict[str, Pattern] = {
 }
 
 __all__ = ["SIGNATURES"]
+<<<<<<< HEAD:Harpocrates/detectors/regex_patterns.py
+=======
+
+class RegexScanner(BaseScanner):
+    '''
+    Scanner for regex signatures.
+    '''
+    
+    def __init__(self, signatures: Dict[str, Pattern], base_confidence: float = 0.9) -> None:
+        super().__init__(name="RegexScanner")
+        self.signatures = signatures if signatures is not None else SIGNATURES
+        self.base_confidence = base_confidence
+        
+    def scan(self, content: str, context: Dict[str, Any]) -> List[Finding]:
+        file_path = str(context.get("file_path", ""))
+        findings: List[Finding] = []
+        
+        for lineno, line in enumerate(content.splitlines(), start=1):
+            for sig_name, pattern in self.signatures.items():
+                for match in pattern.finditer(line):
+                    token = match.group(0)
+                    column = match.start()
+                    findings.append(
+                        Finding(
+                            scanner_name=self.name,
+                            signature_name=sig_name,
+                            file_path=file_path,
+                            line_number=lineno,
+                            column=column,
+                            raw_text=token,
+                            masked_text=self._mask(token),
+                            confidence_score=self.base_confidence,
+                            metadata={
+                                "type": sig_name,
+                                "snippet": line.strip()[:200],
+                                "evidence": "regex",
+                            },
+                        )
+                    )
+        return findings
+
+    @staticmethod
+    def _mask(value: str) -> str:
+        '''
+        Simple masking helper: keep first and last 2 characters, mask the rest.
+        '''
+        if len(value) <= 4:
+            return "*" * len(value)
+        return value[:2] + "*" * (len(value) - 4) + value[-2:]
+>>>>>>> origin/main:Harpocrates/scanner/regex_signatures.py
