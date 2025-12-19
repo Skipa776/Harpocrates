@@ -68,7 +68,7 @@ def iter_text_lines(
             encoded_len = len(line.encode("utf-8", errors="ignore"))
             total_bytes += encoded_len
 
-            if max_bytes is not None and total_bytes>max_bytes:
+            if max_bytes is not None and total_bytes > max_bytes:
                 break
 
             yield lineno, line.rstrip("\n")
