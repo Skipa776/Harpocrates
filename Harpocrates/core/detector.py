@@ -49,6 +49,41 @@ def _assess_severity(
     return Severity.MEDIUM
 
 
+def _calculate_confidence(
+    evidence_type: EvidenceType,
+    entropy_val: Optional[float],
+) -> float:
+    """
+    Calculate confidence score for a finding.
+
+    Args:
+        evidence_type: How the secret was detected
+        entropy_val: Shannon entropy (if available)
+
+    Returns:
+        Confidence score between 0.0 and 1.0
+    """
+    if evidence_type == EvidenceType.REGEX:
+        # Regex patterns are high confidence (known formats)
+        return 0.95
+
+    if evidence_type == EvidenceType.ENTROPY:
+        # Entropy-based detection: scale from 0.6 to 0.8 based on entropy
+        # Higher entropy = more likely to be a secret
+        if entropy_val is None:
+            return 0.6
+        # Map entropy 4.0-5.5 to confidence 0.6-0.8
+        base = 0.6
+        if entropy_val >= 5.5:
+            return 0.8
+        if entropy_val >= 4.0:
+            # Linear interpolation: 4.0->0.6, 5.5->0.8
+            return base + (entropy_val - 4.0) * (0.2 / 1.5)
+        return base
+
+    return 0.5  # Default for unknown evidence types
+
+
 def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     """
     Scan a single line for regex signatures and entropy-based candidates.
@@ -82,6 +117,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                 entropy=entropy_val,
                 evidence=EvidenceType.REGEX,
                 severity=_assess_severity(EvidenceType.REGEX, entropy_val, sig_name),
+                confidence=_calculate_confidence(EvidenceType.REGEX, entropy_val),
                 token=token,
             )
             findings.append(finding)
@@ -101,6 +137,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     entropy=ent,
                     evidence=EvidenceType.ENTROPY,
                     severity=_assess_severity(EvidenceType.ENTROPY, ent, "ENTROPY"),
+                    confidence=_calculate_confidence(EvidenceType.ENTROPY, ent),
                     token=token,
                 )
                 findings.append(finding)
@@ -150,6 +187,7 @@ def detect_file(
     - Skips binary files
     - Handles encoding errors gracefully
     - Respects max_bytes limit
+    - Returns empty list for nonexistent files
 
     Args:
         path: Path to the file to scan
@@ -157,7 +195,7 @@ def detect_file(
         max_bytes: Maximum bytes to read from file
 
     Returns:
-        List of findings detected
+        List of findings detected (empty list if file doesn't exist)
 
     Example:
         >>> findings = detect_file("secrets.env")
@@ -166,8 +204,12 @@ def detect_file(
     """
     _ = threshold  # Reserved for future use
     path_obj = Path(path)
-    file_name = str(path_obj)
 
+    # Return empty list for nonexistent files
+    if not path_obj.exists():
+        return []
+
+    file_name = str(path_obj)
     findings: List[Finding] = []
 
     for lineno, line in iter_text_lines(path_obj, max_bytes=max_bytes):
