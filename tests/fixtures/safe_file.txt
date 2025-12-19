@@ -1,0 +1,36 @@
+# Safe configuration file with no secrets
+# This file should not trigger any detections
+
+# Application settings
+APP_NAME=MyApplication
+APP_VERSION=1.0.0
+DEBUG=false
+
+# Database configuration (no actual credentials)
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=myapp_db
+DB_USER=app_user
+
+# API settings
+API_URL=https://api.example.com
+API_TIMEOUT=30
+API_RETRIES=3
+
+# Feature flags
+FEATURE_NEW_UI=true
+FEATURE_BETA=false
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+
+# Normal looking strings that should not trigger entropy detection
+USERNAME=john_doe
+EMAIL=user@example.com
+DESCRIPTION=This is a normal configuration value
+
+# Numbers and simple values
+MAX_CONNECTIONS=100
+CACHE_TTL=3600
+RATE_LIMIT=1000

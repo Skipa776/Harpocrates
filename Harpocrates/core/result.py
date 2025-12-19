@@ -21,6 +21,8 @@ class Severity(Enum):
     LOW = 'low'
     INFO = 'info'
 
+
+@dataclass
 class Finding:
     """
     Represents a single secret detection finding.
@@ -45,6 +47,31 @@ class Finding:
     severity: Severity = Severity.MEDIUM
     confidence: Optional[float] = None
     token: Optional[str] = None
+
+    @property
+    def redacted_token(self) -> Optional[str]:
+        """
+        Returns a redacted version of the token for safe display.
+
+        Format: Shows first 4 and last 4 characters with '...' in between.
+        Short tokens (<=10 chars) show first 2 and last 2.
+
+        Examples:
+            'AKIAIOSFODNN7EXAMPLE' -> 'AKIA...MPLE'
+            'ghp_abc123' -> 'gh...23'
+            None -> None
+        """
+        if not self.token:
+            return None
+        if len(self.token) <= 8:
+            # Very short token - just show first and last char
+            return f"{self.token[0]}...{self.token[-1]}"
+        elif len(self.token) <= 10:
+            # Short token - show first 2 and last 2
+            return f"{self.token[:2]}...{self.token[-2:]}"
+        else:
+            # Normal token - show first 4 and last 4
+            return f"{self.token[:4]}...{self.token[-4:]}"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert finding to dictionary representation"""
@@ -91,11 +118,11 @@ class ScanResult:
     @property
     def found_secrets(self) -> bool:
         """Returns True if any findings were dectected"""
-        return len(self.finigns) > 0
+        return len(self.findings) > 0
 
     @property
     def critical_count(self) -> int:
-        """Count of critical severity finings were detected."""
+        """Count of critical severity findings were detected."""
         return sum(1 for f in self.findings if f.severity == Severity.CRITICAL)
 
     @property

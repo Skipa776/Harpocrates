@@ -4,7 +4,6 @@ Command-line interface for Harpocrates secrets detection.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -17,21 +16,26 @@ from Harpocrates.core.scanner import scan_directory, scan_file
 
 app = typer.Typer(
     name="harpocrates",
-    help="🔒 Harpocrates - ML-powered secrets detection for code repositories",
+    help="Harpocrates - Secrets detection for code repositories",
     add_completion=False,
 )
 console = Console()
+error_console = Console(stderr=True)
 
 
 @app.command()
 def scan(
     path: Path = typer.Argument(..., help="File or directory to scan"),
-    recursive: bool = typer.Option(True, "--recursive/--no-recursive", "-r", 
-                                   help="Scan directories recursively"),
+    recursive: bool = typer.Option(
+        True, "--recursive/--no-recursive", "-r",
+        help="Scan directories recursively"
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
     max_file_size: int = typer.Option(10, "--max-size", help="Max file size in MB"),
-    ignore: Optional[str] = typer.Option(None, "--ignore", 
-                                         help="Comma-separated patterns to ignore"),
+    ignore: Optional[str] = typer.Option(
+        None, "--ignore",
+        help="Comma-separated patterns to ignore"
+    ),
 ) -> None:
     """
     Scan a file or directory for secrets.
@@ -51,8 +55,8 @@ def scan(
         harpocrates scan ./my_project --ignore "*.test.js,test_*"
     """
     if not path.exists():
-        console.print(f"[red]✗[/red] Path not found: {path}")
-        raise typer.Exit(code=1)
+        error_console.print(f"[red]✗[/red] Path not found: {path}")
+        raise typer.Exit(code=2)  # Error exit code
 
     ignore_patterns = set(ignore.split(",")) if ignore else set()
 
@@ -63,7 +67,7 @@ def scan(
         result = scan_file(path, max_file_size=max_bytes)
     else:
         result = scan_directory(
-            path, 
+            path,
             recursive=recursive,
             max_file_size=max_bytes,
             ignore_patterns=ignore_patterns
@@ -72,27 +76,33 @@ def scan(
     # Handle errors
     if result.errors:
         for error in result.errors:
-            console.print(f"[yellow]⚠[/yellow]  {error}", file=sys.stderr)
+            error_console.print(f"[yellow]⚠[/yellow]  {error}")
 
     if json_output:
         print(json.dumps(result.to_dict(), indent=2))
-        raise typer.Exit(code=2 if result.found_secrets else 0)
+        raise typer.Exit(code=1 if result.found_secrets else 0)  # 1=findings, 0=clean
 
     if not result.found_secrets:
         console.print("[green]✓[/green] No secrets detected")
-        console.print(f"Scanned {result.scanned_files} files ({result.total_lines} lines) "
-                     f"in {result.duration_ms:.0f}ms")
+        console.print(
+            f"Scanned {result.scanned_files} files ({result.total_lines} lines) "
+            f"in {result.duration_ms:.0f}ms"
+        )
         raise typer.Exit(code=0)
 
-    table = Table(title=f"🔍 Found {len(result.findings)} potential secrets", 
-                  show_header=True)
+    table = Table(
+        title=f"Found {len(result.findings)} potential secrets",
+        show_header=True
+    )
     table.add_column("Severity", style="bold")
     table.add_column("Type", style="cyan")
     table.add_column("Location")
     table.add_column("Evidence")
 
-    for finding in sorted(result.findings, 
-                         key=lambda f: (f.severity.value, f.file or "", f.line or 0)):
+    for finding in sorted(
+        result.findings,
+        key=lambda f: (f.severity.value, f.file or "", f.line or 0)
+    ):
         # Color severity
         severity_colors = {
             Severity.CRITICAL: "red bold",
@@ -115,12 +125,16 @@ def scan(
         )
 
     console.print(table)
-    console.print(f"\nScanned {result.scanned_files} files ({result.total_lines} lines) "
-                 f"in {result.duration_ms:.0f}ms")
-    console.print(f"[yellow]⚠[/yellow]  Found {result.critical_count} critical, "
-                 f"{result.high_count} high severity secrets")
+    console.print(
+        f"\nScanned {result.scanned_files} files ({result.total_lines} lines) "
+        f"in {result.duration_ms:.0f}ms"
+    )
+    console.print(
+        f"[yellow]⚠[/yellow]  Found {result.critical_count} critical, "
+        f"{result.high_count} high severity secrets"
+    )
 
-    raise typer.Exit(code=2)
+    raise typer.Exit(code=1)  # 1=findings detected
 
 
 @app.command()

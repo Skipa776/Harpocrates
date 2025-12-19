@@ -3,10 +3,9 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
-from Harpocrates.scanner.base import BaseScanner
-from Harpocrates.scanner.models import Finding
+from Harpocrates.core.result import Finding, ScanResult
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-.]{8,}")
 
@@ -88,65 +87,4 @@ def looks_like_secret(s: str, threshold: float = 4.0) -> bool:
 
     return shannon_entropy(s) >= threshold
 
-<<<<<<< HEAD:Harpocrates/detectors/entropy_detector.py
 __all__ = ["shannon_entropy", "looks_like_secret"]
-=======
-__all__ = ["EntropyScanner", "looks_like_secret", "shannon_entropy"]
-
-class EntropyScanner(BaseScanner):
-    '''
-    Scanner for entropy-based secret detection.
-    '''
-    def __init__(
-        self,
-        entropy_threshold: float = 4.0,
-        base_confidence: float = 0.4,
-    ) -> None:
-        super().__init__(name="EntropyScanner")
-        self.base_confidence = base_confidence
-        self.entropy_threshold = entropy_threshold
-        
-    def scan(self, content: str, context: Dict[str, Any]) -> List[Finding]:
-        file_path = str(context.get("file_path", ""))
-        findings: List[Finding] = []
-        
-        for lineno, line in enumerate(content.splitlines(), start=1):
-            stripped = line.strip()
-            for token in _TOKEN_RE.findall(stripped):
-                entropy_val = shannon_entropy(token)
-                if not looks_like_secret(token, threshold=self.entropy_threshold):
-                    continue
-                
-                confidence = min(
-                    1.0,
-                    self.base_confidence + max(0.0, entropy_val - self.entropy_threshold),
-                )
-                
-                column = line.find(token)
-                findings.append(
-                    Finding(
-                        scanner_name=self.name,
-                        signature_name="ENTROPY_HEURISTIC",
-                        file_path=file_path,
-                        line_number=lineno,
-                        column=column if column >= 0 else 0,
-                        raw_text=token,
-                        masked_text=self._mask(token),
-                        confidence_score=confidence,
-                        metadata={
-                            "type": "ENTROPY_CANDIDATE",
-                            "entropy": entropy_val,
-                            "snippet": stripped[:200],
-                            "evidence": "entropy",
-                        },
-                    )
-                )
-        return findings
-    
-    @staticmethod
-    def _mask(value: str) -> str:
-        """Mask helper that keeps the first/last two characters."""
-        if len(value) <= 4:
-            return "*" * len(value)
-        return value[:2] + "*" * (len(value) - 4) + value[-2:]
->>>>>>> origin/main:Harpocrates/scanner/entropy.py
