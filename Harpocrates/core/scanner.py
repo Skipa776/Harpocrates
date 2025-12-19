@@ -37,11 +37,20 @@ def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
     Returns:
         True if file should be scanned
     """
+    # Skip symlinks to prevent infinite loops
+    if path.is_symlink():
+        return False
+
+    # Check parent directories against ignore patterns
     for parent in path.parents:
         if parent.name in ignore_patterns:
             return False
+
+    # Check filename against ignore patterns
     if path.name in ignore_patterns:
         return False
+
+    # Check extension patterns (e.g., "*.pyc")
     for pattern in ignore_patterns:
         if pattern.startswith("*") and path.name.endswith(pattern[1:]):
             return False
@@ -96,10 +105,11 @@ def scan_directory(
     total_lines = 0
     errors: List[str] = []
 
+    # Get all files and sort for deterministic ordering
     if recursive:
-        file_iter = dir_path.rglob("*")
+        file_iter = sorted(dir_path.rglob("*"))
     else:
-        file_iter = dir_path.glob("*")
+        file_iter = sorted(dir_path.glob("*"))
 
     for file_path in file_iter:
         if not _should_scan_file(file_path, ignore):
@@ -129,7 +139,7 @@ def scan_directory(
         except Exception as e:
             errors.append(f"Error scanning {file_path}: {e}")
 
-    duration = (time.time()- start_time) * 1000 # in MS
+    duration = (time.time() - start_time) * 1000  # ms
 
     return ScanResult(
         findings=all_findings,
