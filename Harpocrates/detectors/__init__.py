@@ -2,7 +2,7 @@
 Harpocrates detectors package.
 
 Provides regex pattern matching and entropy-based secret detection.
-"""
+"""  # noqa: N999
 from __future__ import annotations
 
 from Harpocrates.detectors.entropy_detector import looks_like_secret, shannon_entropy

@@ -3,9 +3,6 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from typing import Any, Dict, List
-
-from Harpocrates.core.result import Finding, ScanResult
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-.]{8,}")
 

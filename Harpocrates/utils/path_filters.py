@@ -1,18 +1,18 @@
 from __future__ import annotations
-import fnmatch
 
-from typing import Iterable, List, Optional
+import fnmatch
 from pathlib import Path
+from typing import List, Optional
 
 DEFAULT_SKIP_DIRS = {
-    ".git", 
-    ".hg", 
-    ".svn", 
+    ".git",
+    ".hg",
+    ".svn",
     ".venv",
-    "venv", 
-    "__pycache__", 
-    "node_modules", 
-    "dist", 
+    "venv",
+    "__pycache__",
+    "node_modules",
+    "dist",
     "build"
 }
 
@@ -68,7 +68,7 @@ def _pattern_matches(rel_str: str, is_dir: bool, patterns: str) -> bool:
     anchored = patterns.startswith("/")
     pat_core = patterns.lstrip("/").rstrip("/")
     target = rel_str if not is_dir else rel_str + "/"
-    
+
     if anchored:
         return fnmatch.fnmatchcase(target, pat_core)
     else:
@@ -78,8 +78,8 @@ def _pattern_matches(rel_str: str, is_dir: bool, patterns: str) -> bool:
         return fnmatch.fnmatchcase(target, implied)
 
 def load_ignore_patterns(
-    root: Path, 
-    respect_gitignore: bool, 
+    root: Path,
+    respect_gitignore: bool,
     extra_ignore_file: Optional[Path] = None
 ) -> list[str]:
     """
@@ -93,7 +93,7 @@ def load_ignore_patterns(
     entries take precedence during evaluation.
     """
     patterns: List[str] = []
-    
+
     if respect_gitignore:
         gi = root / GITIGNORE_FILE
         if gi.exists():
@@ -109,7 +109,7 @@ def load_ignore_patterns(
 def should_scan_path(
     path: Path,
     *,
-    root: Path, 
+    root: Path,
     ignores:list[str],
     default_skip_exts:bool = True,
     follow_symlinks:bool = False
@@ -131,13 +131,13 @@ def should_scan_path(
       - A trailing '/' denotes a directory pattern (e.g., 'logs/').
       - Negations '!pattern' re-include matches; later lines win.
     """
-    
+
     root_resolved = root.resolve()
     try:
         rel = path.resolve().relative_to(root_resolved)
     except ValueError:
         return False
-    
+
     if rel==Path('.'):
         return True
     try:
@@ -148,28 +148,28 @@ def should_scan_path(
 
     if any(part in DEFAULT_SKIP_DIRS for part in rel.parts if part):
         return False
-    
+
     try:
         is_dir = path.is_dir()
     except OSError:
         return False
-    
+
     if not is_dir and default_skip_exts:
         if path.suffix.lower() in DEFAULT_SKIP_EXTS:
             return False
-        
+
     rel_str = rel.as_posix()
     decision: Optional[bool] = None
-    
+
     for pat in ignores:
         if not pat or pat.startswith('#'):
             continue
-        
+
         negated = pat.startswith('!')
         raw = pat[1:] if negated else pat
         if _pattern_matches(rel_str, is_dir, raw):
             decision = True if negated else False
     if decision is not None:
         return decision
-    
+
     return True

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import TYPE_CHECKING, List, Optional, Set
 
-from Harpocrates.core.detector import detect_file
+from Harpocrates.core.detector import detect_file, detect_file_with_ml
 from Harpocrates.core.result import Finding, ScanResult
+
+if TYPE_CHECKING:
+    from Harpocrates.ml.verifier import Verifier
 
 DEFAULT_IGNORE_PATTERNS = {
     # Version control
@@ -62,6 +65,8 @@ def scan_directory(
     recursive: bool = True,
     max_file_size: int = 10 * 1024 * 1024,
     ignore_patterns: Optional[Set[str]] = None,
+    verifier: Optional["Verifier"] = None,
+    ml_threshold: float = 0.5,
 ) -> ScanResult:
     """
     Scan a directory for secrets.
@@ -71,6 +76,8 @@ def scan_directory(
         recursive: If True, scan subdirectories
         max_file_size: Maximum file size to scan (in bytes)
         ignore_patterns: Additional patterns to ignore (merged with defaults)
+        verifier: Optional ML verifier for false positive filtering
+        ml_threshold: ML confidence threshold when verifier is enabled
 
     Returns:
         ScanResult containing all findings
@@ -124,7 +131,17 @@ def scan_directory(
             continue
 
         try:
-            findings = detect_file(file_path, max_bytes=max_file_size)
+            # Use ML verification if verifier is provided
+            if verifier is not None:
+                findings = detect_file_with_ml(
+                    file_path,
+                    verifier=verifier,
+                    max_bytes=max_file_size,
+                    ml_threshold=ml_threshold,
+                )
+            else:
+                findings = detect_file(file_path, max_bytes=max_file_size)
+
             all_findings.extend(findings)
             scanned_files += 1
             if findings:
@@ -152,6 +169,8 @@ def scan_directory(
 def scan_file(
     filepath: str | Path,
     max_file_size: int = 10 * 1024 * 1024,
+    verifier: Optional["Verifier"] = None,
+    ml_threshold: float = 0.5,
 ) -> ScanResult:
     """
     Scan a single file for secrets.
@@ -159,6 +178,8 @@ def scan_file(
     Args:
         filepath: Path to file
         max_file_size: Maximum file size to scan
+        verifier: Optional ML verifier for false positive filtering
+        ml_threshold: ML confidence threshold when verifier is enabled
 
     Returns:
         ScanResult containing findings from this file
@@ -178,7 +199,16 @@ def scan_file(
         )
 
     try:
-        findings = detect_file(file_path, max_bytes=max_file_size)
+        # Use ML verification if verifier is provided
+        if verifier is not None:
+            findings = detect_file_with_ml(
+                file_path,
+                verifier=verifier,
+                max_bytes=max_file_size,
+                ml_threshold=ml_threshold,
+            )
+        else:
+            findings = detect_file(file_path, max_bytes=max_file_size)
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 total_lines = sum(1 for _ in f)

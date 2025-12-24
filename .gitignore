@@ -53,6 +53,13 @@ dmypy.json
 *.sqlite
 *.db
 
+# Training data and test files with fake secrets
+*.jsonl
+test_secrets.txt
+training_data*.jsonl
+test_data*.jsonl
+train*.jsonl
+
 # Environment and secrets
 .env
 .env.local
