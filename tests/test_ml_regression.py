@@ -470,7 +470,7 @@ class TestEdgeCases:
 
         features = extract_features(finding, context)
         assert features.token_length == 0
-        assert len(features.to_array()) == 32
+        assert len(features.to_array()) == 37
 
     def test_very_long_token(self):
         """Very long token should not crash."""
@@ -485,7 +485,7 @@ class TestEdgeCases:
 
         features = extract_features(finding, context)
         assert features.token_length == 10000
-        assert len(features.to_array()) == 32
+        assert len(features.to_array()) == 37
 
     def test_special_characters_in_token(self):
         """Token with special characters should not crash."""
@@ -499,7 +499,7 @@ class TestEdgeCases:
         context = CodeContext(line_content=f'weird = "{token}"')
 
         features = extract_features(finding, context)
-        assert len(features.to_array()) == 32
+        assert len(features.to_array()) == 37
         assert features.special_char_ratio > 0
 
     def test_binary_like_content(self):
@@ -514,4 +514,4 @@ class TestEdgeCases:
         context = CodeContext(line_content=f"binary = {repr(token)}")
 
         features = extract_features(finding, context)
-        assert len(features.to_array()) == 32
+        assert len(features.to_array()) == 37
