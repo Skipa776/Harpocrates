@@ -6,10 +6,14 @@ and robustness through model diversity.
 """
 from __future__ import annotations
 
+import logging
+import traceback
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from Harpocrates.ml.context import CodeContext
 from Harpocrates.ml.features import FeatureVector, extract_features
@@ -192,6 +196,7 @@ class EnsembleVerifier(Verifier):
         import numpy as np
 
         predictions = {}
+        failed_models = []
 
         # XGBoost predictions
         if self._xgboost_verifier is not None:
@@ -200,16 +205,30 @@ class EnsembleVerifier(Verifier):
                 xgb_matrix = xgb.DMatrix(features_array)
                 xgb_probas = self._xgboost_verifier._model.predict(xgb_matrix)
                 predictions["xgboost"] = xgb_probas.tolist()
-            except Exception:
-                pass
+            except Exception as e:
+                failed_models.append("xgboost")
+                logger.error(
+                    "XGBoost prediction failed: %s\n%s",
+                    str(e),
+                    traceback.format_exc(),
+                )
 
         # LightGBM predictions
         if self._lightgbm_verifier is not None:
             try:
                 lgb_probas = self._lightgbm_verifier._model.predict(features_array)
                 predictions["lightgbm"] = lgb_probas.tolist()
-            except Exception:
-                pass
+            except Exception as e:
+                failed_models.append("lightgbm")
+                logger.error(
+                    "LightGBM prediction failed: %s\n%s",
+                    str(e),
+                    traceback.format_exc(),
+                )
+
+        # Track failed models for callers to detect
+        if failed_models:
+            predictions["_failed_models"] = failed_models
 
         return predictions
 
