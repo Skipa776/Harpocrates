@@ -247,8 +247,14 @@ class EnsembleVerifier(Verifier):
         Returns:
             Combined probability (0.0-1.0)
         """
-        if not predictions:
-            return 0.5  # Default to uncertain
+        # Filter out metadata keys (e.g., "_failed_models") to get only model predictions
+        model_predictions = {
+            k: v for k, v in predictions.items()
+            if not k.startswith("_") and isinstance(v, list)
+        }
+
+        if not model_predictions:
+            return 0.5  # Default to uncertain if no valid predictions
 
         strategy = self._config.strategy
 
@@ -257,29 +263,31 @@ class EnsembleVerifier(Verifier):
             total_weight = 0.0
             weighted_sum = 0.0
 
-            if "xgboost" in predictions:
-                weighted_sum += self._config.xgboost_weight * predictions["xgboost"][sample_idx]
+            if "xgboost" in model_predictions:
+                weighted_sum += self._config.xgboost_weight * model_predictions["xgboost"][sample_idx]
                 total_weight += self._config.xgboost_weight
 
-            if "lightgbm" in predictions:
-                weighted_sum += self._config.lightgbm_weight * predictions["lightgbm"][sample_idx]
+            if "lightgbm" in model_predictions:
+                weighted_sum += self._config.lightgbm_weight * model_predictions["lightgbm"][sample_idx]
                 total_weight += self._config.lightgbm_weight
 
             return weighted_sum / total_weight if total_weight > 0 else 0.5
 
         elif strategy == EnsembleStrategy.SOFT_VOTING:
             # Simple average of probabilities
-            probas = [p[sample_idx] for p in predictions.values()]
-            return sum(probas) / len(probas)
+            probas = [p[sample_idx] for p in model_predictions.values()]
+            return sum(probas) / len(probas) if probas else 0.5
 
         elif strategy == EnsembleStrategy.HARD_VOTING:
             # Majority vote of classifications
-            votes = [p[sample_idx] >= self._threshold for p in predictions.values()]
-            return 1.0 if sum(votes) > len(votes) / 2 else 0.0
+            votes = [p[sample_idx] >= self._threshold for p in model_predictions.values()]
+            return 1.0 if votes and sum(votes) > len(votes) / 2 else 0.0
 
         elif strategy == EnsembleStrategy.MAX_CONFIDENCE:
             # Take most confident prediction (furthest from 0.5)
-            probas = [p[sample_idx] for p in predictions.values()]
+            probas = [p[sample_idx] for p in model_predictions.values()]
+            if not probas:
+                return 0.5
             confidences = [abs(p - 0.5) for p in probas]
             max_idx = confidences.index(max(confidences))
             return probas[max_idx]
