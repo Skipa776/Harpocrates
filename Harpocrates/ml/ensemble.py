@@ -134,6 +134,12 @@ class EnsembleVerifier(Verifier):
         except (ImportError, FileNotFoundError) as e:
             if self._config.require_both_models:
                 raise
+            logger.warning(
+                "XGBoost model failed to load (path=%s): %s",
+                self._xgboost_path,
+                str(e),
+                exc_info=True,
+            )
             self._xgboost_verifier = None
 
         # Load LightGBM (optional)
@@ -147,6 +153,12 @@ class EnsembleVerifier(Verifier):
         except (ImportError, FileNotFoundError) as e:
             if self._config.require_both_models:
                 raise
+            logger.warning(
+                "LightGBM model failed to load (path=%s): %s",
+                self._lightgbm_path,
+                str(e),
+                exc_info=True,
+            )
             self._lightgbm_verifier = None
 
         # Ensure at least one model is loaded
@@ -395,8 +407,11 @@ class EnsembleVerifier(Verifier):
             finding.evidence,
         )
 
-        # Get individual model predictions for explanation
-        model_probs = {name: probs[0] for name, probs in predictions.items()}
+        # Get individual model predictions for explanation (exclude metadata keys)
+        model_probs = {
+            name: probs[0] for name, probs in predictions.items()
+            if not name.startswith("_") and isinstance(probs, list) and len(probs) > 0
+        }
 
         # Generate explanation
         explanation = self._generate_explanation(
@@ -457,7 +472,11 @@ class EnsembleVerifier(Verifier):
                 finding.evidence,
             )
 
-            model_probs = {name: probs[i] for name, probs in predictions.items()}
+            # Exclude metadata keys when building model_probs
+            model_probs = {
+                name: probs[i] for name, probs in predictions.items()
+                if not name.startswith("_") and isinstance(probs, list) and len(probs) > i
+            }
 
             explanation = self._generate_explanation(
                 all_features[i],
