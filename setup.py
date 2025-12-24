@@ -48,7 +48,10 @@ setup(
             "mypy>=1.0.0",
         ],
         "ml": [
-            # Will add later: xgboost, scikit-learn, etc.
+            "xgboost>=2.0.0",
+            "scikit-learn>=1.3.0",
+            "numpy>=1.24.0",
+            "pandas>=2.0.0",
         ],
     },
     entry_points={
