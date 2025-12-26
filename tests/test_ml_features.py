@@ -133,15 +133,15 @@ class TestFeatureVector:
     """Tests for complete feature vector extraction."""
 
     def test_feature_vector_length(self):
-        """Test that feature vector has 32 features (expanded from 27)."""
+        """Test that feature vector has 51 features."""
         fv = FeatureVector()
         array = fv.to_array()
-        assert len(array) == 32
+        assert len(array) == 51
 
     def test_feature_names(self):
         """Test that feature names are defined."""
         names = FeatureVector.get_feature_names()
-        assert len(names) == 32
+        assert len(names) == 51
         assert "token_length" in names
         assert "var_contains_secret" in names
         assert "file_is_test" in names
@@ -149,12 +149,18 @@ class TestFeatureVector:
         assert "has_known_prefix" not in names
         assert "prefix_type" not in names
         assert "is_hex_like" not in names
-        # New features added for improved recall
+        # Features for improved recall
         assert "token_structure_score" in names
         assert "has_version_pattern" in names
         assert "semantic_context_score" in names
         assert "line_position_ratio" in names
         assert "surrounding_secret_density" in names
+        # NEW: Discriminative features for precision boost
+        assert "is_uuid_v4" in names
+        assert "is_known_hash_length" in names
+        assert "jwt_structure_valid" in names
+        assert "entropy_charset_mismatch" in names
+        assert "has_hash_prefix" in names
 
     def test_extract_features_aws_key(self):
         """Test feature extraction for AWS key."""

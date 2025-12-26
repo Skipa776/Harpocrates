@@ -761,6 +761,318 @@ def generate_certificate() -> Tuple[str, str]:
     return cert, cert_type
 
 
+# --- Enhanced Hard Negative Generators ---
+# These generators create challenging non-secrets that force context-based learning.
+# Key principle: A secret is defined by how it is USED, not how it LOOKS.
+
+
+def generate_uuid_with_auth_context() -> Tuple[str, str, str]:
+    """
+    Generate UUID v4 with auth-like variable names.
+
+    This creates UUIDs that appear in secret-like contexts:
+    - api_key = '550e8400-e29b-41d4-a716-446655440000'
+    - auth_token = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'
+
+    Forces the model to learn that UUIDs are NOT secrets despite
+    appearing with secret-like variable names.
+
+    Returns:
+        Tuple of (uuid, auth_var_name, context_type)
+    """
+    uuid = generate_uuid()
+
+    # Auth-like variable names that would normally trigger secret detection
+    auth_var_names = [
+        ("api_key", "config"),
+        ("API_KEY", "env"),
+        ("auth_token", "code"),
+        ("AUTH_TOKEN", "env"),
+        ("secret_key", "config"),
+        ("SECRET_KEY", "env"),
+        ("access_token", "code"),
+        ("private_key", "config"),
+        ("bearer_token", "header"),
+        ("session_secret", "config"),
+        ("encryption_key", "config"),
+        ("signing_key", "jwt"),
+        ("client_secret", "oauth"),
+        ("refresh_token", "auth"),
+        ("api_secret", "config"),
+    ]
+
+    var_name, context_type = random.choice(auth_var_names)
+    return uuid, var_name, context_type
+
+
+def generate_hash_in_security_context() -> Tuple[str, str, str, str]:
+    """
+    Generate content hashes that appear in security-adjacent contexts.
+
+    Examples:
+    - password_hash = '5f4dcc3b5aa765d61d8327deb882cf99'
+    - auth_hash = 'e99a18c428cb38d5f260853678922e03'
+
+    These are NOT secrets - they are derived values that don't grant access.
+
+    Returns:
+        Tuple of (hash_value, security_var_name, hash_algorithm, context_hint)
+    """
+    hash_configs = [
+        (32, "md5"),
+        (40, "sha1"),
+        (64, "sha256"),
+        (128, "sha512"),
+    ]
+    length, algorithm = random.choice(hash_configs)
+    hash_value = _random_string(length, HEX_CHARS)
+
+    # Security-adjacent variable names that could be confused with secrets
+    security_var_names = [
+        ("password_hash", "auth"),
+        ("PASSWORD_HASH", "env"),
+        ("auth_hash", "verification"),
+        ("token_hash", "storage"),
+        ("secret_hash", "derived"),
+        ("api_key_hash", "validation"),
+        ("credential_hash", "storage"),
+        ("session_hash", "tracking"),
+        ("user_secret_hash", "auth"),
+        ("encryption_hash", "verify"),
+        ("signature_hash", "jwt"),
+        ("hmac_hash", "auth"),
+        ("key_hash", "derived"),
+        ("access_hash", "permission"),
+    ]
+
+    var_name, context_hint = random.choice(security_var_names)
+    return hash_value, var_name, algorithm, context_hint
+
+
+def generate_invalid_jwt() -> Tuple[str, str]:
+    """
+    Generate JWT-shaped tokens that are structurally invalid.
+
+    These look like JWTs (header.payload.signature) but:
+    - Have invalid/corrupted headers
+    - Have obviously fake payloads
+    - Are marked as expired, test, or example tokens
+
+    Returns:
+        Tuple of (invalid_jwt, invalidity_reason)
+    """
+    def b64url_encode(data: str) -> str:
+        return base64.urlsafe_b64encode(data.encode()).decode().rstrip("=")
+
+    invalid_types = [
+        # Invalid algorithm
+        ({"alg": "none", "typ": "JWT"}, {"sub": "test", "exp": 0}, "alg_none"),
+        # Malformed header
+        ({"typ": "JWT"}, {"sub": "test"}, "missing_alg"),
+        # Test/example markers in payload
+        ({"alg": "HS256", "typ": "JWT"}, {"sub": "test_user", "iat": 0, "exp": 0}, "test_payload"),
+        ({"alg": "HS256", "typ": "JWT"}, {"sub": "example", "env": "test"}, "example_payload"),
+        ({"alg": "HS256", "typ": "JWT"}, {"sub": "PLACEHOLDER", "fake": True}, "placeholder"),
+        # Obviously expired (year 2000)
+        ({"alg": "HS256", "typ": "JWT"}, {"sub": "user", "exp": 946684800}, "expired_2000"),
+        # Invalid type
+        ({"alg": "HS256", "typ": "FAKE"}, {"sub": "user"}, "invalid_type"),
+    ]
+
+    header, payload, reason = random.choice(invalid_types)
+
+    header_b64 = b64url_encode(json.dumps(header, separators=(",", ":")))
+    payload_b64 = b64url_encode(json.dumps(payload, separators=(",", ":")))
+    # Signature is always fake anyway
+    signature = _random_string(43, BASE64_URL_CHARS)
+
+    jwt_token = f"{header_b64}.{payload_b64}.{signature}"
+    return jwt_token, reason
+
+
+def generate_base64_telemetry_id() -> Tuple[str, str, str]:
+    """
+    Generate base64 blobs used as telemetry/correlation/cache IDs.
+
+    These are high-entropy base64 strings that are NOT secrets:
+    - trace_id = 'dGVsZW1ldHJ5X2lkXzEyMzQ1Njc4OTA='
+    - correlation_id = 'Y29ycmVsYXRpb25faWRfYWJjZGVm'
+    - request_id = 'cmVxdWVzdF8xNjk4NzY1NDMyMQ=='
+
+    Returns:
+        Tuple of (base64_id, var_name, id_type)
+    """
+    # Generate realistic-looking IDs
+    id_types = [
+        # Telemetry/tracing IDs
+        ("telemetry", ["trace_id", "TRACE_ID", "span_id", "SPAN_ID", "telemetry_id"]),
+        # Correlation IDs
+        ("correlation", ["correlation_id", "CORRELATION_ID", "request_correlation", "x_correlation_id"]),
+        # Request/response IDs
+        ("request", ["request_id", "REQUEST_ID", "response_id", "transaction_id", "x_request_id"]),
+        # Cache keys
+        ("cache", ["cache_key", "CACHE_KEY", "cache_id", "cache_token", "etag"]),
+        # Session tracking (NOT session secrets)
+        ("tracking", ["tracking_id", "visitor_id", "analytics_id", "event_id"]),
+        # Build/deployment IDs
+        ("build", ["build_id", "BUILD_ID", "deploy_id", "release_id", "artifact_id"]),
+    ]
+
+    id_type, var_names = random.choice(id_types)
+    var_name = random.choice(var_names)
+
+    # Generate a plausible ID content
+    id_contents = [
+        f"{id_type}_id_{_random_string(16, ALPHANUMERIC)}",
+        f"{_random_string(8, HEX_CHARS)}-{_random_string(4, HEX_CHARS)}-{_random_string(4, HEX_CHARS)}",
+        f"v1_{_random_string(20, ALPHANUMERIC)}",
+        f"{id_type}_{random.randint(1000000000, 9999999999)}",
+    ]
+
+    content = random.choice(id_contents)
+    base64_id = base64.b64encode(content.encode()).decode()
+
+    return base64_id, var_name, id_type
+
+
+def generate_session_id_non_secret() -> Tuple[str, str]:
+    """
+    Generate session/request IDs that look like secrets but aren't.
+
+    Session IDs are identifiers, not authentication secrets.
+    They may be high-entropy but don't grant access by themselves.
+
+    Returns:
+        Tuple of (session_id, var_name)
+    """
+    formats = [
+        # UUID-style session ID
+        lambda: generate_uuid(),
+        # Hex session ID
+        lambda: _random_string(32, HEX_CHARS),
+        # Prefixed session ID
+        lambda: "sess_" + _random_string(24, ALPHANUMERIC),
+        lambda: "sid_" + _random_string(20, ALPHANUMERIC),
+        lambda: "session-" + _random_string(32, HEX_CHARS),
+        # Base64 session ID
+        lambda: base64.urlsafe_b64encode(_random_string(24, ALPHANUMERIC).encode()).decode().rstrip("="),
+    ]
+
+    session_id = random.choice(formats)()
+
+    var_names = [
+        "session_id", "SESSION_ID", "sessionId", "SessionID",
+        "request_id", "REQUEST_ID", "requestId",
+        "transaction_id", "txn_id", "tx_id",
+        "connection_id", "conn_id",
+        "client_id", "visitor_id",
+    ]
+
+    return session_id, random.choice(var_names)
+
+
+def generate_encoded_public_data() -> Tuple[str, str, str]:
+    """
+    Generate base64-encoded public/config data that looks secret-like.
+
+    These are high-entropy base64 strings containing non-sensitive data:
+    - Configuration JSON
+    - Public metadata
+    - Feature flags
+    - Non-secret settings
+
+    Returns:
+        Tuple of (base64_data, var_name, content_type)
+    """
+    data_types = [
+        # Configuration data
+        (
+            json.dumps({"version": "2.0", "features": ["auth", "api"], "enabled": True}),
+            ["config_data", "CONFIG_DATA", "settings_blob", "app_config"],
+            "config"
+        ),
+        # Feature flags
+        (
+            json.dumps({"feature_a": True, "feature_b": False, "rollout": 0.5}),
+            ["feature_flags", "FEATURE_FLAGS", "features", "flags_data"],
+            "features"
+        ),
+        # Metadata
+        (
+            json.dumps({"created": "2024-01-01", "version": 1, "type": "user"}),
+            ["metadata", "META_DATA", "object_meta", "resource_meta"],
+            "metadata"
+        ),
+        # Public key ID (not the key itself)
+        (
+            f"kid:{_random_string(16, ALPHANUMERIC)}:v1",
+            ["key_id", "KEY_ID", "kid", "public_key_id"],
+            "key_id"
+        ),
+        # State tokens (CSRF-like, but for state management)
+        (
+            f"state:{_random_string(24, ALPHANUMERIC)}:1234567890",
+            ["state_token", "STATE", "oauth_state", "csrf_token"],
+            "state"
+        ),
+    ]
+
+    content, var_names, content_type = random.choice(data_types)
+    var_name = random.choice(var_names)
+    base64_data = base64.b64encode(content.encode()).decode()
+
+    return base64_data, var_name, content_type
+
+
+def generate_version_hash() -> Tuple[str, str, str]:
+    """
+    Generate content/version hashes that appear in deployment contexts.
+
+    These are hashes used for:
+    - Content integrity verification
+    - Cache invalidation
+    - Version tracking
+    - Asset fingerprinting
+
+    Returns:
+        Tuple of (hash_value, var_name, context)
+    """
+    hash_configs = [
+        (8, "short"),   # Short hash (git short SHA, content hash prefix)
+        (32, "md5"),
+        (40, "sha1"),
+        (64, "sha256"),
+    ]
+
+    length, hash_type = random.choice(hash_configs)
+    hash_value = _random_string(length, HEX_CHARS)
+
+    var_contexts = [
+        # Asset hashing
+        ("asset_hash", "static_files"),
+        ("ASSET_HASH", "static_files"),
+        ("bundle_hash", "webpack"),
+        ("content_hash", "cdn"),
+        # Version control
+        ("version_hash", "release"),
+        ("VERSION_HASH", "ci"),
+        ("deploy_hash", "deployment"),
+        ("release_hash", "release"),
+        # Integrity
+        ("integrity_hash", "sri"),
+        ("INTEGRITY_HASH", "verification"),
+        ("checksum", "download"),
+        ("CHECKSUM", "package"),
+        # Caching
+        ("etag_hash", "http"),
+        ("cache_hash", "redis"),
+        ("object_hash", "storage"),
+    ]
+
+    var_name, context = random.choice(var_contexts)
+    return hash_value, var_name, context
+
+
 __all__ = [
     # Standard secret generators
     "generate_aws_key",
@@ -803,4 +1115,12 @@ __all__ = [
     "generate_pem_private_key",
     "generate_ssh_private_key",
     "generate_certificate",
+    # --- Enhanced hard negatives (precision boost) ---
+    "generate_uuid_with_auth_context",
+    "generate_hash_in_security_context",
+    "generate_invalid_jwt",
+    "generate_base64_telemetry_id",
+    "generate_session_id_non_secret",
+    "generate_encoded_public_data",
+    "generate_version_hash",
 ]
