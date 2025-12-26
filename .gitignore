@@ -78,9 +78,6 @@ secrets.json
 ehthumbs.db
 Thumbs.db
 
-# Claude Code
-.claude/
-
 # Build artifacts
 *.manifest
 *.spec
@@ -93,3 +90,6 @@ Thumbs.db
 *.egg-info/
 .eggs/
 *.whl
+
+# Claude Code agent state and plans
+.claude/
