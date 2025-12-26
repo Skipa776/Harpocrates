@@ -1,17 +1,23 @@
 """
 Ensemble verification combining multiple ML models.
 
-Combines XGBoost and LightGBM predictions for improved accuracy
-and robustness through model diversity.
+Supports two modes:
+1. Single-stage (legacy): Weighted average of XGBoost and LightGBM (51 features)
+2. Two-stage (recommended): High-recall filter + high-precision verifier (23/51 features)
+
+The two-stage pipeline provides better precision-recall tradeoff by:
+- Stage A: Fast filter using only token features (23), optimized for high recall
+- Stage B: Deep verification using all features (51), optimized for high precision
 """
 from __future__ import annotations
 
+import json
 import logging
 import traceback
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +25,7 @@ from Harpocrates.ml.context import CodeContext
 from Harpocrates.ml.features import FeatureVector, extract_features
 from Harpocrates.ml.verifier import (
     DEFAULT_ML_THRESHOLD,
+    DEFAULT_MODEL_DIR,
     VerificationResult,
     Verifier,
     XGBoostVerifier,
@@ -26,6 +33,12 @@ from Harpocrates.ml.verifier import (
 
 if TYPE_CHECKING:
     from Harpocrates.core.result import EvidenceType, Finding
+
+
+# Paths for two-stage models
+TWO_STAGE_CONFIG_PATH = DEFAULT_MODEL_DIR / "two_stage_config.json"
+STAGE_A_MODEL_PATH = DEFAULT_MODEL_DIR / "stageA_xgboost.json"
+STAGE_B_MODEL_PATH = DEFAULT_MODEL_DIR / "stageB_lightgbm.txt"
 
 
 class EnsembleStrategy(Enum):
@@ -502,8 +515,438 @@ class EnsembleVerifier(Verifier):
         return results
 
 
+@dataclass
+class TwoStageConfig:
+    """Configuration for two-stage detection pipeline."""
+
+    # Stage A thresholds (high-recall filter)
+    stage_a_threshold_low: float = 0.1  # Below this = definitely not a secret
+    stage_a_threshold_high: float = 0.9  # Above this = definitely a secret
+    # Stage B threshold (high-precision verifier)
+    stage_b_threshold: float = 0.55  # Threshold for ambiguous cases
+
+
+class TwoStageVerifier(Verifier):
+    """
+    Two-stage verifier for improved precision-recall tradeoff.
+
+    Stage A: XGBoost with 23 token-only features
+        - Optimized for high recall (98%)
+        - Quickly filters out obvious non-secrets
+        - Passes ambiguous cases to Stage B
+
+    Stage B: LightGBM with all 51 features
+        - Optimized for high precision (90%+)
+        - Deep context analysis for ambiguous cases
+        - Uses full feature set including context
+
+    Decision logic:
+        - Stage A prob < threshold_low → NOT secret (fast reject)
+        - Stage A prob > threshold_high → IS secret (fast accept)
+        - Otherwise → Use Stage B for final decision
+    """
+
+    _instance: Optional["TwoStageVerifier"] = None
+
+    def __init__(
+        self,
+        config_path: Optional[Path] = None,
+        stage_a_path: Optional[Path] = None,
+        stage_b_path: Optional[Path] = None,
+        lazy_load: bool = True,
+    ):
+        """
+        Initialize the two-stage verifier.
+
+        Args:
+            config_path: Path to two_stage_config.json
+            stage_a_path: Path to Stage A XGBoost model
+            stage_b_path: Path to Stage B LightGBM model
+            lazy_load: If True, defer model loading until first use
+        """
+        self._config_path = config_path or TWO_STAGE_CONFIG_PATH
+        self._stage_a_path = stage_a_path or STAGE_A_MODEL_PATH
+        self._stage_b_path = stage_b_path or STAGE_B_MODEL_PATH
+
+        self._config: Optional[TwoStageConfig] = None
+        self._stage_a_model = None  # XGBoost Booster
+        self._stage_b_model = None  # LightGBM Booster
+        self._loaded = False
+
+        if not lazy_load:
+            self._load_models()
+
+    @classmethod
+    def get_instance(
+        cls,
+        config_path: Optional[Path] = None,
+        stage_a_path: Optional[Path] = None,
+        stage_b_path: Optional[Path] = None,
+    ) -> "TwoStageVerifier":
+        """Get singleton instance of two-stage verifier."""
+        if cls._instance is None:
+            cls._instance = cls(
+                config_path=config_path,
+                stage_a_path=stage_a_path,
+                stage_b_path=stage_b_path,
+            )
+        return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Reset singleton instance (useful for testing)."""
+        cls._instance = None
+
+    def _load_models(self) -> None:
+        """Load Stage A and Stage B models plus configuration."""
+        import lightgbm as lgb
+        import xgboost as xgb
+
+        # Load configuration
+        if self._config_path.exists():
+            with open(self._config_path) as f:
+                config_dict = json.load(f)
+
+            self._config = TwoStageConfig(
+                stage_a_threshold_low=config_dict.get("stage_a", {}).get(
+                    "threshold_low", 0.1
+                ),
+                stage_a_threshold_high=config_dict.get("stage_a", {}).get(
+                    "threshold_high", 0.9
+                ),
+                stage_b_threshold=config_dict.get("stage_b", {}).get("threshold", 0.55),
+            )
+        else:
+            logger.warning(
+                "Two-stage config not found at %s, using defaults", self._config_path
+            )
+            self._config = TwoStageConfig()
+
+        # Load Stage A (XGBoost)
+        if self._stage_a_path.exists():
+            self._stage_a_model = xgb.Booster()
+            self._stage_a_model.load_model(str(self._stage_a_path))
+            logger.info("Loaded Stage A model from %s", self._stage_a_path)
+        else:
+            raise FileNotFoundError(f"Stage A model not found: {self._stage_a_path}")
+
+        # Load Stage B (LightGBM)
+        if self._stage_b_path.exists():
+            self._stage_b_model = lgb.Booster(model_file=str(self._stage_b_path))
+            logger.info("Loaded Stage B model from %s", self._stage_b_path)
+        else:
+            raise FileNotFoundError(f"Stage B model not found: {self._stage_b_path}")
+
+        self._loaded = True
+
+    def _ensure_loaded(self) -> None:
+        """Ensure models are loaded (lazy loading)."""
+        if not self._loaded:
+            self._load_models()
+
+    @property
+    def is_loaded(self) -> bool:
+        """Check if models are loaded."""
+        return self._loaded
+
+    @property
+    def threshold(self) -> float:
+        """Get Stage B threshold (for compatibility)."""
+        if self._config:
+            return self._config.stage_b_threshold
+        return 0.55
+
+    def _predict_stage_a(self, token_features: List[List[float]]) -> List[float]:
+        """Get Stage A predictions using token-only features (23)."""
+        import xgboost as xgb
+
+        dmatrix = xgb.DMatrix(token_features)
+        return self._stage_a_model.predict(dmatrix).tolist()
+
+    def _predict_stage_b(self, full_features: List[List[float]]) -> List[float]:
+        """Get Stage B predictions using all features (51)."""
+        return self._stage_b_model.predict(full_features).tolist()
+
+    def _route_decision(
+        self, stage_a_prob: float, stage_b_prob: Optional[float]
+    ) -> Tuple[bool, float, str]:
+        """
+        Make final decision based on two-stage routing.
+
+        Returns:
+            Tuple of (is_secret, confidence, routing_info)
+        """
+        config = self._config or TwoStageConfig()
+
+        if stage_a_prob < config.stage_a_threshold_low:
+            # Fast reject: clearly not a secret
+            return False, 1.0 - stage_a_prob, "rejected_by_stage_a"
+
+        elif stage_a_prob > config.stage_a_threshold_high:
+            # Fast accept: clearly a secret
+            return True, stage_a_prob, "accepted_by_stage_a"
+
+        else:
+            # Ambiguous: consult Stage B
+            if stage_b_prob is None:
+                # Shouldn't happen, but fallback
+                return stage_a_prob >= 0.5, stage_a_prob, "stage_b_unavailable"
+
+            is_secret = stage_b_prob >= config.stage_b_threshold
+            confidence = stage_b_prob if is_secret else (1.0 - stage_b_prob)
+            return is_secret, confidence, "decided_by_stage_b"
+
+    def _combine_confidence(
+        self,
+        original_confidence: float,
+        ml_confidence: float,
+        evidence_type: "EvidenceType",
+    ) -> float:
+        """Combine original and ML confidence scores."""
+        from Harpocrates.core.result import EvidenceType
+
+        if evidence_type == EvidenceType.REGEX:
+            weight_original = 0.6
+            weight_ml = 0.4
+        else:
+            weight_original = 0.3
+            weight_ml = 0.7
+
+        return weight_original * original_confidence + weight_ml * ml_confidence
+
+    def _generate_explanation(
+        self,
+        features: FeatureVector,
+        ml_confidence: float,
+        is_secret: bool,
+        routing_info: str,
+        stage_a_prob: float,
+        stage_b_prob: Optional[float],
+    ) -> str:
+        """Generate human-readable explanation for classification."""
+        reasons = []
+
+        if is_secret:
+            if features.var_contains_secret:
+                reasons.append("variable name suggests secret")
+            if features.file_is_config:
+                reasons.append("found in config file")
+            if features.token_entropy > 4.0:
+                reasons.append(f"high entropy ({features.token_entropy:.2f})")
+        else:
+            if features.var_contains_safe:
+                reasons.append("variable name suggests safe content")
+            if features.context_mentions_git:
+                reasons.append("git-related context")
+            if features.context_mentions_hash:
+                reasons.append("hash/checksum context")
+            if features.context_mentions_test:
+                reasons.append("test/mock context")
+            if features.file_is_test:
+                reasons.append("test file")
+
+        if not reasons:
+            reasons.append("based on overall context")
+
+        # Add routing info
+        routing_str = routing_info.replace("_", " ")
+        probs_str = f"[A={stage_a_prob:.0%}"
+        if stage_b_prob is not None:
+            probs_str += f", B={stage_b_prob:.0%}"
+        probs_str += "]"
+
+        classification = "likely secret" if is_secret else "likely not a secret"
+        confidence_str = f"{ml_confidence:.0%} confidence"
+
+        return f"{classification} ({confidence_str}) {probs_str} {routing_str}: {', '.join(reasons)}"
+
+    def verify(
+        self,
+        finding: "Finding",
+        context: CodeContext,
+    ) -> VerificationResult:
+        """
+        Verify a single finding using two-stage pipeline.
+
+        Args:
+            finding: Finding to verify
+            context: Code context around the finding
+
+        Returns:
+            VerificationResult with classification and confidence
+        """
+        self._ensure_loaded()
+
+        # Extract features
+        features = extract_features(finding, context)
+
+        # Stage A: Token-only features (first 23)
+        token_features = [features.to_token_only_array()]
+        stage_a_probs = self._predict_stage_a(token_features)
+        stage_a_prob = stage_a_probs[0]
+
+        # Check if we need Stage B
+        config = self._config or TwoStageConfig()
+        stage_b_prob = None
+
+        if config.stage_a_threshold_low <= stage_a_prob <= config.stage_a_threshold_high:
+            # Ambiguous: need Stage B
+            full_features = [features.to_array()]
+            stage_b_probs = self._predict_stage_b(full_features)
+            stage_b_prob = stage_b_probs[0]
+
+        # Make decision
+        is_secret, ml_confidence, routing_info = self._route_decision(
+            stage_a_prob, stage_b_prob
+        )
+
+        # Combine confidences
+        original_confidence = finding.confidence or 0.5
+        combined_confidence = self._combine_confidence(
+            original_confidence,
+            ml_confidence,
+            finding.evidence,
+        )
+
+        # Generate explanation
+        explanation = self._generate_explanation(
+            features, ml_confidence, is_secret, routing_info, stage_a_prob, stage_b_prob
+        )
+
+        # Create feature dict for debugging
+        feature_names = FeatureVector.get_feature_names()
+        features_dict = dict(zip(feature_names, features.to_array()))
+
+        return VerificationResult(
+            is_secret=is_secret,
+            ml_confidence=ml_confidence,
+            original_confidence=original_confidence,
+            combined_confidence=combined_confidence,
+            features_used=features_dict,
+            explanation=explanation,
+        )
+
+    def verify_batch(
+        self,
+        findings_with_context: List[Tuple["Finding", CodeContext]],
+    ) -> List[VerificationResult]:
+        """
+        Verify multiple findings efficiently using two-stage pipeline.
+
+        Args:
+            findings_with_context: List of (finding, context) tuples
+
+        Returns:
+            List of VerificationResults in same order
+        """
+        if not findings_with_context:
+            return []
+
+        self._ensure_loaded()
+
+        # Extract all features
+        all_features = []
+        for finding, context in findings_with_context:
+            features = extract_features(finding, context)
+            all_features.append(features)
+
+        # Stage A: Batch predict with token-only features
+        token_features_array = [f.to_token_only_array() for f in all_features]
+        stage_a_probs = self._predict_stage_a(token_features_array)
+
+        # Find which samples need Stage B
+        config = self._config or TwoStageConfig()
+        ambiguous_indices = []
+        for i, prob in enumerate(stage_a_probs):
+            if config.stage_a_threshold_low <= prob <= config.stage_a_threshold_high:
+                ambiguous_indices.append(i)
+
+        # Stage B: Batch predict only for ambiguous samples
+        stage_b_probs: Dict[int, float] = {}
+        if ambiguous_indices:
+            ambiguous_features = [all_features[i].to_array() for i in ambiguous_indices]
+            b_probs = self._predict_stage_b(ambiguous_features)
+            for idx, prob in zip(ambiguous_indices, b_probs):
+                stage_b_probs[idx] = prob
+
+        # Build results
+        results = []
+        for i, (finding, context) in enumerate(findings_with_context):
+            stage_a_prob = stage_a_probs[i]
+            stage_b_prob = stage_b_probs.get(i)
+
+            is_secret, ml_confidence, routing_info = self._route_decision(
+                stage_a_prob, stage_b_prob
+            )
+
+            original_confidence = finding.confidence or 0.5
+            combined_confidence = self._combine_confidence(
+                original_confidence,
+                ml_confidence,
+                finding.evidence,
+            )
+
+            explanation = self._generate_explanation(
+                all_features[i],
+                ml_confidence,
+                is_secret,
+                routing_info,
+                stage_a_prob,
+                stage_b_prob,
+            )
+
+            feature_names = FeatureVector.get_feature_names()
+            features_dict = dict(zip(feature_names, all_features[i].to_array()))
+
+            results.append(
+                VerificationResult(
+                    is_secret=is_secret,
+                    ml_confidence=ml_confidence,
+                    original_confidence=original_confidence,
+                    combined_confidence=combined_confidence,
+                    features_used=features_dict,
+                    explanation=explanation,
+                )
+            )
+
+        return results
+
+
+def get_verifier(mode: str = "auto") -> Verifier:
+    """
+    Get the appropriate verifier based on mode.
+
+    Args:
+        mode: "two_stage", "single_stage", or "auto" (default)
+              - "auto": Uses two-stage if models exist, else single-stage
+              - "two_stage": Forces two-stage (raises error if unavailable)
+              - "single_stage": Forces single-stage legacy mode
+
+    Returns:
+        Verifier instance (TwoStageVerifier or EnsembleVerifier)
+    """
+    if mode == "two_stage":
+        return TwoStageVerifier.get_instance()
+
+    if mode == "single_stage":
+        return EnsembleVerifier.get_instance()
+
+    # Auto mode: prefer two-stage if available
+    if TWO_STAGE_CONFIG_PATH.exists() and STAGE_A_MODEL_PATH.exists():
+        try:
+            return TwoStageVerifier.get_instance()
+        except Exception as e:
+            logger.warning("Failed to load two-stage verifier: %s", e)
+
+    # Fallback to single-stage
+    return EnsembleVerifier.get_instance()
+
+
 __all__ = [
     "EnsembleStrategy",
     "EnsembleConfig",
     "EnsembleVerifier",
+    "TwoStageConfig",
+    "TwoStageVerifier",
+    "get_verifier",
 ]
