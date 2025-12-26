@@ -80,31 +80,29 @@ def scan(
     verifier = None
     if use_ml:
         try:
-            from Harpocrates.ml.ensemble import EnsembleVerifier
-            from Harpocrates.ml.lightgbm_verifier import LightGBMVerifier
-            from Harpocrates.ml.verifier import XGBoostVerifier
+            from Harpocrates.ml.ensemble import (
+                TwoStageVerifier,
+                get_verifier,
+            )
 
-            # Attempt to load models in order of preference: Ensemble > XGBoost > LightGBM
+            # Use get_verifier to auto-select the best available verifier
+            # Prefers two-stage if models exist, falls back to single-stage
             try:
-                verifier = EnsembleVerifier.get_instance(threshold=ml_threshold)
+                verifier = get_verifier(mode="auto")
                 if not json_output:
-                    console.print("[cyan]ℹ[/cyan] Ensemble ML verification enabled")
-            except Exception:
-                try:
-                    verifier = XGBoostVerifier.get_instance(threshold=ml_threshold)
-                    if not json_output:
-                        console.print("[cyan]ℹ[/cyan] XGBoost ML verification enabled")
-                except Exception:
-                    try:
-                        verifier = LightGBMVerifier.get_instance(threshold=ml_threshold)
-                        if not json_output:
-                            console.print("[cyan]ℹ[/cyan] LightGBM ML verification enabled")
-                    except Exception:
-                        error_console.print(
-                            "[yellow]⚠[/yellow] No ML model found. "
-                            "Train a model with 'harpocrates train'."
-                        )
-                        error_console.print("[yellow]⚠[/yellow] Falling back to standard detection")
+                    if isinstance(verifier, TwoStageVerifier):
+                        console.print("[cyan]ℹ[/cyan] Two-stage ML verification enabled (recommended)")
+                    else:
+                        console.print("[cyan]ℹ[/cyan] Ensemble ML verification enabled")
+            except Exception as e:
+                error_console.print(
+                    f"[yellow]⚠[/yellow] No ML model found: {e}"
+                )
+                error_console.print(
+                    "[yellow]⚠[/yellow] Train a model with 'harpocrates train' or "
+                    "'python -m Harpocrates.training.train_two_stage'"
+                )
+                error_console.print("[yellow]⚠[/yellow] Falling back to standard detection")
         except ImportError:
             error_console.print(
                 "[yellow]⚠[/yellow] ML dependencies not installed. "

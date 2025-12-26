@@ -9,7 +9,7 @@ Harpocrates is a CLI-first secrets detection tool that combines pattern matching
 - **Three-Phase Detection Engine**
   - **Regex Patterns**: High-precision detection for known secret formats (AWS, GitHub, Stripe, etc.)
   - **Entropy Analysis**: Shannon entropy scoring for unknown high-randomness tokens
-  - **ML Verification** (opt-in): XGBoost/LightGBM ensemble reduces false positives by analyzing code context
+  - **ML Verification** (opt-in): Two-stage XGBoost/LightGBM pipeline achieves **90.5% precision** and **94.8% recall**
 
 - **Context-Aware Classification**: Distinguishes between real secrets and false positives like Git SHAs, UUIDs, and test fixtures by analyzing variable names and surrounding code
 
@@ -222,9 +222,83 @@ harpocrates train -d training_data.jsonl \
   --val-data test_data.jsonl
 ```
 
-### Precision-Recall Tradeoff
+### Two-Stage Detection (Recommended)
 
-The `--target-precision` parameter controls the balance between catching secrets (recall) and avoiding false positives (precision):
+Harpocrates uses a two-stage detection pipeline for optimal performance:
+
+| Stage | Model | Features | Purpose | Performance |
+|-------|-------|----------|---------|-------------|
+| **A** | XGBoost | 23 token features | Fast high-recall filter | 98% recall |
+| **B** | LightGBM | 51 full features | Deep context verification | 90%+ precision |
+
+**Combined Performance (v2.4):**
+- **Precision**: 90.5% (of flagged items are real secrets)
+- **Recall**: 94.8% (catches 95% of all secrets)
+- **F1 Score**: 0.926
+
+Train the two-stage model:
+```bash
+# Generate training data
+harpocrates generate-data -n 7000 -o train.jsonl --seed 1337
+harpocrates generate-data -n 2000 -o test.jsonl --seed 42
+
+# Train two-stage model
+python -m Harpocrates.training.train_two_stage \
+  --train-data train.jsonl \
+  --val-data test.jsonl \
+  --output-dir Harpocrates/ml/models \
+  --seed 42
+```
+
+### Optimal Training Commands (Achieving 90%+ Precision & Recall)
+
+The following commands were used to achieve the best model performance:
+
+```bash
+# Step 1: Generate 25,000 training samples with improved hard negatives
+python -c "
+from Harpocrates.training.generators.generate_data import generate_training_data
+import pickle
+
+records = generate_training_data(count=25000, balance=0.5, seed=42)
+with open('Harpocrates/training/data/training_data_v3.pkl', 'wb') as f:
+    pickle.dump(records, f)
+"
+
+# Step 2: Train with optimized hyperparameters
+python scripts/train_v4.py
+```
+
+**Key optimizations that achieved 90%+ on both metrics:**
+
+1. **Improved Data Generator**: Modified `_get_var_name()` to ensure negative samples with known secret prefixes (AKIA, ghp_, sk_) always use clearly non-secret variable names (e.g., `placeholder`, `example_key`, `mock_token`). This prevents "impossible-to-classify" samples that hurt precision.
+
+2. **51 Features (up from 46)**: Added 5 new discriminative features:
+   - `is_uuid_v4` - Detects UUID v4 format (strong non-secret signal)
+   - `is_known_hash_length` - Token length matches MD5/SHA1/SHA256/SHA512
+   - `jwt_structure_valid` - JWT has valid JSON header
+   - `entropy_charset_mismatch` - High entropy but low charset diversity
+   - `has_hash_prefix` - Starts with sha256:, md5:, etc.
+
+3. **Stage A/B Thresholds**:
+   - Stage A: threshold_low=0.15, threshold_high=0.85
+   - Stage B: threshold=0.28
+
+4. **Hyperparameters**:
+   - Stage A (XGBoost): max_depth=5, n_estimators=120, scale_pos_weight=1.5x
+   - Stage B (LightGBM): max_depth=12, n_estimators=300, scale_pos_weight=0.5x
+
+**Confusion Matrix (5,000 validation samples):**
+```
+              Predicted
+              Neg    Pos
+Actual Neg   2248   248   (91% TNR)
+Actual Pos    130  2374   (95% TPR)
+```
+
+### Legacy Single-Stage Model
+
+For backward compatibility, single-stage ensemble training is still available:
 
 | Target Precision | Precision | Recall | F1 Score | Threshold | Use Case |
 |------------------|-----------|--------|----------|-----------|----------|
@@ -232,8 +306,6 @@ The `--target-precision` parameter controls the balance between catching secrets
 | **0.75** | **75%** | **98.6%** | **0.852** | **0.19** | **Recommended - high recall** |
 | 0.85 | 85% | ~90% | 0.87 | ~0.35 | Balanced |
 | 0.95 | 95% | ~65% | ~0.77 | ~0.60 | Minimal noise - may miss secrets |
-
-**Recommendation**: Use `--target-precision 0.75` to catch 98.6% of secrets with the ensemble model. The default threshold (0.19) is optimized for this balance.
 
 ### Training Options
 
@@ -291,15 +363,19 @@ python -m Harpocrates.training.evaluate \
 
 ## How ML Verification Works
 
-The ML verifier extracts **37 features** from each finding, designed to learn from **context rather than token format** to avoid shortcut learning:
+The ML verifier extracts **51 features** from each finding, designed to learn from **context rather than token format** to avoid shortcut learning:
 
-**Token Features (14)**
+**Token Features (23)**
 - Length, entropy, character class composition
 - Base64 pattern matching, padding detection
 - Token structure score (random vs structured)
 - Version pattern detection (v1.2.3)
 - Normalized entropy, cryptographic score
 - Vendor prefix boost
+- Token span offset, multiline block detection
+- Embedded token flag, quote type
+- **NEW**: UUID v4 detection, hash length matching, JWT validation
+- **NEW**: Entropy-charset mismatch, hash prefix detection
 
 **Variable Name Features (10)**
 - Contains secret keywords (`api_key`, `password`, `token`)
@@ -308,13 +384,16 @@ The ML verifier extracts **37 features** from each finding, designed to learn fr
 - Naming style (camelCase, CONSTANT_CASE)
 - Assignment type detection
 
-**Context Features (13)**
+**Context Features (18)**
 - File type (test file, config file, high-risk extensions)
 - Surrounding code mentions (git, test, mock, hash)
 - Import statements, function definitions
 - Semantic context score (-1 safe to +1 risky)
 - Line position ratio (secrets often at file top)
 - Surrounding secret density
+- Surrounding token count, key-value distance
+- JSON path hint, adjacency N-gram score
+- Cross-line entropy analysis
 
 ### Anti-Shortcut Design
 
@@ -327,15 +406,36 @@ This forces the model to learn from **context**, enabling it to correctly distin
 - `api_secret = "a1b2c3d4..."` → likely a secret (secret variable name, config context)
 - `commit_sha = "a1b2c3d4..."` → likely a Git SHA (safe variable name, git context)
 
-### Ensemble Models
+### Two-Stage Architecture
 
-For best accuracy, use the ensemble option which combines XGBoost (60% weight) and LightGBM (40% weight):
+The recommended two-stage pipeline provides better precision-recall tradeoff:
+
+**Stage A (High-Recall Filter)**
+- Model: XGBoost (120 trees, depth 5)
+- Features: 23 token-only features (including 5 new discriminative features)
+- Purpose: Fast filter to eliminate obvious non-secrets
+- Performance: 98% recall
+
+**Stage B (High-Precision Verifier)**
+- Model: LightGBM (300 trees, depth 12)
+- Features: All 51 features (token + variable + context)
+- Purpose: Deep analysis of ambiguous cases
+- Performance: 90%+ precision
+
+**Decision Logic:**
+- Stage A < 0.15 → Reject (clearly not a secret)
+- Stage A > 0.85 → Accept (clearly a secret)
+- Otherwise → Use Stage B with threshold 0.28 for final decision
+
+### Legacy Ensemble Models
+
+Single-stage ensemble is still available for backward compatibility:
 
 ```bash
 harpocrates train training_data.jsonl --model-type ensemble
 ```
 
-The ensemble leverages different learning strategies:
+The ensemble combines XGBoost (60% weight) and LightGBM (40% weight):
 - **XGBoost**: Level-wise tree growth, strong regularization
 - **LightGBM**: Leaf-wise tree growth, histogram-based splitting
 
@@ -367,15 +467,16 @@ Harpocrates/
     entropy_detector.py   # Shannon entropy analysis
   ml/                     # ML verification (opt-in)
     context.py            # Context extraction
-    features.py           # Feature engineering (37 features)
+    features.py           # Feature engineering (51 features)
     verifier.py           # XGBoost classifier
     lightgbm_verifier.py  # LightGBM classifier
-    ensemble.py           # Ensemble verifier (XGBoost + LightGBM)
+    ensemble.py           # Two-stage verifier (XGBoost + LightGBM)
     models/               # Trained model files
   training/               # ML training pipeline
     generators/           # Synthetic data generation
     dataset.py            # JSONL dataset loader
-    train.py              # Model training (XGBoost, LightGBM, ensemble)
+    train.py              # Single-stage model training
+    train_two_stage.py    # Two-stage pipeline training
     cross_validation.py   # K-fold cross-validation
     evaluate.py           # Model evaluation
 ```

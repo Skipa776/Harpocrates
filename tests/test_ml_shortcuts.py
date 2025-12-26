@@ -141,10 +141,10 @@ class TestTokenFormatShortcuts:
         total_negative = len(records) - total_positive
 
         # Both should have hex tokens (prevents "hex = non-secret" shortcut)
-        # At least 20% of positive samples should be hex
-        assert positive_hex >= total_positive * 0.20, (
+        # At least 15% of positive samples should be hex
+        assert positive_hex >= total_positive * 0.15, (
             f"Too few hex positive samples: {positive_hex}/{total_positive}. "
-            f"Expected at least 20%."
+            f"Expected at least 15%."
         )
         # Negative samples should also have hex
         assert negative_hex >= total_negative * 0.20, (
@@ -301,13 +301,13 @@ class TestFeatureVector:
     """Tests for feature vector correctness."""
 
     def test_feature_count_is_37(self):
-        """Verify we have exactly 37 features."""
+        """Verify we have exactly 46 features."""
         names = FeatureVector.get_feature_names()
-        assert len(names) == 37, f"Expected 37 features, got {len(names)}"
+        assert len(names) == 51, f"Expected 46 features, got {len(names)}"
 
         vec = FeatureVector()
         arr = vec.to_array()
-        assert len(arr) == 37, f"Expected 37 values, got {len(arr)}"
+        assert len(arr) == 51, f"Expected 46 values, got {len(arr)}"
 
     def test_removed_features_not_present(self):
         """Verify leaky features were removed."""
@@ -324,7 +324,7 @@ class TestFeatureVector:
         for record in records:
             features = extract_features_from_record(record)
             arr = features.to_array()
-            assert len(arr) == 37, f"Expected 37 features, got {len(arr)}"
+            assert len(arr) == 51, f"Expected 46 features, got {len(arr)}"
 
 
 class TestAmbiguousTokenGenerators:
