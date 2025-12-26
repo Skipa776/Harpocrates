@@ -22,11 +22,11 @@ from Harpocrates.training.generators.generate_data import generate_training_data
 class TestFeatureExtraction:
     """Tests for feature extraction pipeline."""
 
-    def test_feature_vector_has_32_features(self):
-        """Verify feature vector produces exactly 46 features."""
+    def test_feature_vector_has_51_features(self):
+        """Verify feature vector produces exactly 51 features."""
         fv = FeatureVector()
         array = fv.to_array()
-        assert len(array) == 51, f"Expected 46 features, got {len(array)}"
+        assert len(array) == 51, f"Expected 51 features, got {len(array)}"
 
     def test_feature_names_match_array_length(self):
         """Verify feature names match array length."""
