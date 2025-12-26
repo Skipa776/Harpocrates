@@ -71,7 +71,7 @@ def train_stage_a(
     """
     Train Stage A: High-recall token detector using XGBoost.
 
-    Uses only token-level features (18 features) for fast filtering.
+    Uses only token-level features (23 features) for fast filtering.
     Optimized for high recall (>98%) to minimize missed secrets.
     """
     import xgboost as xgb
@@ -183,7 +183,7 @@ def train_stage_b(
     """
     Train Stage B: High-precision context verifier using LightGBM.
 
-    Uses all 46 features and only trains on ambiguous cases
+    Uses all 51 features and only trains on ambiguous cases
     (samples where Stage A probability is between thresholds).
     Optimized for high precision (>90%).
     """

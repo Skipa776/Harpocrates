@@ -1,15 +1,16 @@
 """
 Feature engineering for ML-based secrets verification.
 
-Extracts 37 features from tokens and their context to enable
+Extracts 51 features from tokens and their context to enable
 context-aware classification of potential secrets.
 
 Features are organized into three categories:
-- Token features (14): Properties of the token itself including advanced
-  entropy analysis and vendor prefix detection
+- Token features (23): Properties of the token itself including advanced
+  entropy analysis, vendor prefix detection, and discriminative features
+  (is_uuid_v4, is_known_hash_length, jwt_structure_valid, entropy_charset_mismatch, has_hash_prefix)
 - Variable name features (10): Properties of the variable/key name including
   N-gram scoring for secret and safe patterns
-- Context features (13): Properties of surrounding code including semantic
+- Context features (18): Properties of surrounding code including semantic
   analysis and secret density
 """
 from __future__ import annotations
@@ -1335,7 +1336,7 @@ def _extract_context_features(
     token: str = "",
     var_name: Optional[str] = None,
 ) -> dict:
-    """Extract context-level features (18 features)."""
+    """Extract context-level features (18 features including advanced context)."""
     full_text = context.full_context
     line = context.line_content
 
@@ -1413,7 +1414,7 @@ def extract_features(
     regex_match_type: int = 0,
 ) -> FeatureVector:
     """
-    Extract all 46 features from a finding and its context.
+    Extract all 51 features from a finding and its context.
 
     Args:
         finding: The Finding object with token and metadata
@@ -1421,7 +1422,7 @@ def extract_features(
         regex_match_type: Encoded type of regex match (0 = entropy-only)
 
     Returns:
-        FeatureVector with all 46 features
+        FeatureVector with all 51 features
     """
     token = finding.token or ""
 
@@ -1472,7 +1473,7 @@ def extract_features_from_record(record: dict) -> FeatureVector:
         record: Dict with token, line_content, context_before, context_after, etc.
 
     Returns:
-        FeatureVector with all 46 features
+        FeatureVector with all 51 features
     """
     from Harpocrates.core.result import EvidenceType, Finding
 

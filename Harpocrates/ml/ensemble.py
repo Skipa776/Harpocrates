@@ -2,12 +2,12 @@
 Ensemble verification combining multiple ML models.
 
 Supports two modes:
-1. Single-stage (legacy): Weighted average of XGBoost and LightGBM (37 features)
-2. Two-stage (recommended): High-recall filter + high-precision verifier (18/46 features)
+1. Single-stage (legacy): Weighted average of XGBoost and LightGBM (51 features)
+2. Two-stage (recommended): High-recall filter + high-precision verifier (23/51 features)
 
 The two-stage pipeline provides better precision-recall tradeoff by:
-- Stage A: Fast filter using only token features (18), optimized for high recall
-- Stage B: Deep verification using all features (46), optimized for high precision
+- Stage A: Fast filter using only token features (23), optimized for high recall
+- Stage B: Deep verification using all features (51), optimized for high precision
 """
 from __future__ import annotations
 
@@ -530,13 +530,13 @@ class TwoStageVerifier(Verifier):
     """
     Two-stage verifier for improved precision-recall tradeoff.
 
-    Stage A: XGBoost with 18 token-only features
+    Stage A: XGBoost with 23 token-only features
         - Optimized for high recall (98%)
         - Quickly filters out obvious non-secrets
         - Passes ambiguous cases to Stage B
 
-    Stage B: LightGBM with all 46 features
-        - Optimized for high precision (85%+)
+    Stage B: LightGBM with all 51 features
+        - Optimized for high precision (90%+)
         - Deep context analysis for ambiguous cases
         - Uses full feature set including context
 
@@ -657,14 +657,14 @@ class TwoStageVerifier(Verifier):
         return 0.55
 
     def _predict_stage_a(self, token_features: List[List[float]]) -> List[float]:
-        """Get Stage A predictions using token-only features (18)."""
+        """Get Stage A predictions using token-only features (23)."""
         import xgboost as xgb
 
         dmatrix = xgb.DMatrix(token_features)
         return self._stage_a_model.predict(dmatrix).tolist()
 
     def _predict_stage_b(self, full_features: List[List[float]]) -> List[float]:
-        """Get Stage B predictions using all features (46)."""
+        """Get Stage B predictions using all features (51)."""
         return self._stage_b_model.predict(full_features).tolist()
 
     def _route_decision(
@@ -780,7 +780,7 @@ class TwoStageVerifier(Verifier):
         # Extract features
         features = extract_features(finding, context)
 
-        # Stage A: Token-only features (first 18)
+        # Stage A: Token-only features (first 23)
         token_features = [features.to_token_only_array()]
         stage_a_probs = self._predict_stage_a(token_features)
         stage_a_prob = stage_a_probs[0]
