@@ -1,7 +1,6 @@
 """Tests for the scanner module."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from Harpocrates.core.scanner import scan_directory, scan_file
