@@ -55,6 +55,7 @@ def _finding_to_response(finding) -> FindingResponse:
 def _scan_content(content: str, filename: str | None, ml_verify: bool) -> ScanResponse:
     """Internal function to scan content."""
     start = time.perf_counter()
+    ml_applied = False
 
     try:
         from Harpocrates.core.detector import detect_text
@@ -68,19 +69,23 @@ def _scan_content(content: str, filename: str | None, ml_verify: bool) -> ScanRe
                 if not f.file:
                     f.file = filename
 
-        # Apply ML verification if enabled
+        # Apply ML verification if enabled (isolated from scan errors)
         if ml_verify and settings.ml_enabled and findings:
-            from Harpocrates.core.detector import _apply_ml_verification
-            from Harpocrates.ml.ensemble import get_verifier
+            try:
+                from Harpocrates.core.detector import _apply_ml_verification
+                from Harpocrates.ml.ensemble import get_verifier
 
-            verifier = get_verifier(settings.ml_mode)
-            if verifier:
-                findings = _apply_ml_verification(
-                    findings=findings,
-                    full_content=content,
-                    verifier=verifier,
-                    ml_threshold=settings.ml_threshold,
-                )
+                verifier = get_verifier(settings.ml_mode)
+                if verifier:
+                    findings = _apply_ml_verification(
+                        findings=findings,
+                        full_content=content,
+                        verifier=verifier,
+                        ml_threshold=settings.ml_threshold,
+                    )
+                    ml_applied = True
+            except Exception as e:
+                logger.warning(f"ML verification failed, returning unverified findings: {e}")
     except Exception as e:
         logger.exception(f"Scan failed: {e}")
         raise ScanError(str(e))
@@ -92,7 +97,7 @@ def _scan_content(content: str, filename: str | None, ml_verify: bool) -> ScanRe
     return ScanResponse(
         findings=finding_responses,
         scan_time_ms=elapsed_ms,
-        ml_enabled=ml_verify and settings.ml_enabled,
+        ml_enabled=ml_applied,
         total_findings=len(finding_responses),
         high_confidence_findings=sum(1 for f in finding_responses if f.confidence > 0.8),
     )

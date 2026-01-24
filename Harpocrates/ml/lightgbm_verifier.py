@@ -85,10 +85,10 @@ class LightGBMVerifier(Verifier):
         if cls._instance is None:
             cls._instance = cls(model_path=model_path, threshold=threshold)
         else:
-            if model_path is not None and model_path != cls._instance.model_path:
+            if model_path is not None and model_path != cls._instance._model_path:
                 cls._instance = cls(model_path=model_path, threshold=threshold)
-            elif threshold != cls._instance.threshold:
-                cls._instance.threshold = threshold
+            elif threshold != cls._instance._threshold:
+                cls._instance._threshold = threshold
         return cls._instance
 
     @classmethod
@@ -254,7 +254,7 @@ class LightGBMVerifier(Verifier):
         is_secret = ml_confidence >= self._threshold
 
         # Combine confidences
-        original_confidence = finding.confidence or 0.5
+        original_confidence = finding.confidence if finding.confidence is not None else 0.5
         combined_confidence = self._combine_confidence(
             original_confidence,
             ml_confidence,
@@ -311,7 +311,7 @@ class LightGBMVerifier(Verifier):
             ml_confidence = probas[i]
             is_secret = ml_confidence >= self._threshold
 
-            original_confidence = finding.confidence or 0.5
+            original_confidence = finding.confidence if finding.confidence is not None else 0.5
             combined_confidence = self._combine_confidence(
                 original_confidence,
                 ml_confidence,

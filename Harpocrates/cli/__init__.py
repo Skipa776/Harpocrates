@@ -72,6 +72,12 @@ def scan(
         error_console.print(f"[red]✗[/red] Path not found: {path}")
         raise typer.Exit(code=2)  # Error exit code
 
+    if not (0.0 <= ml_threshold <= 1.0):
+        error_console.print(
+            f"[red]✗[/red] --ml-threshold must be between 0.0 and 1.0, got: {ml_threshold}"
+        )
+        raise typer.Exit(code=2)
+
     ignore_patterns = set(ignore.split(",")) if ignore else set()
 
     max_bytes = max_file_size * 1024 * 1024
@@ -317,6 +323,12 @@ def train(
 
     # Use cross-validation if requested
     if cross_validate:
+        if folds < 2:
+            error_console.print(
+                f"[red]✗[/red] --folds must be >= 2, got: {folds}"
+            )
+            raise typer.Exit(code=2)
+
         from Harpocrates.training.cross_validation import cross_validate_with_best_model
 
         if not quiet:

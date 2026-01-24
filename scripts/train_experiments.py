@@ -152,10 +152,25 @@ def train_and_evaluate(
 
     n_pos_amb = sum(y_train_ambiguous)
     n_neg_amb = len(y_train_ambiguous) - n_pos_amb
+
+    if n_pos_amb == 0 or n_neg_amb == 0:
+        print("Warning: single-class ambiguous subset, using fallback prediction")
+        # Fallback: predict based on Stage A only
+        stage_a_val_proba_full = stage_a_model.predict_proba(X_val_tokens)[:, 1]
+        y_pred_fallback = (stage_a_val_proba_full > 0.5).astype(int)
+        return {
+            "stage_a_metrics": {"auc": float(roc_auc_score(y_val, stage_a_val_proba_full))},
+            "combined": {
+                "precision": float(precision_score(y_val, y_pred_fallback, zero_division=0)),
+                "recall": float(recall_score(y_val, y_pred_fallback, zero_division=0)),
+                "f1": float(f1_score(y_val, y_pred_fallback, zero_division=0)),
+            },
+            "stage_b": {"threshold": 0.5},
+            "note": "single-class ambiguous subset, Stage A only",
+        }
+
     scale_pos_weight_b = (
         (n_neg_amb / n_pos_amb) * config.stage_b_scale_pos_multiplier
-        if n_pos_amb > 0
-        else 1.0
     )
 
     stage_b_params = {
@@ -505,7 +520,7 @@ def run_experiments() -> List[Dict[str, Any]]:
             "stage_a": {
                 "model_type": "xgboost",
                 "features": "token_only",
-                "feature_count": 23,
+                "feature_count": X_train[:, :len(get_token_feature_indices())].shape[1],
                 "threshold_low": best_result["config"]["stage_a_threshold_low"],
                 "threshold_high": best_result["config"]["stage_a_threshold_high"],
                 "metrics": best_result["stage_a"],
@@ -513,7 +528,7 @@ def run_experiments() -> List[Dict[str, Any]]:
             "stage_b": {
                 "model_type": "lightgbm",
                 "features": "all",
-                "feature_count": 51,
+                "feature_count": X_train.shape[1],
                 "threshold": best_result["stage_b"]["threshold"],
             },
             "combined_metrics": best_result["combined"],

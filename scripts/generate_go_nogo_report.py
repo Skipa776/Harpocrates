@@ -545,8 +545,8 @@ def main():
         aggregate_metrics, type_metrics, stress_results, calibration_metrics, routing_metrics = simulate_metrics()
         model_version = "simulated-v1.0"
     else:
-        print(f"Error: --model-path provided but model evaluation is not yet implemented.", file=sys.stderr)
-        print(f"Use --simulate for demonstration or --metrics-file with pre-computed metrics.", file=sys.stderr)
+        print("Error: --model-path provided but model evaluation is not yet implemented.", file=sys.stderr)
+        print("Use --simulate for demonstration or --metrics-file with pre-computed metrics.", file=sys.stderr)
         sys.exit(1)
 
     # Generate report

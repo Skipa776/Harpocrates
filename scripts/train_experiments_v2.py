@@ -429,6 +429,9 @@ def run_v2_experiments():
     n_pos = sum(y_train)
     n_neg = len(y_train) - n_pos
 
+    if n_pos == 0:
+        raise ValueError("No positive samples in training data; cannot train Stage A")
+
     stage_a_model = xgb.XGBClassifier(
         objective="binary:logistic",
         max_depth=5,

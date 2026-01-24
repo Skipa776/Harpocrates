@@ -65,6 +65,17 @@ def train_and_evaluate(
     n_pos = sum(y_train)
     n_neg = len(y_train) - n_pos
 
+    if n_pos == 0 or n_neg == 0:
+        # Fallback: predict majority class
+        majority = 1 if n_pos > n_neg else 0
+        y_pred = np.full(len(y_val), majority)
+        return {
+            "precision": float(precision_score(y_val, y_pred, zero_division=0)),
+            "recall": float(recall_score(y_val, y_pred, zero_division=0)),
+            "f1": float(f1_score(y_val, y_pred, zero_division=0)),
+            "note": "single-class training data, fallback predictor",
+        }
+
     # Train Stage A
     stage_a = xgb.XGBClassifier(
         objective="binary:logistic",
@@ -96,6 +107,16 @@ def train_and_evaluate(
     n_pos_amb = sum(y_train_amb)
     n_neg_amb = len(y_train_amb) - n_pos_amb
 
+    if n_pos_amb == 0 or n_neg_amb == 0:
+        # Fallback: use Stage A predictions directly
+        y_pred = (stage_a.predict_proba(X_val_tokens)[:, 1] > 0.5).astype(int)
+        return {
+            "precision": float(precision_score(y_val, y_pred, zero_division=0)),
+            "recall": float(recall_score(y_val, y_pred, zero_division=0)),
+            "f1": float(f1_score(y_val, y_pred, zero_division=0)),
+            "note": "single-class ambiguous subset, Stage A only",
+        }
+
     # Train Stage B
     stage_b = lgb.LGBMClassifier(
         n_estimators=config.get("b_estimators", 300),
@@ -103,7 +124,7 @@ def train_and_evaluate(
         num_leaves=config.get("b_leaves", 63),
         learning_rate=0.03,
         min_child_samples=30,
-        scale_pos_weight=(n_neg_amb / n_pos_amb) * config.get("b_scale", 0.5) if n_pos_amb > 0 else 1.0,
+        scale_pos_weight=(n_neg_amb / n_pos_amb) * config.get("b_scale", 0.5),
         subsample=0.7,
         colsample_bytree=0.7,
         reg_alpha=0.2,

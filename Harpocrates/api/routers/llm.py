@@ -24,6 +24,10 @@ def _get_llm_provider():
     global _llm_provider
 
     if _llm_provider is not None:
+        # Revalidate availability in case provider went offline
+        if not _llm_provider.is_available():
+            _llm_provider = None
+            return None
         return _llm_provider
 
     if not settings.llm_enabled:
@@ -94,17 +98,15 @@ async def llm_verify(request: LLMVerifyRequest) -> LLMVerifyResponse:
         lines_before = request.context_before.split("\n") if request.context_before else []
         lines_after = request.context_after.split("\n") if request.context_after else []
 
-        # line_content is the single line containing the token
-        last_before = lines_before[-1] if lines_before else ""
-        first_after = lines_after[0] if lines_after else ""
-        line_content = f"{last_before}{request.token}{first_after}"
+        # line_content is just the token itself (the actual secret candidate)
+        line_content = request.token
 
         context = CodeContext(
             line_content=line_content,
-            lines_before=lines_before[:-1] if lines_before else [],
-            lines_after=lines_after[1:] if lines_after else [],
+            lines_before=lines_before,
+            lines_after=lines_after,
             file_path=request.filename,
-            line_number=1,
+            line_number=request.line_number if hasattr(request, "line_number") else 1,
         )
 
         # Create finding

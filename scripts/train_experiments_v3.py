@@ -130,6 +130,10 @@ def train_precision_focused(
         n_pos_amb = sum(y_train_amb)
         n_neg_amb = len(y_train_amb) - n_pos_amb
 
+        if n_pos_amb == 0 or n_neg_amb == 0:
+            print(f"  Skipping {cfg['name']}: single-class ambiguous subset")
+            continue
+
         # Train Stage B with strict settings
         stage_b = lgb.LGBMClassifier(
             n_estimators=300,
@@ -246,6 +250,10 @@ def run_v3_experiments():
     print("RESULTS SUMMARY")
     print("=" * 60)
 
+    if not results:
+        print("\nNo experiments produced results. Check training data.")
+        return
+
     results_sorted = sorted(results, key=lambda x: x["f1"], reverse=True)
 
     print(f"\n{'Config':<20} {'Precision':>10} {'Recall':>10} {'F1':>10} {'Target':>8}")
@@ -282,14 +290,14 @@ def run_v3_experiments():
         "stage_a": {
             "model_type": "xgboost",
             "features": "token_only",
-            "feature_count": 23,
+            "feature_count": X_train[:, :len(get_token_feature_indices())].shape[1],
             "threshold_low": best["stage_a_low"],
             "threshold_high": best["stage_a_high"],
         },
         "stage_b": {
             "model_type": "lightgbm",
             "features": "all",
-            "feature_count": 51,
+            "feature_count": X_train.shape[1],
             "threshold": best["stage_b_threshold"],
         },
         "combined_metrics": {
