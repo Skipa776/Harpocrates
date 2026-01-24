@@ -87,8 +87,8 @@ def _scan_content(content: str, filename: str | None, ml_verify: bool) -> ScanRe
             except Exception as e:
                 logger.warning(f"ML verification failed, returning unverified findings: {e}")
     except Exception as e:
-        logger.exception(f"Scan failed: {e}")
-        raise ScanError(str(e))
+        logger.exception("Scan failed")
+        raise ScanError(str(e)) from e
 
     elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -130,6 +130,13 @@ async def scan_batch(request: BatchScanRequest) -> BatchScanResponse:
     if len(request.files) > settings.max_batch_size:
         raise BatchTooLargeError(len(request.files), settings.max_batch_size)
 
+    # Check for duplicate filenames
+    seen_filenames: set = set()
+    for file_item in request.files:
+        if file_item.filename in seen_filenames:
+            raise ScanError(f"Duplicate filename in batch: {file_item.filename}")
+        seen_filenames.add(file_item.filename)
+
     start = time.perf_counter()
     results: Dict[str, BatchScanFileResult] = {}
     total_findings = 0
@@ -162,7 +169,7 @@ async def scan_batch(request: BatchScanRequest) -> BatchScanResponse:
             total_findings += scan_result.total_findings
 
         except Exception as e:
-            logger.exception(f"Failed to scan {file_item.filename}: {e}")
+            logger.exception("Failed to scan %s", file_item.filename)
             results[file_item.filename] = BatchScanFileResult(
                 findings=[],
                 scan_time_ms=0,

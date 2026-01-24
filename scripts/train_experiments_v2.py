@@ -133,29 +133,35 @@ def train_with_focal_loss(
 
     # LightGBM with focal loss via custom objective
     def focal_loss_lgb(y_true, y_pred):
-        """Focal loss for LightGBM with correct per-class derivatives."""
+        """Focal loss for LightGBM using factored p_t/alpha_t form."""
         eps = 1e-10
         p = 1.0 / (1.0 + np.exp(-y_pred))  # sigmoid
         p = np.clip(p, eps, 1.0 - eps)
 
-        # Positive samples (y=1): -alpha * (1-p)^gamma * log(p)
-        # Negative samples (y=0): -(1-alpha) * p^gamma * log(1-p)
-        grad = np.where(
-            y_true == 1,
-            alpha * (1 - p) ** gamma * (gamma * p * np.log(p) + p - 1),
-            (1 - alpha) * p ** gamma * (-gamma * (1 - p) * np.log(1 - p) + p),
-        )
-        hess = np.where(
-            y_true == 1,
-            alpha * (1 - p) ** gamma * p * (
-                (1 - p) - gamma * (1 - p) * np.log(p) * (gamma * p - 1 + p)
-                + gamma * p * (1 - p)
-            ),
-            (1 - alpha) * p ** gamma * (1 - p) * (
-                p + gamma * p * np.log(1 - p) * (gamma * (1 - p) - p)
-                + gamma * (1 - p) * p
-            ),
-        )
+        # p_t = P(correct class), alpha_t = class weight
+        p_t = np.where(y_true == 1, p, 1 - p)
+        alpha_t = np.where(y_true == 1, alpha, 1 - alpha)
+        # y_pos: +1 for positive, -1 for negative (sign for gradient direction)
+        y_pos = np.where(y_true == 1, 1.0, -1.0)
+
+        # Gradient: d(focal_loss)/d(y_pred)
+        # u = alpha_t * y_pos * (1 - p_t)^gamma
+        # v = gamma * p_t * log(p_t) + p_t - 1
+        # grad = u * v
+        u = alpha_t * y_pos * (1 - p_t) ** gamma
+        v = gamma * p_t * np.log(p_t + eps) + p_t - 1
+        grad = u * v
+
+        # Hessian: d^2(focal_loss)/d(y_pred)^2
+        # du/dp_t = -alpha_t * y_pos * gamma * (1 - p_t)^(gamma-1)
+        # dv/dp_t = gamma * (log(p_t) + 1) + 1 = gamma * log(p_t) + gamma + 1
+        du_dp_t = -alpha_t * y_pos * gamma * (1 - p_t) ** (gamma - 1)
+        dv_dp_t = gamma * np.log(p_t + eps) + gamma + 1
+
+        # dp_t/d(y_pred) = y_pos * p_t * (1 - p_t)
+        # hess = (du_dp_t * v + u * dv_dp_t) * y_pos * p_t * (1 - p_t)
+        hess = (du_dp_t * v + u * dv_dp_t) * y_pos * p_t * (1 - p_t)
+
         # Ensure hessians are positive for numerical stability
         hess = np.maximum(hess, eps)
         return grad, hess
@@ -560,7 +566,10 @@ def run_v2_experiments():
 
         # Save Stage B
         stage_b_path = output_dir / "stageB_lightgbm.txt"
-        best["model"].booster_.save_model(str(stage_b_path))
+        if best.get("model") is not None and hasattr(best["model"], "booster_"):
+            best["model"].booster_.save_model(str(stage_b_path))
+        else:
+            print("Warning: Stage B model is None or has no booster_, skipping save")
 
         # Save config
         config = {
