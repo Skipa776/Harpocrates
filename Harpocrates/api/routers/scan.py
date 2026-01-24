@@ -62,6 +62,12 @@ def _scan_content(content: str, filename: str | None, ml_verify: bool) -> ScanRe
         # Always start with standard detection
         findings = detect_text(content)
 
+        # Assign filename to findings for ML file-path features
+        if filename:
+            for f in findings:
+                if not f.file:
+                    f.file = filename
+
         # Apply ML verification if enabled
         if ml_verify and settings.ml_enabled and findings:
             from Harpocrates.core.detector import _apply_ml_verification

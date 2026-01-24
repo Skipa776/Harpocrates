@@ -105,8 +105,8 @@ def evaluate_model(
         "threshold": threshold,
     }
 
-    # Confusion matrix
-    cm = confusion_matrix(y, y_pred)
+    # Confusion matrix (force 2x2 even with single-class data)
+    cm = confusion_matrix(y, y_pred, labels=[0, 1])
     metrics["confusion_matrix"] = {
         "true_negative": int(cm[0, 0]),
         "false_positive": int(cm[0, 1]),

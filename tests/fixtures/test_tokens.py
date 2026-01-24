@@ -173,11 +173,11 @@ FAKE_NON_SECRETS: Dict[str, Dict[str, Any]] = {
         "description": "Semver version string",
     },
     "test_placeholder": {
-        "token": "sk_test_EXAMPLEEXAMPLEEXAMPLEEX",  # gitleaks:allow
-        "context": 'placeholder_key = "sk_test_EXAMPLEEXAMPLEEXAMPLEEX"  # not real',  # gitleaks:allow
+        "token": "sk_test_FAKEVAL",  # gitleaks:allow (truncated, won't trigger push protection)
+        "context": 'placeholder_key = "sk_test_FAKEVAL"  # not real',  # gitleaks:allow
         "var_name": "placeholder_key",
         "type": "test_token",
-        "description": "Stripe test-mode placeholder (clearly fake)",
+        "description": "Stripe test-mode placeholder (clearly fake, invalid length)",
     },
     "documentation_example": {
         "token": "AKIAIOSFODNN7EXAMPLE",  # gitleaks:allow (AWS official example)

@@ -545,11 +545,9 @@ def main():
         aggregate_metrics, type_metrics, stress_results, calibration_metrics, routing_metrics = simulate_metrics()
         model_version = "simulated-v1.0"
     else:
-        # TODO: Implement actual model evaluation
-        print(f"Model path: {args.model_path}")
-        print("Note: Full model evaluation not yet implemented. Using simulated metrics.")
-        aggregate_metrics, type_metrics, stress_results, calibration_metrics, routing_metrics = simulate_metrics()
-        model_version = f"model-{Path(args.model_path).stem}"
+        print(f"Error: --model-path provided but model evaluation is not yet implemented.", file=sys.stderr)
+        print(f"Use --simulate for demonstration or --metrics-file with pre-computed metrics.", file=sys.stderr)
+        sys.exit(1)
 
     # Generate report
     report = generate_go_nogo_report(

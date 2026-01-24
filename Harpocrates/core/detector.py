@@ -359,20 +359,28 @@ def detect_file_with_ml(
     if not findings:
         return findings
 
-    # Read full content for context extraction
+    # Read content for context extraction (respect max_bytes cap)
     try:
-        full_content = path_obj.read_text(encoding="utf-8", errors="ignore")
+        if max_bytes:
+            with open(path_obj, "r", encoding="utf-8", errors="ignore") as f:
+                full_content = f.read(max_bytes)
+        else:
+            full_content = path_obj.read_text(encoding="utf-8", errors="ignore")
     except (OSError, IOError):
         # If we can't read for context, return unverified findings
         return findings
 
-    # Phase 3: ML verification
-    return _apply_ml_verification(
-        findings=findings,
-        full_content=full_content,
-        verifier=verifier,
-        ml_threshold=ml_threshold,
-    )
+    # Phase 3: ML verification (guard against verifier failures)
+    try:
+        return _apply_ml_verification(
+            findings=findings,
+            full_content=full_content,
+            verifier=verifier,
+            ml_threshold=ml_threshold,
+        )
+    except Exception:
+        # On ML failure, return unverified findings rather than aborting the scan
+        return findings
 
 
 __all__ = [

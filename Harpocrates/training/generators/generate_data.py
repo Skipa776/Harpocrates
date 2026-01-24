@@ -910,6 +910,13 @@ def generate_contrastive_pair(record: Dict[str, Any]) -> Dict[str, Any]:
     token = record["token"]
     original_label = record["label"]
 
+    # Guard: don't flip labels for tokens with known secret prefixes
+    # (a real AWS key is dangerous regardless of context)
+    KNOWN_SECRET_PREFIXES = ("AKIA", "ASIA", "ghp_", "gho_", "ghs_", "ghr_",
+                             "sk_live_", "rk_live_", "sk-proj-")
+    if original_label == 1 and any(token.startswith(p) for p in KNOWN_SECRET_PREFIXES):
+        return None  # Skip contrastive pair for known-format secrets
+
     if original_label == 1:
         # Secret token in benign context → now it's NOT a secret (revoked, example, etc.)
         var_name = random.choice([

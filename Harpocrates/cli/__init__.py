@@ -580,8 +580,8 @@ def _write_jsonl(path: Path, data: list) -> None:
 @app.command()
 def serve(
     host: str = typer.Option(
-        "0.0.0.0", "--host", "-h",
-        help="Host to bind the server to"
+        "127.0.0.1", "--host", "-h",
+        help="Host to bind the server to (use 0.0.0.0 for public access)"
     ),
     port: int = typer.Option(
         8000, "--port", "-p",

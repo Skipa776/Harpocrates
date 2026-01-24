@@ -84,6 +84,13 @@ class OllamaProvider(LLMProvider):
         model: str = "llama3.2",
         base_url: str = "http://localhost:11434",
     ):
+        from urllib.parse import urlparse
+
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"Invalid base_url scheme '{parsed.scheme}': only http/https allowed"
+            )
         self._model = model
         self.base_url = base_url
 
