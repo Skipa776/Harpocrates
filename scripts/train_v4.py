@@ -11,7 +11,7 @@ import pickle
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -64,7 +64,7 @@ def train_and_evaluate(
     X_val: np.ndarray,
     y_val: np.ndarray,
     config: Dict[str, Any],
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     """Train both stages and evaluate combined pipeline."""
     import lightgbm as lgb
     import xgboost as xgb

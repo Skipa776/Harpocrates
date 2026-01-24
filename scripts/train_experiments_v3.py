@@ -101,6 +101,8 @@ def train_precision_focused(
 
         if n_pos == 0:
             raise ValueError("Stage A training requires positive samples: n_pos==0")
+        if n_neg == 0:
+            raise ValueError("Stage A training requires negative samples: n_neg==0")
 
         # Train Stage A
         stage_a = xgb.XGBClassifier(
