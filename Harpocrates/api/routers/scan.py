@@ -10,7 +10,12 @@ from typing import Dict
 from fastapi import APIRouter
 
 from Harpocrates.api.config import settings
-from Harpocrates.api.exceptions import BatchTooLargeError, ContentTooLargeError, ScanError
+from Harpocrates.api.exceptions import (
+    BatchTooLargeError,
+    ContentTooLargeError,
+    DuplicateFilenameError,
+    ScanError,
+)
 from Harpocrates.api.schemas import (
     BatchScanFileResult,
     BatchScanRequest,
@@ -134,7 +139,7 @@ async def scan_batch(request: BatchScanRequest) -> BatchScanResponse:
     seen_filenames: set = set()
     for file_item in request.files:
         if file_item.filename in seen_filenames:
-            raise ScanError(f"Duplicate filename in batch: {file_item.filename}")
+            raise DuplicateFilenameError(file_item.filename)
         seen_filenames.add(file_item.filename)
 
     start = time.perf_counter()

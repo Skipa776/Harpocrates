@@ -74,6 +74,16 @@ class MLModelError(HarpocratesAPIError):
         )
 
 
+class DuplicateFilenameError(HarpocratesAPIError):
+    """Raised when a batch request contains duplicate filenames."""
+
+    def __init__(self, filename: str):
+        super().__init__(
+            status_code=400,
+            detail=f"Duplicate filename in batch: {filename}",
+        )
+
+
 class ScanError(HarpocratesAPIError):
     """Raised when scanning fails."""
 
