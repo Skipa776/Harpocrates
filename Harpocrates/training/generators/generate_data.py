@@ -1182,7 +1182,6 @@ def generate_transformed_training_data(
     mode: str = "train",
     noise_rate: float = 0.08,
     contrastive_ratio: float = 0.3,
-    vendor_neutralization: bool = True,
     validate: bool = True,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
@@ -1203,7 +1202,6 @@ def generate_transformed_training_data(
         mode: "train" or "test"
         noise_rate: Label noise rate (train only)
         contrastive_ratio: Fraction of samples to generate contrastive pairs for
-        vendor_neutralization: Ensure vendor strings in both classes
         validate: Run dataset quality validation
 
     Returns:
@@ -1227,7 +1225,10 @@ def generate_transformed_training_data(
     if contrastive_ratio > 0:
         contrastive_count = int(len(records) * contrastive_ratio)
         samples_for_contrastive = random.sample(records, min(contrastive_count, len(records)))
-        contrastive_pairs = [generate_contrastive_pair(r) for r in samples_for_contrastive]
+        contrastive_pairs = [
+            p for p in (generate_contrastive_pair(r) for r in samples_for_contrastive)
+            if p is not None
+        ]
         records.extend(contrastive_pairs)
         report["transformations"].append({
             "type": "contrastive_pairs",
@@ -1394,7 +1395,6 @@ def main() -> int:
             mode=args.mode,
             noise_rate=args.noise_rate if args.mode == "train" else 0,
             contrastive_ratio=args.contrastive_ratio if args.mode == "train" else 0,
-            vendor_neutralization=True,
         )
         # Save validation report if requested
         if args.report:

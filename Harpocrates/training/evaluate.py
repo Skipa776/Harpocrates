@@ -118,13 +118,16 @@ def evaluate_model(
     report = classification_report(y, y_pred, output_dict=True, zero_division=0)
     metrics["classification_report"] = report
 
-    # Precision-recall curve data
-    precision, recall, thresholds = precision_recall_curve(y, y_proba)
-    metrics["pr_curve"] = {
-        "precision": precision.tolist(),
-        "recall": recall.tolist(),
-        "thresholds": thresholds.tolist(),
-    }
+    # Precision-recall curve data (requires both classes)
+    if len(np.unique(y)) > 1:
+        precision, recall, thresholds = precision_recall_curve(y, y_proba)
+        metrics["pr_curve"] = {
+            "precision": precision.tolist(),
+            "recall": recall.tolist(),
+            "thresholds": thresholds.tolist(),
+        }
+    else:
+        metrics["pr_curve"] = {"precision": [], "recall": [], "thresholds": []}
 
     return metrics
 
@@ -275,6 +278,11 @@ def find_optimal_threshold(
 
     dmatrix = xgb.DMatrix(X)
     y_proba = model.predict(dmatrix)
+
+    # Single-class guard: PR curve requires both classes
+    if len(np.unique(y)) < 2:
+        return 0.5, {"precision": 0.0, "recall": 0.0, "threshold": 0.5,
+                      "note": "Single-class dataset, cannot compute PR curve"}
 
     precision, recall, thresholds = precision_recall_curve(y, y_proba)
 

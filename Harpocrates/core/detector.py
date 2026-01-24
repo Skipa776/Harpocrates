@@ -309,13 +309,17 @@ def detect_text_with_ml(
     if not findings:
         return findings
 
-    # Phase 3: ML verification
-    return _apply_ml_verification(
-        findings=findings,
-        full_content=text,
-        verifier=verifier,
-        ml_threshold=ml_threshold,
-    )
+    # Phase 3: ML verification (guard against verifier failures)
+    try:
+        return _apply_ml_verification(
+            findings=findings,
+            full_content=text,
+            verifier=verifier,
+            ml_threshold=ml_threshold,
+        )
+    except Exception:
+        # On ML failure, return unverified findings rather than aborting the scan
+        return findings
 
 
 def detect_file_with_ml(
