@@ -68,7 +68,7 @@ def train_precision_focused(
     y_train: np.ndarray,
     X_val: np.ndarray,
     y_val: np.ndarray,
-) -> Dict[str, Any]:
+) -> List[Dict[str, Any]]:
     """Train with precision-focused hyperparameters."""
     import lightgbm as lgb
     import xgboost as xgb

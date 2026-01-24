@@ -20,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def load_training_data(data_path: Path) -> Tuple[np.ndarray, np.ndarray, List[Dict]]:
     """Load training data from pickle file."""
+    import logging
+
+    logger = logging.getLogger(__name__)
     from Harpocrates.ml.features import extract_features_from_record
 
     with open(data_path, "rb") as f:
@@ -28,15 +31,24 @@ def load_training_data(data_path: Path) -> Tuple[np.ndarray, np.ndarray, List[Di
     features = []
     labels = []
     valid_records = []
+    dropped = 0
 
-    for record in records:
+    for i, record in enumerate(records):
         try:
             fv = extract_features_from_record(record)
             features.append(fv.to_array())
             labels.append(record["label"])
             valid_records.append(record)
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                f"Skipping record {record.get('id', i)}: "
+                f"{type(e).__name__}: {e}"
+            )
+            dropped += 1
             continue
+
+    if dropped > 0:
+        logger.info(f"Dropped {dropped}/{len(records)} records during feature extraction")
 
     return np.array(features), np.array(labels), valid_records
 
@@ -69,10 +81,21 @@ def train_and_evaluate(
         # Fallback: predict majority class
         majority = 1 if n_pos > n_neg else 0
         y_pred = np.full(len(y_val), majority)
+        p = float(precision_score(y_val, y_pred, zero_division=0))
+        r = float(recall_score(y_val, y_pred, zero_division=0))
+        f1_val = float(f1_score(y_val, y_pred, zero_division=0))
         return {
-            "precision": float(precision_score(y_val, y_pred, zero_division=0)),
-            "recall": float(recall_score(y_val, y_pred, zero_division=0)),
-            "f1": float(f1_score(y_val, y_pred, zero_division=0)),
+            "config_name": config.get("name", "unnamed"),
+            "precision": p,
+            "recall": r,
+            "f1": f1_val,
+            "targets_met": p >= 0.90 and r >= 0.90,
+            "stage_a": None,
+            "stage_b": None,
+            "a_low": config.get("a_low", 0.15),
+            "a_high": config.get("a_high", 0.85),
+            "stage_b_threshold": 0.5,
+            "confusion_matrix": confusion_matrix(y_val, y_pred, labels=[0, 1]).tolist(),
             "note": "single-class training data, fallback predictor",
         }
 
@@ -109,11 +132,24 @@ def train_and_evaluate(
 
     if n_pos_amb == 0 or n_neg_amb == 0:
         # Fallback: use Stage A predictions directly
-        y_pred = (stage_a.predict_proba(X_val_tokens)[:, 1] > 0.5).astype(int)
+        a_low = config.get("a_low", 0.15)
+        a_high = config.get("a_high", 0.85)
+        y_pred = (stage_a_val_proba > 0.5).astype(int)
+        p = float(precision_score(y_val, y_pred, zero_division=0))
+        r = float(recall_score(y_val, y_pred, zero_division=0))
+        f1_val = float(f1_score(y_val, y_pred, zero_division=0))
         return {
-            "precision": float(precision_score(y_val, y_pred, zero_division=0)),
-            "recall": float(recall_score(y_val, y_pred, zero_division=0)),
-            "f1": float(f1_score(y_val, y_pred, zero_division=0)),
+            "config_name": config.get("name", "unnamed"),
+            "precision": p,
+            "recall": r,
+            "f1": f1_val,
+            "targets_met": p >= 0.90 and r >= 0.90,
+            "stage_a": stage_a,
+            "stage_b": None,
+            "a_low": a_low,
+            "a_high": a_high,
+            "stage_b_threshold": 0.5,
+            "confusion_matrix": confusion_matrix(y_val, y_pred, labels=[0, 1]).tolist(),
             "note": "single-class ambiguous subset, Stage A only",
         }
 
@@ -160,7 +196,7 @@ def train_and_evaluate(
 
         if score > best_score:
             best_score = score
-            cm = confusion_matrix(y_val, y_pred)
+            cm = confusion_matrix(y_val, y_pred, labels=[0, 1])
             best_result = {
                 "config_name": config.get("name", "unnamed"),
                 "stage_b_threshold": float(b_thresh),
@@ -257,8 +293,15 @@ def main():
         stage_a_path = output_dir / "stageA_xgboost.json"
         stage_b_path = output_dir / "stageB_lightgbm.txt"
 
-        best_result["stage_a"].save_model(str(stage_a_path))
-        best_result["stage_b"].booster_.save_model(str(stage_b_path))
+        if best_result["stage_a"] is not None:
+            best_result["stage_a"].save_model(str(stage_a_path))
+        else:
+            print("Warning: Stage A model is None, skipping save")
+
+        if best_result["stage_b"] is not None and hasattr(best_result["stage_b"], "booster_"):
+            best_result["stage_b"].booster_.save_model(str(stage_b_path))
+        else:
+            print("Warning: Stage B model is None or has no booster_, skipping save")
 
         config = {
             "version": "2.4.0",
@@ -268,7 +311,7 @@ def main():
             "stage_a": {
                 "model_type": "xgboost",
                 "features": "token_only",
-                "feature_count": 23,
+                "feature_count": len(get_token_feature_indices()),
                 "threshold_low": best_result["a_low"],
                 "threshold_high": best_result["a_high"],
             },

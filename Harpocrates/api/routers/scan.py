@@ -44,7 +44,7 @@ def _finding_to_response(finding) -> FindingResponse:
         line_number=finding.line,
         snippet=finding.snippet or "",
         severity=severity,
-        confidence=finding.confidence or 0.5,
+        confidence=finding.confidence if finding.confidence is not None else 0.5,
         evidence_type=evidence_type,
         entropy=finding.entropy,
         ml_verified=getattr(finding, "ml_verified", None),

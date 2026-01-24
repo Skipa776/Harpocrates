@@ -216,7 +216,7 @@ def evaluate_stress_tests(
         else:
             # Threshold check
             value = result.get(config["metric"], 0.0)
-            passed = value >= config["threshold"] if config["metric"] != "variance" else value <= config["threshold"]
+            passed = value <= config["threshold"] if config["metric"] in ("variance", "ece") else value >= config["threshold"]
             if config["metric"] in ["variance", "ece"]:
                 requirement = f"{config['metric']} <= {config['threshold']:.0%}"
             else:

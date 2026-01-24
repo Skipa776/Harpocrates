@@ -133,14 +133,32 @@ def train_with_focal_loss(
 
     # LightGBM with focal loss via custom objective
     def focal_loss_lgb(y_true, y_pred):
-        """Focal loss for LightGBM."""
+        """Focal loss for LightGBM with correct per-class derivatives."""
+        eps = 1e-10
         p = 1.0 / (1.0 + np.exp(-y_pred))  # sigmoid
-        grad = alpha * (1 - p) ** gamma * (gamma * p * np.log(p + 1e-10) + p - y_true)
-        hess = alpha * (1 - p) ** gamma * (
-            gamma * (gamma * p * np.log(p + 1e-10) + 2 * p - y_true) * p * (1 - p)
-            + p * (1 - p)
+        p = np.clip(p, eps, 1.0 - eps)
+
+        # Positive samples (y=1): -alpha * (1-p)^gamma * log(p)
+        # Negative samples (y=0): -(1-alpha) * p^gamma * log(1-p)
+        grad = np.where(
+            y_true == 1,
+            alpha * (1 - p) ** gamma * (gamma * p * np.log(p) + p - 1),
+            (1 - alpha) * p ** gamma * (-gamma * (1 - p) * np.log(1 - p) + p),
         )
-        return grad, np.abs(hess)
+        hess = np.where(
+            y_true == 1,
+            alpha * (1 - p) ** gamma * p * (
+                (1 - p) - gamma * (1 - p) * np.log(p) * (gamma * p - 1 + p)
+                + gamma * p * (1 - p)
+            ),
+            (1 - alpha) * p ** gamma * (1 - p) * (
+                p + gamma * p * np.log(1 - p) * (gamma * (1 - p) - p)
+                + gamma * (1 - p) * p
+            ),
+        )
+        # Ensure hessians are positive for numerical stability
+        hess = np.maximum(hess, eps)
+        return grad, hess
 
     model = lgb.LGBMClassifier(
         objective=focal_loss_lgb,

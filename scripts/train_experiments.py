@@ -47,6 +47,9 @@ def load_training_data(
     data_path: Path,
 ) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
     """Load training data from pickle file."""
+    import logging
+
+    logger = logging.getLogger(__name__)
     from Harpocrates.ml.features import FeatureVector, extract_features_from_record
 
     with open(data_path, "rb") as f:
@@ -55,15 +58,24 @@ def load_training_data(
     features = []
     labels = []
     valid_records = []
+    dropped = 0
 
-    for record in records:
+    for i, record in enumerate(records):
         try:
             fv = extract_features_from_record(record)
             features.append(fv.to_array())
             labels.append(record["label"])
             valid_records.append(record)
         except Exception as e:
+            logger.warning(
+                f"Skipping record {record.get('id', i)}: "
+                f"{type(e).__name__}: {e}"
+            )
+            dropped += 1
             continue
+
+    if dropped > 0:
+        logger.info(f"Dropped {dropped}/{len(records)} records during feature extraction")
 
     return np.array(features), np.array(labels), valid_records
 
@@ -101,8 +113,17 @@ def train_and_evaluate(
     n_positive = sum(y_train)
     n_negative = len(y_train) - n_positive
 
-    if n_positive == 0:
-        raise ValueError("No positive samples in training set")
+    if n_positive == 0 or n_negative == 0:
+        raise ValueError(
+            f"Single-class training set: {n_positive} positive, {n_negative} negative"
+        )
+
+    n_val_positive = sum(y_val)
+    n_val_negative = len(y_val) - n_val_positive
+    if n_val_positive == 0 or n_val_negative == 0:
+        raise ValueError(
+            f"Single-class validation set: {n_val_positive} positive, {n_val_negative} negative"
+        )
 
     scale_pos_weight = (n_negative / n_positive) * config.stage_a_scale_pos_multiplier
 
@@ -156,18 +177,32 @@ def train_and_evaluate(
     if n_pos_amb == 0 or n_neg_amb == 0:
         print("Warning: single-class ambiguous subset, using fallback prediction")
         # Fallback: predict based on Stage A only
-        stage_a_val_proba_full = stage_a_model.predict_proba(X_val_tokens)[:, 1]
-        y_pred_fallback = (stage_a_val_proba_full > 0.5).astype(int)
-        return {
-            "stage_a_metrics": {"auc": float(roc_auc_score(y_val, stage_a_val_proba_full))},
-            "combined": {
-                "precision": float(precision_score(y_val, y_pred_fallback, zero_division=0)),
-                "recall": float(recall_score(y_val, y_pred_fallback, zero_division=0)),
-                "f1": float(f1_score(y_val, y_pred_fallback, zero_division=0)),
-            },
-            "stage_b": {"threshold": 0.5},
-            "note": "single-class ambiguous subset, Stage A only",
+        y_pred_fallback = (stage_a_val_proba > 0.5).astype(int)
+        low_mask = stage_a_val_proba < config.stage_a_threshold_low
+        high_mask = stage_a_val_proba > config.stage_a_threshold_high
+        amb_mask_f = ~low_mask & ~high_mask
+
+        results["stage_a"] = {
+            "auc_roc": float(stage_a_auc),
+            "threshold_low": config.stage_a_threshold_low,
+            "threshold_high": config.stage_a_threshold_high,
         }
+        results["stage_b"] = {"threshold": 0.5, "skipped": True}
+        results["combined"] = {
+            "precision": float(precision_score(y_val, y_pred_fallback, zero_division=0)),
+            "recall": float(recall_score(y_val, y_pred_fallback, zero_division=0)),
+            "f1": float(f1_score(y_val, y_pred_fallback, zero_division=0)),
+            "rejected_by_stage_a": int(sum(low_mask)),
+            "accepted_by_stage_a": int(sum(high_mask)),
+            "sent_to_stage_b": int(sum(amb_mask_f)),
+        }
+        results["targets_met"] = (
+            results["combined"]["precision"] >= 0.90
+            and results["combined"]["recall"] >= 0.90
+        )
+        results["models"] = {"stage_a": stage_a_model, "stage_b": None}
+        results["note"] = "single-class ambiguous subset, Stage A only"
+        return results
 
     scale_pos_weight_b = (
         (n_neg_amb / n_pos_amb) * config.stage_b_scale_pos_multiplier
@@ -508,8 +543,15 @@ def run_experiments() -> List[Dict[str, Any]]:
         stage_a_path = output_dir / "stageA_xgboost.json"
         stage_b_path = output_dir / "stageB_lightgbm.txt"
 
-        best_result["models"]["stage_a"].save_model(str(stage_a_path))
-        best_result["models"]["stage_b"].booster_.save_model(str(stage_b_path))
+        if best_result["models"]["stage_a"] is not None:
+            best_result["models"]["stage_a"].save_model(str(stage_a_path))
+        else:
+            print("Warning: Stage A model is None, skipping save")
+
+        if best_result["models"]["stage_b"] is not None and hasattr(best_result["models"]["stage_b"], "booster_"):
+            best_result["models"]["stage_b"].booster_.save_model(str(stage_b_path))
+        else:
+            print("Warning: Stage B model is None or has no booster_, skipping save")
 
         # Save config
         config = {
