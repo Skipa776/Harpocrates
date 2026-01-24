@@ -80,9 +80,15 @@ class LightGBMVerifier(Verifier):
         Get singleton instance of LightGBM verifier.
 
         Useful for reusing the same model across multiple scans.
+        Updates threshold/model_path if provided to an existing instance.
         """
         if cls._instance is None:
             cls._instance = cls(model_path=model_path, threshold=threshold)
+        else:
+            if model_path is not None and model_path != cls._instance.model_path:
+                cls._instance = cls(model_path=model_path, threshold=threshold)
+            elif threshold != cls._instance.threshold:
+                cls._instance.threshold = threshold
         return cls._instance
 
     @classmethod

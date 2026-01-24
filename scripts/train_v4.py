@@ -254,7 +254,7 @@ def main():
             "stage_b": {
                 "model_type": "lightgbm",
                 "features": "all",
-                "feature_count": 51,
+                "feature_count": X_train.shape[1],
                 "threshold": best_result["stage_b_threshold"],
             },
             "combined_metrics": {

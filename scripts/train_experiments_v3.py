@@ -99,6 +99,9 @@ def train_precision_focused(
         n_pos = sum(y_train)
         n_neg = len(y_train) - n_pos
 
+        if n_pos == 0:
+            raise ValueError("Stage A training requires positive samples: n_pos==0")
+
         # Train Stage A
         stage_a = xgb.XGBClassifier(
             objective="binary:logistic",

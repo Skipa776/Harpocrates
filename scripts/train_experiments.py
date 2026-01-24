@@ -100,6 +100,10 @@ def train_and_evaluate(
 
     n_positive = sum(y_train)
     n_negative = len(y_train) - n_positive
+
+    if n_positive == 0:
+        raise ValueError("No positive samples in training set")
+
     scale_pos_weight = (n_negative / n_positive) * config.stage_a_scale_pos_multiplier
 
     stage_a_params = {

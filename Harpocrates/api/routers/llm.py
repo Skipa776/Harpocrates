@@ -90,17 +90,19 @@ async def llm_verify(request: LLMVerifyRequest) -> LLMVerifyResponse:
         from Harpocrates.llm.verifier import LLMVerifier
         from Harpocrates.ml.context import CodeContext
 
-        # Build line content from context
-        line_content = f"{request.context_before}{request.token}{request.context_after}"
-
-        # Create context
+        # Build context lines
         lines_before = request.context_before.split("\n") if request.context_before else []
         lines_after = request.context_after.split("\n") if request.context_after else []
 
+        # line_content is the single line containing the token
+        last_before = lines_before[-1] if lines_before else ""
+        first_after = lines_after[0] if lines_after else ""
+        line_content = f"{last_before}{request.token}{first_after}"
+
         context = CodeContext(
             line_content=line_content,
-            lines_before=lines_before,
-            lines_after=lines_after,
+            lines_before=lines_before[:-1] if lines_before else [],
+            lines_after=lines_after[1:] if lines_after else [],
             file_path=request.filename,
             line_number=1,
         )

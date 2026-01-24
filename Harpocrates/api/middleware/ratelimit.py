@@ -39,27 +39,28 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         app,
         max_requests: int = 100,
         window_seconds: int = 60,
+        trust_proxy: bool = False,
     ):
         super().__init__(app)
         self.max_requests = max_requests
         self.window_seconds = window_seconds
+        self.trust_proxy = trust_proxy
         # Client IP -> list of request timestamps
         self._requests: Dict[str, List[float]] = defaultdict(list)
 
     def _get_client_ip(self, request: Request) -> str:
         """Extract client IP from request, considering proxies."""
-        # Check X-Forwarded-For header (for reverse proxies)
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            # Take the first IP (original client)
-            return forwarded.split(",")[0].strip()
+        # Only trust proxy headers when explicitly configured
+        if self.trust_proxy:
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
 
-        # Check X-Real-IP header
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip.strip()
+            real_ip = request.headers.get("X-Real-IP")
+            if real_ip:
+                return real_ip.strip()
 
-        # Fall back to direct client IP
+        # Use direct client IP
         if request.client:
             return request.client.host
 

@@ -34,7 +34,8 @@ def load_training_data(
     from Harpocrates.ml.features import FeatureVector, extract_features_from_record
 
     with open(data_path, "rb") as f:
-        records = pickle.load(f)
+        # WARNING: pickle can execute arbitrary code. Only load from trusted sources.
+        records = pickle.load(f)  # nosec B301
 
     features = []
     labels = []
@@ -58,8 +59,8 @@ def get_token_feature_indices() -> List[int]:
 
 
 def get_context_feature_indices() -> List[int]:
-    """Get indices of context features (features 23-50)."""
-    return list(range(23, 51))
+    """Get indices of context features (features 33-50, after token and variable-name)."""
+    return list(range(33, 51))
 
 
 def analyze_feature_importance(
@@ -142,6 +143,7 @@ def train_with_focal_loss(
         return grad, np.abs(hess)
 
     model = lgb.LGBMClassifier(
+        objective=focal_loss_lgb,
         n_estimators=200,
         max_depth=10,
         num_leaves=47,
@@ -293,6 +295,10 @@ def train_with_high_precision_focus(
     )
     X_train_amb = X_train[ambiguous_mask_train]
     y_train_amb = y_train[ambiguous_mask_train]
+
+    # Guard: empty or single-class ambiguous subsets make Stage B training invalid
+    if len(y_train_amb) == 0 or len(np.unique(y_train_amb)) < 2:
+        return None
 
     # Train Stage B with very conservative settings
     n_pos = sum(y_train_amb)
@@ -485,6 +491,10 @@ def run_v2_experiments():
 
     all_results = sorted(results, key=lambda x: x["f1"], reverse=True)
 
+    if not all_results:
+        print("\nNo valid results produced. Check Stage A/B configurations.")
+        return
+
     # Check for any that meet targets
     target_met = [r for r in all_results if r["targets_met"]]
     if target_met:
@@ -546,7 +556,7 @@ def run_v2_experiments():
             "stage_b": {
                 "model_type": "lightgbm",
                 "features": "all",
-                "feature_count": 51,
+                "feature_count": X_train.shape[1],
                 "threshold": best["stage_b_threshold"],
             },
             "combined_metrics": {
