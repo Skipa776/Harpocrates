@@ -294,7 +294,8 @@ def main():
         stage_b_path = output_dir / "stageB_lightgbm.txt"
 
         if best_result["stage_a"] is not None:
-            best_result["stage_a"].save_model(str(stage_a_path))
+            # Use get_booster() to save to JSON format
+            best_result["stage_a"].get_booster().save_model(str(stage_a_path))
         else:
             print("Warning: Stage A model is None, skipping save")
 
