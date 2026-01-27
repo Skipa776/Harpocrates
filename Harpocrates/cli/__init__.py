@@ -72,6 +72,12 @@ def scan(
         error_console.print(f"[red]✗[/red] Path not found: {path}")
         raise typer.Exit(code=2)  # Error exit code
 
+    if not (0.0 <= ml_threshold <= 1.0):
+        error_console.print(
+            f"[red]✗[/red] --ml-threshold must be between 0.0 and 1.0, got: {ml_threshold}"
+        )
+        raise typer.Exit(code=2)
+
     ignore_patterns = set(ignore.split(",")) if ignore else set()
 
     max_bytes = max_file_size * 1024 * 1024
@@ -317,6 +323,12 @@ def train(
 
     # Use cross-validation if requested
     if cross_validate:
+        if folds < 2:
+            error_console.print(
+                f"[red]✗[/red] --folds must be >= 2, got: {folds}"
+            )
+            raise typer.Exit(code=2)
+
         from Harpocrates.training.cross_validation import cross_validate_with_best_model
 
         if not quiet:
@@ -575,6 +587,110 @@ def _write_jsonl(path: Path, data: list) -> None:
     with open(path, "w") as f:
         for record in data:
             f.write(json.dumps(record) + "\n")
+
+
+@app.command()
+def serve(
+    host: str = typer.Option(
+        "127.0.0.1", "--host", "-h",
+        help="Host to bind the server to (use 0.0.0.0 for public access)"
+    ),
+    port: int = typer.Option(
+        8000, "--port", "-p",
+        help="Port to bind the server to"
+    ),
+    workers: int = typer.Option(
+        1, "--workers", "-w",
+        help="Number of worker processes"
+    ),
+    reload: bool = typer.Option(
+        False, "--reload",
+        help="Enable auto-reload for development"
+    ),
+    api_key: Optional[str] = typer.Option(
+        None, "--api-key",
+        help="API key for authentication (optional)"
+    ),
+    no_ml: bool = typer.Option(
+        False, "--no-ml",
+        help="Disable ML verification"
+    ),
+) -> None:
+    """
+    Start the Harpocrates REST API server.
+
+    The API provides programmatic access to the secrets detection engine
+    with endpoints for scanning code and ML verification.
+
+    Examples:
+
+        # Start server on default port (8000)
+        harpocrates serve
+
+        # Start on custom host/port
+        harpocrates serve --host 127.0.0.1 --port 3000
+
+        # Start with multiple workers (production)
+        harpocrates serve --workers 4
+
+        # Enable API key authentication
+        harpocrates serve --api-key "my-secret-key"
+
+        # Development mode with auto-reload
+        harpocrates serve --reload
+
+    API Endpoints:
+
+        GET  /health       - Health check
+        GET  /config       - ML model configuration
+        POST /scan         - Scan code for secrets
+        POST /scan/batch   - Batch scan multiple files
+        POST /verify       - ML-verify a single token
+        GET  /docs         - OpenAPI documentation
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        error_console.print(
+            "[red]✗[/red] API dependencies not installed. "
+            "Install with: pip install harpocrates[api]"
+        )
+        raise typer.Exit(code=2)
+
+    # Set environment variables for API config
+    import os
+    os.environ["HARPOCRATES_HOST"] = host
+    os.environ["HARPOCRATES_PORT"] = str(port)
+    os.environ["HARPOCRATES_WORKERS"] = str(workers)
+
+    if api_key:
+        os.environ["HARPOCRATES_API_KEY"] = api_key
+
+    if no_ml:
+        os.environ["HARPOCRATES_ML_ENABLED"] = "false"
+
+    if reload:
+        os.environ["HARPOCRATES_DEBUG"] = "true"
+
+    console.print(f"[cyan]ℹ[/cyan] Starting Harpocrates API server...")
+    console.print(f"  Host: {host}")
+    console.print(f"  Port: {port}")
+    console.print(f"  Workers: {workers}")
+    console.print(f"  ML Enabled: {'No' if no_ml else 'Yes'}")
+    console.print(f"  Auth: {'Enabled' if api_key else 'Disabled'}")
+    console.print(f"  Reload: {'Enabled' if reload else 'Disabled'}")
+    console.print()
+    console.print(f"[green]→[/green] API docs available at http://{host}:{port}/docs")
+    console.print()
+
+    # Run uvicorn
+    uvicorn.run(
+        "Harpocrates.api.main:app",
+        host=host,
+        port=port,
+        workers=workers if not reload else 1,
+        reload=reload,
+    )
 
 
 def main() -> None:

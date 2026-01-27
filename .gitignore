@@ -43,6 +43,17 @@ htmlcov/
 .tox/
 .nox/
 
+# Test files with fake secrets (flagged by GitHub push protection)
+tests/test_ml_stress.py
+tests/test_ml_calibration.py
+tests/test_stage_routing.py
+tests/test_string_literal_detection.py
+tests/fixtures/fake_secrets.txt
+
+# Scripts with fake secret patterns
+scripts/evaluate_stress_tests.py
+scripts/validate_training_data.py
+
 # Type checking
 .mypy_cache/
 .dmypy.json
@@ -59,6 +70,19 @@ test_secrets.txt
 training_data*.jsonl
 test_data*.jsonl
 train*.jsonl
+
+# Pickle files (security risk - arbitrary code execution)
+*.pkl
+*.pickle
+
+# ML artifacts and training outputs
+Harpocrates/ml/artifacts/
+Harpocrates/training/data/*.pkl
+Harpocrates/training/data/*.json
+data_validation_report.json
+
+# One-off training scripts
+train_simple.py
 
 # Environment and secrets
 .env

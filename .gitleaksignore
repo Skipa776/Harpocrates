@@ -1,0 +1,35 @@
+# .gitleaksignore - GitLeaks allowlist for Harpocrates
+#
+# Harpocrates is a secrets detection tool. Test files and source code
+# necessarily contain fake/example secret patterns for detection testing.
+# All tokens in this repository are SYNTHETIC and not real credentials.
+#
+# Format: commit-hash:file:rule:line (or just fingerprints)
+# See: https://github.com/gitleaks/gitleaks#gitleaksignore
+
+# Test fixture files containing intentional fake secrets
+tests/fixtures/test_tokens.py
+tests/fixtures/fake_secrets.txt
+
+# Source code that references secret patterns for detection logic
+Harpocrates/training/generators/secret_templates.py
+Harpocrates/training/generators/generate_data.py
+Harpocrates/ml/features.py
+Harpocrates/detectors/regex_patterns.py
+Harpocrates/core/detector.py
+Harpocrates/core/result.py
+
+# Test files that use fake secrets for validation
+tests/test_scanner.py
+tests/test_detector.py
+tests/test_regex.py
+tests/test_cli.py
+tests/test_entropy.py
+tests/test_data_generator.py
+tests/test_ml_features.py
+tests/test_ml_pipeline.py
+tests/test_ml_regression.py
+tests/test_ml_shortcuts.py
+
+# README contains example usage with fake tokens
+README.md
