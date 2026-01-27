@@ -89,57 +89,79 @@ MAX_ENTROPY_BASE64 = 6.0  # log2(64)
 MAX_ENTROPY_HEX = 4.0  # log2(16)
 
 # Variable name N-gram weights for secret detection
+# STAGE B GENERALIZATION: Weights scaled by 0.4 (max was 1.0 → now 0.40)
+# This prevents N-gram scores from dominating predictions and forces
+# the model to learn from multiple signals instead of a single feature.
 SECRET_NGRAMS: Dict[str, float] = {
-    # Highest confidence secret indicators
-    "api_key": 1.0, "apikey": 1.0, "api-key": 1.0,
-    "secret": 0.9, "password": 0.9, "passwd": 0.9, "pwd": 0.85,
-    "private_key": 1.0, "privatekey": 1.0,
-    "access_key": 0.95, "accesskey": 0.95,
-    "auth_token": 0.95, "authtoken": 0.95,
-    "bearer": 0.9, "credential": 0.9,
-    # Medium confidence
-    "token": 0.7, "key": 0.5,  # Generic, needs context
-    "client_secret": 0.95, "clientsecret": 0.95,
-    "signing_key": 0.9, "signingkey": 0.9,
-    "encryption_key": 0.9, "encryptionkey": 0.9,
+    # Highest confidence secret indicators (scaled: 1.0 → 0.40)
+    "api_key": 0.40, "apikey": 0.40, "api-key": 0.40,
+    "secret": 0.36, "password": 0.36, "passwd": 0.36, "pwd": 0.34,
+    "private_key": 0.40, "privatekey": 0.40,
+    "access_key": 0.38, "accesskey": 0.38,
+    "auth_token": 0.38, "authtoken": 0.38,
+    "bearer": 0.36, "credential": 0.36,
+    # Medium confidence (scaled: 0.7 → 0.28, 0.5 → 0.20)
+    "token": 0.28, "key": 0.20,  # Generic, needs context
+    "client_secret": 0.38, "clientsecret": 0.38,
+    "signing_key": 0.36, "signingkey": 0.36,
+    "encryption_key": 0.36, "encryptionkey": 0.36,
 }
 
 # Variable name N-gram weights for safe (non-secret) detection
+# STAGE B GENERALIZATION: Weights scaled by 0.4 (max was 1.0 → now 0.40)
 SAFE_NGRAMS: Dict[str, float] = {
-    # Highest confidence safe indicators
-    "commit": 0.9, "commit_sha": 1.0, "commitsha": 1.0,
-    "sha": 0.8, "sha1": 0.9, "sha256": 0.95, "sha512": 0.95,
-    "hash": 0.85, "checksum": 0.95, "digest": 0.9,
-    "uuid": 0.95, "guid": 0.95, "identifier": 0.7,
-    "version": 0.8, "revision": 0.85, "rev": 0.7,
-    # Context-dependent safe indicators
-    "example": 0.9, "sample": 0.85, "placeholder": 0.95,
-    "test": 0.7, "mock": 0.85, "fake": 0.9, "dummy": 0.9,
-    "fingerprint": 0.9, "session_id": 0.7, "trace_id": 0.8,
+    # Highest confidence safe indicators (scaled: 1.0 → 0.40)
+    "commit": 0.36, "commit_sha": 0.40, "commitsha": 0.40,
+    "sha": 0.32, "sha1": 0.36, "sha256": 0.38, "sha512": 0.38,
+    "hash": 0.34, "checksum": 0.38, "digest": 0.36,
+    "uuid": 0.38, "guid": 0.38, "identifier": 0.28,
+    "version": 0.32, "revision": 0.34, "rev": 0.28,
+    # Context-dependent safe indicators (scaled)
+    "example": 0.36, "sample": 0.34, "placeholder": 0.38,
+    "test": 0.28, "mock": 0.34, "fake": 0.36, "dummy": 0.36,
+    "fingerprint": 0.36, "session_id": 0.28, "trace_id": 0.32,
 }
 
 
 @dataclass
 class FeatureVector:
     """
-    51 extracted features for ML classification.
+    63 extracted features for ML classification.
 
-    Organized into three categories:
+    Organized into five categories:
     - Token features (23): Properties of the token itself
     - Variable name features (10): Properties of the variable/key name
     - Context features (18): Properties of surrounding code
+    - Stage B precision features (7): Targeted FP reduction features
+    - Stage B generalization features (5): Hex disambiguation features
 
     NOTE: The following features were REMOVED to prevent shortcut learning:
     - has_known_prefix: Directly encodes token type based on prefix
     - prefix_type: Maps prefixes to secret categories
     - is_hex_like: Strongly correlated with non-secrets (git SHAs)
 
-    NEW DISCRIMINATIVE FEATURES (for precision boost):
+    DISCRIMINATIVE FEATURES (for precision boost):
     - is_uuid_v4: Detects UUID v4 format (strong non-secret indicator)
     - is_known_hash_length: Token length matches MD5/SHA1/SHA256/SHA512
     - jwt_structure_valid: JWT has valid base64-encoded JSON header
     - entropy_charset_mismatch: High entropy but low charset diversity (suspicious)
     - has_hash_prefix: Starts with hash algorithm prefix (sha256:, md5:)
+
+    STAGE B PRECISION FEATURES (targeting observed FP patterns):
+    - is_hex_len_40: Token is exactly 40 hex chars (git SHA/SHA1)
+    - is_hex_len_64: Token is exactly 64 hex chars (SHA256)
+    - is_test_token: Has _test_, _staging_, test_ prefix
+    - contains_example_keyword: Contains EXAMPLE, xxxx, demo, placeholder
+    - file_is_git_related: Path contains .git/, hash, commit
+    - file_is_build: Path contains build/, dist/, node_modules/
+    - file_is_example: Path contains example/, docs/, demo/
+
+    STAGE B GENERALIZATION FEATURES (hex disambiguation):
+    - hex_context_git_keywords: Context contains git, commit, merge keywords
+    - hex_context_crypto_keywords: Context contains encrypt, sign, key keywords
+    - hex_adjacent_assignment_pattern: Assignment pattern (env_var, config, func_arg)
+    - hex_in_url_or_dsn: Token is embedded in URL/DSN
+    - hex_file_suggests_secret: File path suggests secrets (secrets/, .env)
 
     The model should learn from CONTEXT, not token format.
     """
@@ -206,8 +228,25 @@ class FeatureVector:
     adjacency_ngram_score: float = 0.0  # Sum of N-gram scores in nearby var names
     cross_line_entropy: float = 0.0  # Average entropy across ±3 lines
 
+    # STAGE B PRECISION IMPROVEMENT: Features targeting observed FP patterns
+    is_hex_len_40: bool = False  # Token is exactly 40 hex chars (git SHA/SHA1)
+    is_hex_len_64: bool = False  # Token is exactly 64 hex chars (SHA256)
+    is_test_token: bool = False  # Has _test_, _staging_, test_ prefix
+    contains_example_keyword: bool = False  # Contains EXAMPLE, xxxx, demo, placeholder
+    file_is_git_related: bool = False  # Path contains .git/, hash, commit
+    file_is_build: bool = False  # Path contains build/, dist/, node_modules/
+    file_is_example: bool = False  # Path contains example/, docs/, demo/
+
+    # STAGE B GENERALIZATION IMPROVEMENT: Hex disambiguation features
+    # These help distinguish hex secrets from git SHAs/checksums
+    hex_context_git_keywords: bool = False  # Context contains git, commit, merge, branch
+    hex_context_crypto_keywords: bool = False  # Context contains encrypt, sign, key, secret
+    hex_adjacent_assignment_pattern: int = 0  # 0=unknown, 1=env_var, 2=config, 3=func_arg
+    hex_in_url_or_dsn: bool = False  # Token is embedded in URL/DSN
+    hex_file_suggests_secret: bool = False  # Path suggests secrets (secrets/, .env, credentials/)
+
     def to_array(self) -> List[float]:
-        """Convert to numpy-compatible array of 51 floats."""
+        """Convert to numpy-compatible array of 63 floats."""
         return [
             # Token features (23)
             float(self.token_length),
@@ -266,11 +305,25 @@ class FeatureVector:
             float(self.json_path_hint),
             self.adjacency_ngram_score,
             self.cross_line_entropy,
+            # Stage B precision improvement features (7)
+            float(self.is_hex_len_40),
+            float(self.is_hex_len_64),
+            float(self.is_test_token),
+            float(self.contains_example_keyword),
+            float(self.file_is_git_related),
+            float(self.file_is_build),
+            float(self.file_is_example),
+            # Stage B generalization improvement features (5)
+            float(self.hex_context_git_keywords),
+            float(self.hex_context_crypto_keywords),
+            float(self.hex_adjacent_assignment_pattern),
+            float(self.hex_in_url_or_dsn),
+            float(self.hex_file_suggests_secret),
         ]
 
     @staticmethod
     def get_feature_names() -> List[str]:
-        """Get ordered list of 51 feature names."""
+        """Get ordered list of 63 feature names."""
         return [
             # Token features (23)
             "token_length",
@@ -327,6 +380,20 @@ class FeatureVector:
             "json_path_hint",
             "adjacency_ngram_score",
             "cross_line_entropy",
+            # Stage B precision improvement features (7)
+            "is_hex_len_40",
+            "is_hex_len_64",
+            "is_test_token",
+            "contains_example_keyword",
+            "file_is_git_related",
+            "file_is_build",
+            "file_is_example",
+            # Stage B generalization improvement features (5)
+            "hex_context_git_keywords",
+            "hex_context_crypto_keywords",
+            "hex_adjacent_assignment_pattern",
+            "hex_in_url_or_dsn",
+            "hex_file_suggests_secret",
         ]
 
     @staticmethod
@@ -785,28 +852,163 @@ def _has_hash_prefix(token: str) -> bool:
     return any(token.startswith(prefix) for prefix in hash_prefixes)
 
 
+# --- STAGE B PRECISION IMPROVEMENT FEATURES ---
+# These features target specific false positive patterns observed in Stage B
+
+
+def _is_hex_exact_length(token: str, length: int) -> bool:
+    """
+    Check if token is exactly `length` hex characters.
+
+    Args:
+        token: The token to check
+        length: Expected length (40 for SHA1/git, 64 for SHA256)
+
+    Returns:
+        True if token is exactly `length` hex characters
+    """
+    if not token or len(token) != length:
+        return False
+    return all(c in HEX_CHARS for c in token)
+
+
+def _is_test_token(token: str) -> bool:
+    """
+    Check if token has test/staging prefix patterns.
+
+    Targets FP pattern: sk_test_*, pk_test_*, rk_test_* tokens that are
+    NOT real secrets but test/sandbox credentials.
+
+    Returns:
+        True if token contains test/staging indicators
+    """
+    if not token:
+        return False
+
+    test_patterns = [
+        '_test_', '_staging_', 'test_', 'TEST_', '_demo_',
+        'sk_test_', 'pk_test_', 'rk_test_',
+    ]
+    return any(p in token for p in test_patterns)
+
+
+def _contains_example_keyword(token: str) -> bool:
+    """
+    Check if token contains known example/placeholder patterns.
+
+    Targets FP pattern: Documentation example tokens like AKIAIOSFODNN7EXAMPLE
+    or placeholder patterns with 'xxxx', 'demo', etc.
+
+    Returns:
+        True if token contains example/placeholder keywords
+    """
+    if not token:
+        return False
+
+    patterns = [
+        'EXAMPLE', 'example', 'xxxx', 'XXXX', 'demo', 'DEMO',
+        'placeholder', 'your_', 'YOUR_', '0000', 'sample', 'SAMPLE',
+        'fake', 'FAKE', 'dummy', 'DUMMY', 'mock', 'MOCK',
+    ]
+    return any(p in token for p in patterns)
+
+
+def _is_git_related_path(file_path: Optional[str]) -> bool:
+    """
+    Check if file path is git-related.
+
+    Targets FP pattern: 40-char hex tokens in .git/ directories or
+    files with git-related names that contain commit SHAs.
+
+    Returns:
+        True if path indicates git-related content
+    """
+    if not file_path:
+        return False
+
+    path_lower = file_path.lower()
+    patterns = [
+        '.git/', '/hash', 'commit', '/objects/', 'refs/',
+        'git-sha', 'gitsha', 'commit_sha', 'commitsha',
+    ]
+    return any(p in path_lower for p in patterns)
+
+
+def _is_build_path(file_path: Optional[str]) -> bool:
+    """
+    Check if file path is in build/dist directories.
+
+    Targets FP pattern: Hex tokens in build artifacts, node_modules,
+    vendor directories that are checksums or asset hashes.
+
+    Returns:
+        True if path is a build/artifact directory
+    """
+    if not file_path:
+        return False
+
+    path_lower = file_path.lower()
+    patterns = [
+        'build/', 'dist/', 'node_modules/', 'vendor/',
+        'target/', '.output/', '__pycache__/', '.cache/',
+        'pkg/', 'bin/', 'obj/', '.next/', '.nuxt/',
+    ]
+    return any(p in path_lower for p in patterns)
+
+
+def _is_example_path(file_path: Optional[str]) -> bool:
+    """
+    Check if file path is in example/docs directories.
+
+    Targets FP pattern: Tokens in documentation, examples, or demo
+    directories that are often placeholder/example credentials.
+
+    Returns:
+        True if path indicates example/documentation content
+    """
+    if not file_path:
+        return False
+
+    # Case-sensitive for README, CONTRIBUTING
+    patterns_case_sensitive = ['README', 'CONTRIBUTING']
+    if any(p in file_path for p in patterns_case_sensitive):
+        return True
+
+    path_lower = file_path.lower()
+    patterns = [
+        'example', 'docs/', 'demo/', 'samples/',
+        'tutorial/', 'fixtures/', 'mock/', 'stub/',
+    ]
+    return any(p in path_lower for p in patterns)
+
+
 def _calculate_ngram_score(var_name: str, ngram_dict: Dict[str, float]) -> float:
     """
     Calculate weighted N-gram score for a variable name.
+
+    STAGE B GENERALIZATION: Changed from MAX to SUM calculation.
+    Using sum requires multiple signals to accumulate a high score,
+    preventing single-feature domination. The 0.3 scale factor ensures
+    that a variable with multiple matches doesn't exceed 1.0 too easily.
 
     Args:
         var_name: The variable/key name to analyze
         ngram_dict: Dictionary mapping N-grams to weights
 
     Returns:
-        0.0-1.0: Weighted match score (max of all matches)
+        0.0-1.0: Weighted sum of matches (capped at 1.0)
     """
     if not var_name:
         return 0.0
 
     var_lower = var_name.lower()
-    max_score = 0.0
+    total_score = 0.0
 
     for ngram, weight in ngram_dict.items():
         if ngram in var_lower:
-            max_score = max(max_score, weight)
+            total_score += weight * 0.5  # Scale factor to prevent score explosion
 
-    return max_score
+    return min(total_score, 1.0)  # Cap at 1.0
 
 
 def _calculate_semantic_context_score(context_text: str) -> float:
@@ -1408,13 +1610,127 @@ def _extract_context_features(
     }
 
 
+def _extract_stage_b_precision_features(token: str, file_path: Optional[str]) -> dict:
+    """
+    Extract Stage B precision improvement features (7 features).
+
+    These features specifically target observed false positive patterns:
+    - 40/64-char hex tokens (git SHAs, SHA256 hashes)
+    - Test-mode tokens (sk_test_*, pk_test_*)
+    - Example/placeholder tokens
+    - Git-related, build, and example file paths
+
+    Args:
+        token: The token to analyze
+        file_path: The file path for context
+
+    Returns:
+        Dict with 7 Stage B precision features
+    """
+    return {
+        "is_hex_len_40": _is_hex_exact_length(token, 40),
+        "is_hex_len_64": _is_hex_exact_length(token, 64),
+        "is_test_token": _is_test_token(token),
+        "contains_example_keyword": _contains_example_keyword(token),
+        "file_is_git_related": _is_git_related_path(file_path),
+        "file_is_build": _is_build_path(file_path),
+        "file_is_example": _is_example_path(file_path),
+    }
+
+
+def _extract_hex_disambiguation_features(
+    token: str,
+    context_text: str,
+    file_path: Optional[str],
+    line_content: str,
+    embedded_in_url: bool = False,
+) -> dict:
+    """
+    Extract Stage B generalization features for hex token disambiguation (5 features).
+
+    These features help distinguish hex secrets from git SHAs/checksums by
+    analyzing the surrounding context rather than the token format.
+
+    Args:
+        token: The token to analyze
+        context_text: Full context (before + current + after lines joined)
+        file_path: The file path for context
+        line_content: The line containing the token
+        embedded_in_url: Whether token was extracted from a URL/DSN
+
+    Returns:
+        Dict with 5 hex disambiguation features
+    """
+    # Only compute these features for hex-like tokens (40 or 64 chars)
+    hex_chars = set("0123456789abcdefABCDEF")
+    is_hex_candidate = (
+        len(token) in (32, 40, 64) and
+        all(c in hex_chars for c in token)
+    )
+
+    if not is_hex_candidate:
+        # Return defaults for non-hex tokens
+        return {
+            "hex_context_git_keywords": False,
+            "hex_context_crypto_keywords": False,
+            "hex_adjacent_assignment_pattern": 0,
+            "hex_in_url_or_dsn": False,
+            "hex_file_suggests_secret": False,
+        }
+
+    context_lower = context_text.lower() if context_text else ""
+    line_lower = line_content.lower() if line_content else ""
+
+    # Feature 1: Git-related keywords in context (suggests NOT a secret)
+    git_keywords = ["commit", "git", "merge", "branch", "checkout", "sha", "rev", "HEAD"]
+    hex_context_git = any(kw in context_lower for kw in git_keywords)
+
+    # Feature 2: Crypto/secret keywords in context (suggests IS a secret)
+    crypto_keywords = ["encrypt", "decrypt", "sign", "key", "secret", "auth", "password", "credential", "token"]
+    hex_context_crypto = any(kw in context_lower for kw in crypto_keywords)
+
+    # Feature 3: Assignment pattern (helps identify source)
+    # 0=unknown, 1=env_var, 2=config_assignment, 3=func_arg
+    assignment_pattern = 0
+    if "os.environ" in line_lower or "process.env" in line_lower or "env[" in line_lower:
+        assignment_pattern = 1  # Environment variable
+    elif ": " in line_content or "= " in line_content or "=" in line_content:
+        assignment_pattern = 2  # Config assignment
+    elif "(" in line_content and ")" in line_content:
+        assignment_pattern = 3  # Function argument
+
+    # Feature 4: Token embedded in URL/DSN
+    hex_in_url = embedded_in_url or any(
+        pattern in line_lower
+        for pattern in ["http://", "https://", "://", "postgres://", "mysql://", "mongodb://"]
+    )
+
+    # Feature 5: File path suggests secrets
+    hex_file_secret = False
+    if file_path:
+        path_lower = file_path.lower()
+        secret_paths = [
+            "secrets/", "secret/", ".env", "credentials/", "credential/",
+            "keys/", "key/", "private/", "auth/", "vault/", "_secrets",
+        ]
+        hex_file_secret = any(sp in path_lower for sp in secret_paths)
+
+    return {
+        "hex_context_git_keywords": hex_context_git,
+        "hex_context_crypto_keywords": hex_context_crypto,
+        "hex_adjacent_assignment_pattern": assignment_pattern,
+        "hex_in_url_or_dsn": hex_in_url,
+        "hex_file_suggests_secret": hex_file_secret,
+    }
+
+
 def extract_features(
     finding: "Finding",
     context: CodeContext,
     regex_match_type: int = 0,
 ) -> FeatureVector:
     """
-    Extract all 51 features from a finding and its context.
+    Extract all 63 features from a finding and its context.
 
     Args:
         finding: The Finding object with token and metadata
@@ -1422,7 +1738,7 @@ def extract_features(
         regex_match_type: Encoded type of regex match (0 = entropy-only)
 
     Returns:
-        FeatureVector with all 51 features
+        FeatureVector with all 63 features
     """
     token = finding.token or ""
 
@@ -1457,11 +1773,25 @@ def extract_features(
 
     context_features = _extract_context_features(context, token, var_name)
 
+    # Extract Stage B precision improvement features
+    stage_b_features = _extract_stage_b_precision_features(token, context.file_path)
+
+    # Extract Stage B generalization improvement features (hex disambiguation)
+    hex_features = _extract_hex_disambiguation_features(
+        token=token,
+        context_text=context.full_context,
+        file_path=context.file_path,
+        line_content=context.line_content,
+        embedded_in_url=token_features.get("embedded_token_flag", False),
+    )
+
     # Combine all features
     return FeatureVector(
         **token_features,
         **var_features,
         **context_features,
+        **stage_b_features,
+        **hex_features,
     )
 
 
@@ -1473,7 +1803,7 @@ def extract_features_from_record(record: dict) -> FeatureVector:
         record: Dict with token, line_content, context_before, context_after, etc.
 
     Returns:
-        FeatureVector with all 51 features
+        FeatureVector with all 63 features
     """
     from Harpocrates.core.result import EvidenceType, Finding
 

@@ -520,10 +520,10 @@ class TwoStageConfig:
     """Configuration for two-stage detection pipeline."""
 
     # Stage A thresholds (high-recall filter)
-    stage_a_threshold_low: float = 0.1  # Below this = definitely not a secret
-    stage_a_threshold_high: float = 0.9  # Above this = definitely a secret
+    stage_a_threshold_low: float = 0.15  # Below this = definitely not a secret
+    stage_a_threshold_high: float = 0.85  # Above this = definitely a secret
     # Stage B threshold (high-precision verifier)
-    stage_b_threshold: float = 0.55  # Threshold for ambiguous cases
+    stage_b_threshold: float = 0.35  # Threshold for ambiguous cases (optimized)
 
 
 class TwoStageVerifier(Verifier):
@@ -535,8 +535,8 @@ class TwoStageVerifier(Verifier):
         - Quickly filters out obvious non-secrets
         - Passes ambiguous cases to Stage B
 
-    Stage B: LightGBM with all 51 features
-        - Optimized for high precision (90%+)
+    Stage B: LightGBM with all 58 features
+        - Optimized for high precision (88%+)
         - Deep context analysis for ambiguous cases
         - Uses full feature set including context
 

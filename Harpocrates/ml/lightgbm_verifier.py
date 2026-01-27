@@ -80,9 +80,15 @@ class LightGBMVerifier(Verifier):
         Get singleton instance of LightGBM verifier.
 
         Useful for reusing the same model across multiple scans.
+        Updates threshold/model_path if provided to an existing instance.
         """
         if cls._instance is None:
             cls._instance = cls(model_path=model_path, threshold=threshold)
+        else:
+            if model_path is not None and model_path != cls._instance._model_path:
+                cls._instance = cls(model_path=model_path, threshold=threshold)
+            elif threshold != cls._instance._threshold:
+                cls._instance._threshold = threshold
         return cls._instance
 
     @classmethod
@@ -248,7 +254,7 @@ class LightGBMVerifier(Verifier):
         is_secret = ml_confidence >= self._threshold
 
         # Combine confidences
-        original_confidence = finding.confidence or 0.5
+        original_confidence = finding.confidence if finding.confidence is not None else 0.5
         combined_confidence = self._combine_confidence(
             original_confidence,
             ml_confidence,
@@ -305,7 +311,7 @@ class LightGBMVerifier(Verifier):
             ml_confidence = probas[i]
             is_secret = ml_confidence >= self._threshold
 
-            original_confidence = finding.confidence or 0.5
+            original_confidence = finding.confidence if finding.confidence is not None else 0.5
             combined_confidence = self._combine_confidence(
                 original_confidence,
                 ml_confidence,

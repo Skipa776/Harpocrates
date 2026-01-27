@@ -64,24 +64,34 @@ from Harpocrates.training.generators.secret_templates import (
     generate_version_hash,
     generate_webhook_url_with_token,
     generate_certificate,
+    # Stage B precision improvement generators
+    generate_test_mode_token,
+    generate_hex_in_build_context,
+    generate_sha_in_config_file,
+    generate_expanded_documentation_example,
+    # Stage B generalization improvement generators (break shortcut learning)
+    generate_hex_secret_with_strong_context,
+    generate_hash_with_secret_varname,
+    generate_secret_with_misleading_varname,
 )
 
 # --- Constants for Ambiguity Control ---
+# UPDATED: Increased ratios to break shortcut learning more aggressively
 
-# 50% of positive samples use safe or neutral variable names (prevents shortcut)
-SAFE_NAME_MIX_RATIO_POSITIVE = 0.5
+# 65% of positive samples use safe or neutral variable names (prevents shortcut)
+SAFE_NAME_MIX_RATIO_POSITIVE = 0.65
 
-# 50% of negative samples use secret-like variable names (prevents shortcut)
-SECRET_NAME_MIX_RATIO_NEGATIVE = 0.5
+# 65% of negative samples use secret-like variable names (prevents shortcut)
+SECRET_NAME_MIX_RATIO_NEGATIVE = 0.65
 
 # --- Data Generator Transformer Settings ---
 # These settings implement context-token disentanglement per skill spec
 
 # Label noise rate for training data (0 for test data)
-LABEL_NOISE_RATE = 0.08
+LABEL_NOISE_RATE = 0.05  # Reduced from 0.08 to avoid too much confusion
 
 # Contrastive pair ratio (same token, different context)
-CONTRASTIVE_RATIO = 0.3
+CONTRASTIVE_RATIO = 0.40  # Increased from 0.3 to break more shortcuts
 
 # Vendor neutralization: ensure vendor strings appear in both classes
 VENDOR_NEUTRALIZATION = True
@@ -111,6 +121,11 @@ POSITIVE_TOKEN_GENERATORS = {
     # Multi-line secrets (PEM keys)
     "pem_private_key": lambda: generate_pem_private_key()[0],
     "ssh_private_key": lambda: generate_ssh_private_key()[0],
+    # --- STAGE B GENERALIZATION IMPROVEMENT (break shortcut learning) ---
+    # Hex secrets with strong context signals (forces context-based learning)
+    "hex_secret_strong_context": lambda: generate_hex_secret_with_strong_context()[0],
+    # Secrets with misleading safe-looking variable names
+    "secret_misleading_varname": lambda: generate_secret_with_misleading_varname()[0],
 }
 
 # Defines token types that are semantically non-secrets (label=0)
@@ -160,6 +175,19 @@ NEGATIVE_TOKEN_GENERATORS = {
     "encoded_public": lambda: generate_encoded_public_data()[0],
     # Version/content hashes for caching/integrity
     "version_hash": lambda: generate_version_hash()[0],
+    # --- STAGE B PRECISION IMPROVEMENT (targeting observed FP patterns) ---
+    # Test-mode tokens (sk_test_*, pk_test_*, etc.) - should NEVER be flagged
+    "test_mode_token": lambda: generate_test_mode_token()[0],
+    # Hex in build/dist contexts (asset hashes, bundle IDs)
+    "hex_in_build": lambda: generate_hex_in_build_context()[0],
+    # SHA hashes in config/lock files
+    "sha_in_config": lambda: generate_sha_in_config_file()[0],
+    # Expanded documentation examples (AKIAIOSFODNN7EXAMPLE, etc.)
+    "expanded_doc_example": lambda: generate_expanded_documentation_example()[0],
+    # --- STAGE B GENERALIZATION IMPROVEMENT (break shortcut learning) ---
+    # Hashes with secret-like variable names (password_hash, api_key_hash, etc.)
+    # Forces model to learn: secret var name + hash content = NOT a secret
+    "hash_secret_varname": lambda: generate_hash_with_secret_varname()[0],
 }
 
 
@@ -172,51 +200,70 @@ NEGATIVE_TOKEN_GENERATORS = {
 # This forces the model to learn from CONTEXT, not token format.
 
 # High-level semantic distribution for positive samples.
+# STAGE B GENERALIZATION: Added hex_secret_strong_context and secret_misleading_varname
+# to break shortcut learning (var name -> label, token format -> label)
 POSITIVE_DISTRIBUTION = {
-    "prefixed_api_key": 0.25,  # AWS, GitHub, Stripe, OpenAI, Slack
-    "jwt": 0.08,
-    "password": 0.08,
-    "hex_secret": 0.15,  # Hex secrets that look like git SHAs
-    "base64_secret": 0.10,  # Base64 secrets that look like data
-    "generic": 0.08,
-    # NEW: Embedded credentials (to train model to find secrets in URLs)
-    "embedded_credential": 0.15,  # DATABASE_URL, webhook URLs, connection strings
-    # NEW: Multi-line secrets (PEM keys)
-    "pem_key": 0.11,  # Private keys in PEM format
+    "prefixed_api_key": 0.20,  # AWS, GitHub, Stripe, OpenAI, Slack (reduced from 0.25)
+    "jwt": 0.06,  # (reduced from 0.08)
+    "password": 0.06,  # (reduced from 0.08)
+    "hex_secret": 0.10,  # Hex secrets that look like git SHAs (reduced from 0.15)
+    "base64_secret": 0.08,  # Base64 secrets that look like data (reduced from 0.10)
+    "generic": 0.06,  # (reduced from 0.08)
+    # Embedded credentials (secrets in URLs)
+    "embedded_credential": 0.12,  # DATABASE_URL, webhook URLs, connection strings (reduced from 0.15)
+    # Multi-line secrets (PEM keys)
+    "pem_key": 0.09,  # Private keys in PEM format (reduced from 0.11)
+    # --- STAGE B GENERALIZATION IMPROVEMENT (break shortcut learning) ---
+    # 40-char hex secrets with UNMISTAKABLE secret context (production_api_secret, etc.)
+    # Forces model to learn: hex format + strong secret context = SECRET
+    "hex_secret_strong_context": 0.12,
+    # Real secrets (AKIA*, ghp_*, sk_live_*, hex) with misleading safe variable names
+    # Forces model to learn: safe var name does NOT mean safe token
+    "secret_misleading_varname": 0.11,
 }
 
 # High-level semantic distribution for negative samples.
 # Updated with ENHANCED HARD NEGATIVES to force context-based learning
 # NOTE: Distribution rebalanced to target 90%+ precision while maintaining recall
+# STAGE B PRECISION UPDATE: Tripled SHA-like negatives and added new categories
+# STAGE B GENERALIZATION: Added hash_secret_varname to break secret_varname=secret shortcut
 NEGATIVE_DISTRIBUTION = {
-    # Standard non-secrets - hex tokens (reduced to make room for hard negatives)
-    "git_sha": 0.04,          # Pure hex (40 chars) - generic context
-    "checksum": 0.03,         # Hex hashes
+    # Standard non-secrets - hex tokens
+    "git_sha": 0.05,          # Pure hex (40 chars) - generic context
+    "checksum": 0.04,         # Hex hashes
     "uuid": 0.02,
     "data": 0.02,
     # Fake prefixed tokens (existing)
-    "fake_prefixed": 0.05,
-    "ambiguous_key": 0.03,
+    "fake_prefixed": 0.03,
+    "ambiguous_key": 0.04,
     # --- HARD NEGATIVES (force context-based learning) ---
-    "doc_example": 0.06,      # Documentation placeholders like AKIAIOSFODNN7EXAMPLE
-    "revoked_token": 0.05,    # Valid format tokens in revocation contexts
-    "test_fixture": 0.06,     # Test tokens like AKIATESTKEY123456789
-    "encoded_config": 0.03,   # Base64 JSON configs, not secrets
-    "high_entropy_safe": 0.05,  # Hashes, session IDs, cache keys
+    "doc_example": 0.02,      # Documentation placeholders
+    "revoked_token": 0.02,    # Valid format tokens in revocation contexts
+    "test_fixture": 0.02,     # Test tokens
+    "encoded_config": 0.02,   # Base64 JSON configs, not secrets
+    "high_entropy_safe": 0.02,  # Hashes, session IDs, cache keys
     # --- GIT SHA EXPLICIT CONTEXT (suppress false positives) ---
-    "git_sha_explicit": 0.10,  # Git SHAs with commit_sha, git_hash var names
-    "content_hash_explicit": 0.07,  # Content hashes with checksum, digest var names
+    "git_sha_explicit": 0.12,  # Git SHAs with commit_sha, git_hash var names
+    "content_hash_explicit": 0.10,  # Content hashes with checksum, digest var names
     # --- CERTIFICATES (public, not secrets) ---
     "certificate": 0.02,  # X.509 certificates
     # --- ENHANCED HARD NEGATIVES (precision boost) ---
-    # These are the critical additions for reaching 90% precision
-    "uuid_auth_context": 0.10,  # UUIDs with api_key, auth_token var names
-    "hash_security_context": 0.08,  # Hashes with password_hash, secret_hash var names
-    "invalid_jwt": 0.05,  # JWT-shaped but invalid/expired tokens
-    "telemetry_id": 0.05,  # Base64 trace_id, correlation_id, request_id
-    "session_id": 0.04,  # Session IDs that look like secrets
-    "encoded_public": 0.03,  # Base64 configs, metadata, feature flags
+    "uuid_auth_context": 0.04,  # UUIDs with api_key, auth_token var names
+    "hash_security_context": 0.04,  # Hashes with password_hash, secret_hash var names
+    "invalid_jwt": 0.02,  # JWT-shaped but invalid/expired tokens
+    "telemetry_id": 0.02,  # Base64 trace_id, correlation_id, request_id
+    "session_id": 0.02,  # Session IDs that look like secrets
+    "encoded_public": 0.02,  # Base64 configs, metadata, feature flags
     "version_hash": 0.02,  # Asset hashes, etags, content hashes
+    # --- STAGE B PRECISION IMPROVEMENT (new categories) ---
+    "test_mode_token": 0.06,  # sk_test_*, pk_test_*, rk_test_* tokens
+    "hex_in_build": 0.06,     # 40/64-char hex in build/dist paths
+    "sha_in_config": 0.04,    # SHA hashes in config/lock files
+    "expanded_doc_example": 0.02,  # AKIAIOSFODNN7EXAMPLE and known examples
+    # --- STAGE B GENERALIZATION IMPROVEMENT (break shortcut learning) ---
+    # Hashes (MD5/SHA1/SHA256) with SECRET-LIKE variable names (password_hash, api_key_hash)
+    # Forces model to learn: secret var name + hash content = NOT a secret
+    "hash_secret_varname": 0.10,
 }
 
 # Mapping from high-level positive types to specific token generators
@@ -230,10 +277,15 @@ POSITIVE_TYPE_TO_GENERATOR = {
     "hex_secret": ["hex_secret"],  # Looks like SHA but IS a secret
     "base64_secret": ["base64_secret"],  # Looks like data but IS a secret
     "generic": ["generic_secret"],
-    # NEW: Embedded credentials
+    # Embedded credentials
     "embedded_credential": ["database_url", "webhook_url", "connection_string"],
-    # NEW: PEM keys
+    # PEM keys
     "pem_key": ["pem_private_key", "ssh_private_key"],
+    # --- STAGE B GENERALIZATION IMPROVEMENT ---
+    # Hex secrets with strong context (breaks hex=safe shortcut)
+    "hex_secret_strong_context": ["hex_secret_strong_context"],
+    # Secrets with misleading safe var names (breaks safe_varname=safe shortcut)
+    "secret_misleading_varname": ["secret_misleading_varname"],
 }
 
 # Mapping from high-level negative types to specific token generators
@@ -265,6 +317,14 @@ NEGATIVE_TYPE_TO_GENERATOR = {
     "session_id": ["session_id"],  # Session IDs
     "encoded_public": ["encoded_public"],  # Config/metadata blobs
     "version_hash": ["version_hash"],  # Asset/content hashes
+    # --- STAGE B PRECISION IMPROVEMENT ---
+    "test_mode_token": ["test_mode_token"],  # sk_test_*, pk_test_*, rk_test_*
+    "hex_in_build": ["hex_in_build"],  # 40/64-char hex in build/dist paths
+    "sha_in_config": ["sha_in_config"],  # SHA hashes in config/lock files
+    "expanded_doc_example": ["expanded_doc_example"],  # Known example tokens
+    # --- STAGE B GENERALIZATION IMPROVEMENT ---
+    # Hashes with secret-like var names (breaks secret_varname=secret shortcut)
+    "hash_secret_varname": ["hash_secret_varname"],
 }
 
 # Languages to use for context generation
@@ -370,16 +430,27 @@ def generate_training_record(positive: bool) -> Dict[str, Any]:
         The record contains ONLY: token, line_content, context_before,
         context_after, file_path, label.
     """
-    # For specialized semantic types, use their specific var_name
+    # For specialized semantic types, use their specific var_name and file_path
     specialized_var_name = None
+    specialized_file_path = None
 
     if positive:
         # 1. Select a high-level positive type (e.g., "api_key")
         semantic_type = _weighted_choice(POSITIVE_DISTRIBUTION)
         # 2. Select a specific generator from that type (e.g., "github_token")
         generator_key = random.choice(POSITIVE_TYPE_TO_GENERATOR[semantic_type])
-        # 3. Generate the token
-        token = POSITIVE_TOKEN_GENERATORS[generator_key]()
+
+        # 3. Handle specialized generators that return tuples with var_name/file_path
+        # --- STAGE B GENERALIZATION IMPROVEMENT generators ---
+        if semantic_type == "hex_secret_strong_context":
+            # 40-char hex secrets with strong secret context
+            token, specialized_var_name, specialized_file_path, _ = generate_hex_secret_with_strong_context()
+        elif semantic_type == "secret_misleading_varname":
+            # Real secrets with misleading safe-looking variable names
+            token, specialized_var_name, specialized_file_path, _ = generate_secret_with_misleading_varname()
+        else:
+            # 3. Generate the token using standard generator
+            token = POSITIVE_TOKEN_GENERATORS[generator_key]()
         label = 1
     else:
         # 1. Select a high-level negative type (e.g., "ambiguous_key")
@@ -411,6 +482,23 @@ def generate_training_record(positive: bool) -> Dict[str, Any]:
         elif semantic_type == "version_hash":
             # Version/content hash with versioning variable name
             token, specialized_var_name, _ = generate_version_hash()
+        # --- STAGE B PRECISION IMPROVEMENT generators ---
+        elif semantic_type == "test_mode_token":
+            # Test-mode tokens with test context
+            token, specialized_var_name, specialized_file_path = generate_test_mode_token()
+        elif semantic_type == "hex_in_build":
+            # Hex in build/dist contexts
+            token, specialized_var_name, specialized_file_path = generate_hex_in_build_context()
+        elif semantic_type == "sha_in_config":
+            # SHA in config/lock files
+            token, specialized_var_name, specialized_file_path = generate_sha_in_config_file()
+        elif semantic_type == "expanded_doc_example":
+            # Known example tokens from vendor docs
+            token, specialized_var_name, specialized_file_path = generate_expanded_documentation_example()
+        # --- STAGE B GENERALIZATION IMPROVEMENT generators ---
+        elif semantic_type == "hash_secret_varname":
+            # Hash with secret-like var name (password_hash, api_key_hash) - NOT a secret
+            token, specialized_var_name, specialized_file_path, _ = generate_hash_with_secret_varname()
         else:
             token = NEGATIVE_TOKEN_GENERATORS[generator_key]()
         label = 0
@@ -426,12 +514,15 @@ def generate_training_record(positive: bool) -> Dict[str, Any]:
     context_type = random.choice(CONTEXT_TYPES)
 
     # 6. Generate the context using the unified context generator
-    line_content, context_before, context_after, file_path = generate_context(
+    line_content, context_before, context_after, generated_file_path = generate_context(
         token=token,
         var_name=var_name,
         language=language,
         context_type=context_type,
     )
+
+    # Use specialized file path if available, otherwise use generated one
+    file_path = specialized_file_path if specialized_file_path else generated_file_path
 
     # 7. Return a clean record with no leaky fields
     return {
@@ -622,6 +713,191 @@ def generate_adversarial_test_data(
     return records
 
 
+def generate_targeted_adversarial_data(
+    count: int = 5000,
+    seed: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Generate targeted adversarial samples to break specific shortcut patterns.
+
+    This function creates samples that specifically target the shortcuts identified
+    in Stage B analysis:
+    1. Hex secrets (break hex=safe shortcut)
+    2. Prefixed non-secrets (break prefix=secret shortcut)
+    3. Secret-varname non-secrets (break varname shortcut)
+    4. Safe-varname secrets (break safe-varname shortcut)
+    5. Config-file non-secrets (break file-path shortcut)
+    6. Test-file secrets (break test-context shortcut)
+
+    Args:
+        count: Total number of adversarial samples to generate
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of adversarial training records with metadata
+    """
+    if seed is not None:
+        random.seed(seed)
+
+    records = []
+    per_category = count // 6
+
+    # Category 1: Hex secrets (40/64 char hex that ARE secrets)
+    # Breaks: hex format = not a secret shortcut
+    for _ in range(per_category):
+        token, var_name, file_path, _ = generate_hex_secret_with_strong_context()
+        line_content, context_before, context_after, _ = generate_context(
+            token=token,
+            var_name=var_name,
+            language=random.choice(LANGUAGES),
+            context_type="production",
+        )
+        records.append({
+            "token": token,
+            "line_content": line_content,
+            "context_before": context_before,
+            "context_after": context_after,
+            "file_path": file_path,
+            "label": 1,
+            "_adversarial": True,
+            "_scenario": "hex_secret",
+        })
+
+    # Category 2: Prefixed non-secrets (AKIA, ghp_, sk_ but NOT secrets)
+    # Breaks: vendor prefix = secret shortcut
+    for _ in range(per_category):
+        token = generate_fake_prefixed_token()
+        var_name = random.choice([
+            "example_key", "mock_token", "test_api_key", "placeholder",
+            "sample_token", "dummy_key", "demo_token", "stub_key",
+        ])
+        line_content, context_before, context_after, file_path = generate_context(
+            token=token,
+            var_name=var_name,
+            language=random.choice(LANGUAGES),
+            context_type="documentation",
+        )
+        records.append({
+            "token": token,
+            "line_content": line_content,
+            "context_before": context_before,
+            "context_after": context_after,
+            "file_path": file_path,
+            "label": 0,
+            "_adversarial": True,
+            "_scenario": "prefixed_nonsecret",
+        })
+
+    # Category 3: Secret-varname non-secrets (password_hash, api_key_hash, etc.)
+    # Breaks: secret variable name = secret shortcut
+    for _ in range(per_category):
+        token, var_name, file_path, _ = generate_hash_with_secret_varname()
+        line_content, context_before, context_after, _ = generate_context(
+            token=token,
+            var_name=var_name,
+            language=random.choice(LANGUAGES),
+            context_type="production",
+        )
+        records.append({
+            "token": token,
+            "line_content": line_content,
+            "context_before": context_before,
+            "context_after": context_after,
+            "file_path": file_path,
+            "label": 0,
+            "_adversarial": True,
+            "_scenario": "secret_varname_nonsecret",
+        })
+
+    # Category 4: Safe-varname secrets (build_id, version_hash with real secrets)
+    # Breaks: safe variable name = not a secret shortcut
+    for _ in range(per_category):
+        token, var_name, file_path, _ = generate_secret_with_misleading_varname()
+        line_content, context_before, context_after, _ = generate_context(
+            token=token,
+            var_name=var_name,
+            language=random.choice(LANGUAGES),
+            context_type="production",
+        )
+        records.append({
+            "token": token,
+            "line_content": line_content,
+            "context_before": context_before,
+            "context_after": context_after,
+            "file_path": file_path,
+            "label": 1,
+            "_adversarial": True,
+            "_scenario": "safe_varname_secret",
+        })
+
+    # Category 5: Config-file non-secrets (secrets/config.py with non-secrets)
+    # Breaks: secrets file path = secret shortcut
+    for _ in range(per_category):
+        token = generate_git_sha()  # Non-secret hex
+        var_name = random.choice([
+            "commit_sha", "git_hash", "file_checksum", "content_digest",
+        ])
+        secret_looking_paths = [
+            "secrets/config.py", "config/secrets.yaml", ".env.secrets",
+            "credentials/auth.json", "keys/production.py",
+        ]
+        line_content, context_before, context_after, _ = generate_context(
+            token=token,
+            var_name=var_name,
+            language=random.choice(LANGUAGES),
+            context_type="configuration",
+        )
+        records.append({
+            "token": token,
+            "line_content": line_content,
+            "context_before": context_before,
+            "context_after": context_after,
+            "file_path": random.choice(secret_looking_paths),
+            "label": 0,
+            "_adversarial": True,
+            "_scenario": "config_nonsecret",
+        })
+
+    # Category 6: Test-file secrets (real secrets in test files)
+    # Breaks: test file = not a secret shortcut
+    remaining = count - len(records)
+    for _ in range(remaining):
+        # Generate a real secret
+        secret_generators = [
+            generate_github_token,
+            lambda: generate_stripe_key(live=True),
+            generate_openai_key,
+            lambda: generate_aws_key()[1],
+        ]
+        token = random.choice(secret_generators)()
+        var_name = random.choice([
+            "production_key", "live_api_key", "real_secret", "actual_token",
+        ])
+        test_paths = [
+            "tests/test_api.py", "spec/auth_spec.js", "__tests__/config.test.ts",
+            "test/integration/secrets_test.go", "tests/fixtures/real_keys.py",
+        ]
+        line_content, context_before, context_after, _ = generate_context(
+            token=token,
+            var_name=var_name,
+            language=random.choice(LANGUAGES),
+            context_type="test",  # Test context but real secret
+        )
+        records.append({
+            "token": token,
+            "line_content": line_content,
+            "context_before": context_before,
+            "context_after": context_after,
+            "file_path": random.choice(test_paths),
+            "label": 1,  # Still a secret even in test file
+            "_adversarial": True,
+            "_scenario": "test_file_secret",
+        })
+
+    random.shuffle(records)
+    return records
+
+
 def generate_contrastive_pair(record: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generate a contrastive example: same token, different context, opposite label.
@@ -633,6 +909,13 @@ def generate_contrastive_pair(record: Dict[str, Any]) -> Dict[str, Any]:
     """
     token = record["token"]
     original_label = record["label"]
+
+    # Guard: don't flip labels for tokens with known secret prefixes
+    # (a real AWS key is dangerous regardless of context)
+    KNOWN_SECRET_PREFIXES = ("AKIA", "ASIA", "ghp_", "gho_", "ghs_", "ghr_",
+                             "sk_live_", "rk_live_", "sk-proj-")
+    if original_label == 1 and any(token.startswith(p) for p in KNOWN_SECRET_PREFIXES):
+        return None  # Skip contrastive pair for known-format secrets
 
     if original_label == 1:
         # Secret token in benign context → now it's NOT a secret (revoked, example, etc.)
@@ -899,7 +1182,6 @@ def generate_transformed_training_data(
     mode: str = "train",
     noise_rate: float = 0.08,
     contrastive_ratio: float = 0.3,
-    vendor_neutralization: bool = True,
     validate: bool = True,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
@@ -920,7 +1202,6 @@ def generate_transformed_training_data(
         mode: "train" or "test"
         noise_rate: Label noise rate (train only)
         contrastive_ratio: Fraction of samples to generate contrastive pairs for
-        vendor_neutralization: Ensure vendor strings in both classes
         validate: Run dataset quality validation
 
     Returns:
@@ -944,7 +1225,10 @@ def generate_transformed_training_data(
     if contrastive_ratio > 0:
         contrastive_count = int(len(records) * contrastive_ratio)
         samples_for_contrastive = random.sample(records, min(contrastive_count, len(records)))
-        contrastive_pairs = [generate_contrastive_pair(r) for r in samples_for_contrastive]
+        contrastive_pairs = [
+            p for p in (generate_contrastive_pair(r) for r in samples_for_contrastive)
+            if p is not None
+        ]
         records.extend(contrastive_pairs)
         report["transformations"].append({
             "type": "contrastive_pairs",
@@ -1111,7 +1395,6 @@ def main() -> int:
             mode=args.mode,
             noise_rate=args.noise_rate if args.mode == "train" else 0,
             contrastive_ratio=args.contrastive_ratio if args.mode == "train" else 0,
-            vendor_neutralization=True,
         )
         # Save validation report if requested
         if args.report:

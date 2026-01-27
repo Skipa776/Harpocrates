@@ -206,7 +206,7 @@ def train_stage_b(
     if verbose:
         print("\n=== STAGE B: HIGH-PRECISION CONTEXT VERIFIER ===")
         print(f"Ambiguous samples: {len(y_train_ambiguous)} / {len(y_train)}")
-        print(f"Using all 51 features (including 5 new discriminative features)")
+        print(f"Using all 63 features (including hex disambiguation features)")
 
     if len(X_train_ambiguous) < 100:
         if verbose:
@@ -222,23 +222,29 @@ def train_stage_b(
     if verbose:
         print(f"Class balance: {n_positive} positive, {n_negative} negative")
 
-    # LightGBM parameters optimized for HIGH PRECISION
-    # - Deeper trees for complex patterns
-    # - Lower scale_pos_weight to reduce false positives
-    # - Strong regularization
+    # LightGBM parameters optimized for HIGH PRECISION + GENERALIZATION
+    # STAGE B GENERALIZATION UPDATE:
+    # - Deeper trees for complex patterns (max_depth: 8→10)
+    # - Lower learning rate for better generalization (0.05→0.03)
+    # - More trees (200→300)
+    # - More leaves for capacity (31→63)
+    # - Stronger regularization (L1/L2: 0.1→0.2)
+    # - More conservative class weighting (0.8→0.7)
+    # - Feature dropout to prevent overfitting (feature_fraction_bynode)
     params = {
         "objective": "binary",
         "metric": ["binary_logloss", "auc"],
-        "max_depth": 8,
-        "learning_rate": 0.05,
-        "n_estimators": 200,
-        "num_leaves": 31,
-        "min_child_samples": 20,
-        "scale_pos_weight": scale_pos_weight * 0.8,  # Bias toward negatives
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "reg_alpha": 0.1,
-        "reg_lambda": 0.1,
+        "max_depth": 10,  # Was 8 → deeper for complex patterns
+        "learning_rate": 0.03,  # Was 0.05 → slower for better generalization
+        "n_estimators": 300,  # Was 200
+        "num_leaves": 63,  # Was 31 → more capacity
+        "min_child_samples": 30,  # Was 20 → more regularization
+        "scale_pos_weight": scale_pos_weight * 0.7,  # Was 0.8 → more conservative
+        "subsample": 0.7,  # Was 0.8
+        "colsample_bytree": 0.7,  # Was 0.8
+        "reg_alpha": 0.2,  # Was 0.1 → stronger L1
+        "reg_lambda": 0.2,  # Was 0.1 → stronger L2
+        "feature_fraction_bynode": 0.7,  # NEW: feature dropout per node
         "random_state": seed,
         "n_jobs": -1,
         "verbose": -1,
@@ -586,7 +592,7 @@ def main():
         "stage_b": {
             "model_type": "lightgbm",
             "features": "all",
-            "feature_count": 51,
+            "feature_count": 58,
             "threshold": stage_b_threshold,
             "metrics": stage_b_metrics,
         },

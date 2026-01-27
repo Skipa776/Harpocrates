@@ -1,0 +1,57 @@
+version: "3.8"
+
+services:
+  harpocrates-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "${HARPOCRATES_PORT:-8000}:8000"
+    environment:
+      - HARPOCRATES_HOST=0.0.0.0
+      - HARPOCRATES_PORT=8000
+      - HARPOCRATES_WORKERS=${HARPOCRATES_WORKERS:-4}
+      - HARPOCRATES_API_KEY=${HARPOCRATES_API_KEY:-}
+      - HARPOCRATES_ML_ENABLED=${HARPOCRATES_ML_ENABLED:-true}
+      - HARPOCRATES_ML_MODE=${HARPOCRATES_ML_MODE:-two_stage}
+      - HARPOCRATES_RATE_LIMIT_ENABLED=${HARPOCRATES_RATE_LIMIT_ENABLED:-true}
+      - HARPOCRATES_RATE_LIMIT_REQUESTS=${HARPOCRATES_RATE_LIMIT_REQUESTS:-100}
+      - HARPOCRATES_RATE_LIMIT_WINDOW=${HARPOCRATES_RATE_LIMIT_WINDOW:-60}
+    volumes:
+      # Mount ML models directory for custom models
+      - ./Harpocrates/ml/models:/app/Harpocrates/ml/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # Development configuration with hot reload
+  harpocrates-api-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "${HARPOCRATES_PORT:-8000}:8000"
+    environment:
+      - HARPOCRATES_HOST=0.0.0.0
+      - HARPOCRATES_PORT=8000
+      - HARPOCRATES_WORKERS=1
+      - HARPOCRATES_DEBUG=true
+      - HARPOCRATES_ML_ENABLED=true
+      - HARPOCRATES_RATE_LIMIT_ENABLED=false
+    volumes:
+      # Mount source code for development
+      - ./Harpocrates:/app/Harpocrates
+      - ./Harpocrates/ml/models:/app/Harpocrates/ml/models
+    command: ["python", "-m", "uvicorn", "Harpocrates.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    profiles:
+      - dev

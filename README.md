@@ -1,25 +1,44 @@
-# Harpocrates
+<p align="center">
+  <img src="Image%20Background%20Remover.png" alt="Harpocrates - Silence" width="400"/>
+</p>
 
-**ML-powered secrets detection for code repositories**
+<h1 align="center">🤫 Harpocrates</h1>
+
+<p align="center">
+  <strong>ML-powered secrets detection for code repositories</strong><br/>
+  <em>Named after the Greek god of silence and secrets</em>
+</p>
+
+<p align="center">
+  <a href="#-installation">Install</a> •
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-detected-secret-types">Detections</a> •
+  <a href="#-ml-training-advanced">ML Training</a> •
+  <a href="#%EF%B8%8F-development">Development</a>
+</p>
+
+---
 
 Harpocrates is a CLI-first secrets detection tool that combines pattern matching with machine learning to identify credentials, API keys, and tokens in your codebase while minimizing false positives.
 
-## Features
+## ✨ Features
 
-- **Three-Phase Detection Engine**
-  - **Regex Patterns**: High-precision detection for known secret formats (AWS, GitHub, Stripe, etc.)
-  - **Entropy Analysis**: Shannon entropy scoring for unknown high-randomness tokens
-  - **ML Verification** (opt-in): Two-stage XGBoost/LightGBM pipeline achieves **90.5% precision** and **94.8% recall**
+- 🔍 **Three-Phase Detection Engine**
+  - 📐 **Regex Patterns** — High-precision detection for known secret formats (AWS, GitHub, Stripe, etc.)
+  - 📊 **Entropy Analysis** — Shannon entropy scoring for unknown high-randomness tokens
+  - 🤖 **ML Verification** (opt-in) — Two-stage XGBoost/LightGBM pipeline achieves **88.1% precision** and **97.5% recall**
 
-- **Context-Aware Classification**: Distinguishes between real secrets and false positives like Git SHAs, UUIDs, and test fixtures by analyzing variable names and surrounding code
+- 🧠 **Context-Aware Classification** — Distinguishes between real secrets and false positives like Git SHAs, UUIDs, and test fixtures by analyzing variable names and surrounding code
 
-- **Anti-Shortcut Design**: ML model learns from context, not token format, preventing overfitting to simple patterns
+- 🛡️ **Anti-Shortcut Design** — ML model learns from context, not token format, preventing overfitting to simple patterns
 
-- **Safety First**: Secrets are redacted by default to prevent leakage in logs
+- 🔒 **Safety First** — Secrets are redacted by default to prevent leakage in logs
 
-- **CI/CD Ready**: JSON output and exit codes for pipeline integration
+- ⚙️ **CI/CD Ready** — JSON output and exit codes for pipeline integration
 
-## Installation
+---
+
+## 📦 Installation
 
 ### Basic Installation
 
@@ -46,7 +65,9 @@ pip install -e ".[ml]"
 pip install -e ".[dev,ml]"
 ```
 
-## Quick Start
+---
+
+## 🚀 Quick Start
 
 ### Basic Scan
 
@@ -61,7 +82,7 @@ harpocrates scan ./my_project
 harpocrates scan ./my_project --json
 ```
 
-### ML-Enhanced Scan (Fewer False Positives)
+### 🤖 ML-Enhanced Scan (Fewer False Positives)
 
 ```bash
 # Enable ML verification (recommended)
@@ -71,7 +92,9 @@ harpocrates scan ./my_project --ml
 harpocrates scan ./my_project --ml --ml-threshold 0.3
 ```
 
-## Usage Examples
+---
+
+## 💡 Usage Examples
 
 ### Create Test File
 
@@ -101,7 +124,9 @@ harpocrates scan test_secrets.txt --ml
 harpocrates scan test_secrets.txt --json
 ```
 
-## CLI Reference
+---
+
+## 📖 CLI Reference
 
 ```
 harpocrates scan [OPTIONS] PATH
@@ -124,29 +149,33 @@ Options:
 
 | Code | Meaning |
 |------|---------|
-| 0    | No secrets found |
-| 1    | Secrets detected |
-| 2    | Error (file not found, etc.) |
+| ✅ `0` | No secrets found |
+| 🚨 `1` | Secrets detected |
+| ❌ `2` | Error (file not found, etc.) |
 
-## Detected Secret Types
+---
+
+## 🎯 Detected Secret Types
 
 | Type | Pattern | Example |
 |------|---------|---------|
-| AWS Access Key | `AKIA...` | `AKIAIOSFODNN7EXAMPLE` |
-| AWS Secret Key | 40-char base64 | `wJalrXUtnFEMI/K7MDENG...` |
-| GitHub Token | `ghp_`, `gho_`, `github_pat_` | `ghp_xxxxxxxxxxxx` |
-| Stripe Key | `sk_live_`, `sk_test_` | `sk_live_xxxxx` |
-| OpenAI Key | `sk-` | `sk-xxxxxxxx` |
-| Slack Token | `xoxb-`, `xoxp-` | `xoxb-xxx-xxx` |
-| GCP API Key | `AIza` | `AIzaSyxxxxxxxxx` |
-| JWT | `eyJ...` (3 parts) | `eyJhbGci...` |
-| Azure Key Vault | URL pattern | `*.vault.azure.net` |
+| 🔑 AWS Access Key | `AKIA...` | `AKIAIOSFODNN7EXAMPLE` |
+| 🔐 AWS Secret Key | 40-char base64 | `wJalrXUtnFEMI/K7MDENG...` |
+| 🐙 GitHub Token | `ghp_`, `gho_`, `github_pat_` | `ghp_xxxxxxxxxxxx` |
+| 💳 Stripe Key | `sk_live_`, `sk_test_` | `sk_live_xxxxx` |
+| 🧠 OpenAI Key | `sk-` | `sk-xxxxxxxx` |
+| 💬 Slack Token | `xoxb-`, `xoxp-` | `xoxb-xxx-xxx` |
+| ☁️ GCP API Key | `AIza` | `AIzaSyxxxxxxxxx` |
+| 🎫 JWT | `eyJ...` (3 parts) | `eyJhbGci...` |
+| 🏢 Azure Key Vault | URL pattern | `*.vault.azure.net` |
 
-## ML Training (Advanced)
+---
+
+## 🧪 ML Training (Advanced)
 
 Train your own model for improved accuracy on your codebase.
 
-### Quick Start (Optimal Settings)
+### ⚡ Quick Start (Optimal Settings)
 
 ```bash
 # Generate training and test data
@@ -163,7 +192,7 @@ harpocrates train -d train.jsonl \
 harpocrates scan ./my_project --ml
 ```
 
-### 1. Generate Training Data
+### 1️⃣ Generate Training Data
 
 ```bash
 # Generate 10,000 training examples (CLI command)
@@ -179,7 +208,7 @@ harpocrates generate-data -n 10000 --adversarial -o training_data.jsonl
 harpocrates generate-data -n 10000 --split -o data/training.jsonl
 ```
 
-### 2. Train Model
+### 2️⃣ Train Model
 
 ```bash
 # Train XGBoost model (default)
@@ -202,7 +231,11 @@ harpocrates train -d training_data.jsonl --cross-validate --folds 5
 
 # Custom training parameters
 harpocrates train -d training_data.jsonl --max-depth 8 --n-estimators 200
+```
 
+#### 🎚️ Precision-Recall Tradeoffs
+
+```bash
 # HIGH RECALL (recommended) - catches 98.6% of secrets
 harpocrates train -d training_data.jsonl \
   --model-type ensemble \
@@ -222,19 +255,19 @@ harpocrates train -d training_data.jsonl \
   --val-data test_data.jsonl
 ```
 
-### Two-Stage Detection (Recommended)
+### 🏗️ Two-Stage Detection (Recommended)
 
 Harpocrates uses a two-stage detection pipeline for optimal performance:
 
 | Stage | Model | Features | Purpose | Performance |
 |-------|-------|----------|---------|-------------|
-| **A** | XGBoost | 23 token features | Fast high-recall filter | 98% recall |
-| **B** | LightGBM | 51 full features | Deep context verification | 90%+ precision |
+| 🅰️ **Stage A** | XGBoost | 23 token features | Fast high-recall filter | 98% recall |
+| 🅱️ **Stage B** | LightGBM | 58 full features | Deep context verification | 88%+ precision |
 
-**Combined Performance (v2.4):**
-- **Precision**: 90.5% (of flagged items are real secrets)
-- **Recall**: 94.8% (catches 95% of all secrets)
-- **F1 Score**: 0.926
+**📈 Combined Performance (v2.5):**
+- 🎯 **Precision**: 88.14% (of flagged items are real secrets)
+- 🔎 **Recall**: 97.48% (catches 97.5% of all secrets)
+- ⚖️ **F1 Score**: ~0.925
 
 Train the two-stage model:
 ```bash
@@ -250,7 +283,7 @@ python -m Harpocrates.training.train_two_stage \
   --seed 42
 ```
 
-### Optimal Training Commands (Achieving 90%+ Precision & Recall)
+### 🏆 Optimal Training Commands (Achieving 90%+ Precision & Recall)
 
 The following commands were used to achieve the best model performance:
 
@@ -269,45 +302,50 @@ with open('Harpocrates/training/data/training_data_v3.pkl', 'wb') as f:
 python scripts/train_v4.py
 ```
 
-**Key optimizations that achieved 90%+ on both metrics:**
+<details>
+<summary>🔧 <strong>Key optimizations that achieved 90%+ on both metrics</strong></summary>
 
-1. **Improved Data Generator**: Modified `_get_var_name()` to ensure negative samples with known secret prefixes (AKIA, ghp_, sk_) always use clearly non-secret variable names (e.g., `placeholder`, `example_key`, `mock_token`). This prevents "impossible-to-classify" samples that hurt precision.
+1. **Improved Data Generator** — Modified `_get_var_name()` to ensure negative samples with known secret prefixes (AKIA, ghp_, sk_) always use clearly non-secret variable names (e.g., `placeholder`, `example_key`, `mock_token`). This prevents "impossible-to-classify" samples that hurt precision.
 
-2. **51 Features (up from 46)**: Added 5 new discriminative features:
-   - `is_uuid_v4` - Detects UUID v4 format (strong non-secret signal)
-   - `is_known_hash_length` - Token length matches MD5/SHA1/SHA256/SHA512
-   - `jwt_structure_valid` - JWT has valid JSON header
-   - `entropy_charset_mismatch` - High entropy but low charset diversity
-   - `has_hash_prefix` - Starts with sha256:, md5:, etc.
+2. **58 Features (up from 51)** — Added 7 new Stage B precision features:
+   - `is_hex_len_40` — Token is exactly 40 hex chars (git SHA)
+   - `is_hex_len_64` — Token is exactly 64 hex chars (SHA256)
+   - `is_test_token` — Has _test_, _staging_ prefix (e.g., sk_test_*)
+   - `contains_example_keyword` — Contains EXAMPLE, xxxx, demo, placeholder
+   - `file_is_git_related` — Path contains .git/, hash, commit
+   - `file_is_build` — Path contains build/, dist/, node_modules/
+   - `file_is_example` — Path contains example/, docs/, demo/
 
 3. **Stage A/B Thresholds**:
    - Stage A: threshold_low=0.15, threshold_high=0.85
-   - Stage B: threshold=0.28
+   - Stage B: threshold=0.35
 
 4. **Hyperparameters**:
    - Stage A (XGBoost): max_depth=5, n_estimators=120, scale_pos_weight=1.5x
    - Stage B (LightGBM): max_depth=12, n_estimators=300, scale_pos_weight=0.5x
 
-**Confusion Matrix (5,000 validation samples):**
-```
-              Predicted
-              Neg    Pos
-Actual Neg   2248   248   (91% TNR)
-Actual Pos    130  2374   (95% TPR)
-```
+5. **Stage B Precision Improvement (v2.5):**
+   - Stage B precision improved from 59.2% → 88.14% (+28.9 percentage points)
+   - Added 4 new hard negative generators targeting observed FP patterns:
+     - `test_mode_token`: Stripe test-mode tokens (sk_test_*, pk_test_*)
+     - `hex_in_build`: 40/64-char hex in build/dist/git contexts
+     - `sha_in_config`: SHA strings in config files
+     - `expanded_doc_example`: Known vendor example tokens (AKIAIOSFODNN7EXAMPLE, etc.)
 
-### Legacy Single-Stage Model
+</details>
+
+### 📊 Legacy Single-Stage Model
 
 For backward compatibility, single-stage ensemble training is still available:
 
 | Target Precision | Precision | Recall | F1 Score | Threshold | Use Case |
 |------------------|-----------|--------|----------|-----------|----------|
-| 0.70 | 70% | 99%+ | 0.82 | ~0.10 | Maximum security - catch everything |
-| **0.75** | **75%** | **98.6%** | **0.852** | **0.19** | **Recommended - high recall** |
-| 0.85 | 85% | ~90% | 0.87 | ~0.35 | Balanced |
-| 0.95 | 95% | ~65% | ~0.77 | ~0.60 | Minimal noise - may miss secrets |
+| 0.70 | 70% | 99%+ | 0.82 | ~0.10 | 🔒 Maximum security |
+| **0.75** | **75%** | **98.6%** | **0.852** | **0.19** | ⭐ **Recommended** |
+| 0.85 | 85% | ~90% | 0.87 | ~0.35 | ⚖️ Balanced |
+| 0.95 | 95% | ~65% | ~0.77 | ~0.60 | 🎯 Minimal noise |
 
-### Training Options
+### 📋 Training Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -323,7 +361,7 @@ For backward compatibility, single-stage ensemble training is still available:
 | `--n-estimators` | Number of trees | 100 |
 | `--seed` | Random seed for reproducibility | 42 |
 
-### 3. Evaluate Model
+### 3️⃣ Evaluate Model
 
 ```bash
 # Evaluate XGBoost model
@@ -349,7 +387,7 @@ python -m Harpocrates.training.evaluate \
   --error-examples 10
 ```
 
-### Evaluation Options
+### 📋 Evaluation Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -361,11 +399,13 @@ python -m Harpocrates.training.evaluate \
 | `--error-examples` | Number of error examples to show | 5 |
 | `--output, -o` | Output JSON file for detailed results | None |
 
-## How ML Verification Works
+---
 
-The ML verifier extracts **51 features** from each finding, designed to learn from **context rather than token format** to avoid shortcut learning:
+## 🧬 How ML Verification Works
 
-**Token Features (23)**
+The ML verifier extracts **58 features** from each finding, designed to learn from **context rather than token format** to avoid shortcut learning:
+
+### 🔤 Token Features (23)
 - Length, entropy, character class composition
 - Base64 pattern matching, padding detection
 - Token structure score (random vs structured)
@@ -374,17 +414,17 @@ The ML verifier extracts **51 features** from each finding, designed to learn fr
 - Vendor prefix boost
 - Token span offset, multiline block detection
 - Embedded token flag, quote type
-- **NEW**: UUID v4 detection, hash length matching, JWT validation
-- **NEW**: Entropy-charset mismatch, hash prefix detection
+- UUID v4 detection, hash length matching, JWT validation
+- Entropy-charset mismatch, hash prefix detection
 
-**Variable Name Features (10)**
+### 📝 Variable Name Features (10)
 - Contains secret keywords (`api_key`, `password`, `token`)
 - Contains safe keywords (`commit`, `sha`, `uuid`, `hash`)
 - N-gram secret/safe scoring
 - Naming style (camelCase, CONSTANT_CASE)
 - Assignment type detection
 
-**Context Features (18)**
+### 📂 Context Features (18)
 - File type (test file, config file, high-risk extensions)
 - Surrounding code mentions (git, test, mock, hash)
 - Import statements, function definitions
@@ -395,20 +435,26 @@ The ML verifier extracts **51 features** from each finding, designed to learn fr
 - JSON path hint, adjacency N-gram score
 - Cross-line entropy analysis
 
-### Anti-Shortcut Design
+### 🎯 Stage B Precision Features (7) — *New in v2.5*
+- `is_hex_len_40` / `is_hex_len_64` — Exact 40/64 hex char detection
+- `is_test_token` — Test/staging prefix patterns
+- `contains_example_keyword` — Example/placeholder patterns
+- `file_is_git_related` — Git-related paths
+- `file_is_build` — Build/dist directory paths
+- `file_is_example` — Documentation/example paths
+
+### 🛡️ Anti-Shortcut Design
 
 The following features were **intentionally removed** to prevent the model from learning trivial patterns:
-- `has_known_prefix` - Would allow model to simply match `AKIA*`, `ghp_*`, `sk-*`
-- `prefix_type` - Would directly encode secret type from prefix
-- `is_hex_like` - Would strongly correlate with non-secrets (git SHAs)
+- ~~`has_known_prefix`~~ — Would allow model to simply match `AKIA*`, `ghp_*`, `sk-*`
+- ~~`prefix_type`~~ — Would directly encode secret type from prefix
+- ~~`is_hex_like`~~ — Would strongly correlate with non-secrets (git SHAs)
 
 This forces the model to learn from **context**, enabling it to correctly distinguish:
-- `api_secret = "a1b2c3d4..."` → likely a secret (secret variable name, config context)
-- `commit_sha = "a1b2c3d4..."` → likely a Git SHA (safe variable name, git context)
+- `api_secret = "a1b2c3d4..."` → 🚨 likely a secret (secret variable name, config context)
+- `commit_sha = "a1b2c3d4..."` → ✅ likely a Git SHA (safe variable name, git context)
 
-### Two-Stage Architecture
-
-The recommended two-stage pipeline provides better precision-recall tradeoff:
+### 🏗️ Two-Stage Architecture
 
 **Stage A (High-Recall Filter)**
 - Model: XGBoost (120 trees, depth 5)
@@ -418,16 +464,16 @@ The recommended two-stage pipeline provides better precision-recall tradeoff:
 
 **Stage B (High-Precision Verifier)**
 - Model: LightGBM (300 trees, depth 12)
-- Features: All 51 features (token + variable + context)
+- Features: All 58 features (token + variable + context + Stage B precision)
 - Purpose: Deep analysis of ambiguous cases
-- Performance: 90%+ precision
+- Performance: 88%+ precision
 
 **Decision Logic:**
-- Stage A < 0.15 → Reject (clearly not a secret)
-- Stage A > 0.85 → Accept (clearly a secret)
-- Otherwise → Use Stage B with threshold 0.28 for final decision
+- Stage A < 0.15 → ❌ Reject (clearly not a secret)
+- Stage A > 0.85 → ✅ Accept (clearly a secret)
+- Otherwise → 🤔 Use Stage B with threshold 0.35 for final decision
 
-### Legacy Ensemble Models
+### 📦 Legacy Ensemble Models
 
 Single-stage ensemble is still available for backward compatibility:
 
@@ -439,7 +485,9 @@ The ensemble combines XGBoost (60% weight) and LightGBM (40% weight):
 - **XGBoost**: Level-wise tree growth, strong regularization
 - **LightGBM**: Leaf-wise tree growth, histogram-based splitting
 
-## Development
+---
+
+## 🛠️ Development
 
 ### Run Tests
 
@@ -453,7 +501,7 @@ pytest -v
 ruff check .
 ```
 
-### Project Structure
+### 📁 Project Structure
 
 ```
 Harpocrates/
@@ -467,7 +515,7 @@ Harpocrates/
     entropy_detector.py   # Shannon entropy analysis
   ml/                     # ML verification (opt-in)
     context.py            # Context extraction
-    features.py           # Feature engineering (51 features)
+    features.py           # Feature engineering (58 features)
     verifier.py           # XGBoost classifier
     lightgbm_verifier.py  # LightGBM classifier
     ensemble.py           # Two-stage verifier (XGBoost + LightGBM)
@@ -481,20 +529,22 @@ Harpocrates/
     evaluate.py           # Model evaluation
 ```
 
-## Requirements
+---
 
-- Python 3.8+
-- typer, rich (core)
-- xgboost, lightgbm, scikit-learn, numpy, pandas (ML features)
+## 📋 Requirements
 
-## License
+- 🐍 Python 3.8+
+- 📦 typer, rich (core)
+- 🤖 xgboost, lightgbm, scikit-learn, numpy, pandas (ML features)
 
-MIT License - See [LICENSE](LICENSE) for details.
+## 📄 License
 
-## Contributing
+MIT License — See [LICENSE](LICENSE) for details.
+
+## 🤝 Contributing
 
 Contributions welcome! Please open an issue or submit a pull request.
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
-Named after [Harpocrates](https://en.wikipedia.org/wiki/Harpocrates), the Greek god of silence and secrets.
+Named after [Harpocrates](https://en.wikipedia.org/wiki/Harpocrates), the Greek god of silence and secrets. 🤫

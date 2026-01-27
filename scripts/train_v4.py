@@ -11,7 +11,7 @@ import pickle
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -20,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def load_training_data(data_path: Path) -> Tuple[np.ndarray, np.ndarray, List[Dict]]:
     """Load training data from pickle file."""
+    import logging
+
+    logger = logging.getLogger(__name__)
     from Harpocrates.ml.features import extract_features_from_record
 
     with open(data_path, "rb") as f:
@@ -28,15 +31,24 @@ def load_training_data(data_path: Path) -> Tuple[np.ndarray, np.ndarray, List[Di
     features = []
     labels = []
     valid_records = []
+    dropped = 0
 
-    for record in records:
+    for i, record in enumerate(records):
         try:
             fv = extract_features_from_record(record)
             features.append(fv.to_array())
             labels.append(record["label"])
             valid_records.append(record)
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                f"Skipping record {record.get('id', i)}: "
+                f"{type(e).__name__}: {e}"
+            )
+            dropped += 1
             continue
+
+    if dropped > 0:
+        logger.info(f"Dropped {dropped}/{len(records)} records during feature extraction")
 
     return np.array(features), np.array(labels), valid_records
 
@@ -52,7 +64,7 @@ def train_and_evaluate(
     X_val: np.ndarray,
     y_val: np.ndarray,
     config: Dict[str, Any],
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     """Train both stages and evaluate combined pipeline."""
     import lightgbm as lgb
     import xgboost as xgb
@@ -64,6 +76,28 @@ def train_and_evaluate(
 
     n_pos = sum(y_train)
     n_neg = len(y_train) - n_pos
+
+    if n_pos == 0 or n_neg == 0:
+        # Fallback: predict majority class
+        majority = 1 if n_pos > n_neg else 0
+        y_pred = np.full(len(y_val), majority)
+        p = float(precision_score(y_val, y_pred, zero_division=0))
+        r = float(recall_score(y_val, y_pred, zero_division=0))
+        f1_val = float(f1_score(y_val, y_pred, zero_division=0))
+        return {
+            "config_name": config.get("name", "unnamed"),
+            "precision": p,
+            "recall": r,
+            "f1": f1_val,
+            "targets_met": False,
+            "stage_a": None,
+            "stage_b": None,
+            "a_low": config.get("a_low", 0.15),
+            "a_high": config.get("a_high", 0.85),
+            "stage_b_threshold": 0.5,
+            "confusion_matrix": confusion_matrix(y_val, y_pred, labels=[0, 1]).tolist(),
+            "note": "single-class training data, fallback predictor",
+        }
 
     # Train Stage A
     stage_a = xgb.XGBClassifier(
@@ -96,6 +130,29 @@ def train_and_evaluate(
     n_pos_amb = sum(y_train_amb)
     n_neg_amb = len(y_train_amb) - n_pos_amb
 
+    if n_pos_amb == 0 or n_neg_amb == 0:
+        # Fallback: use Stage A predictions directly
+        a_low = config.get("a_low", 0.15)
+        a_high = config.get("a_high", 0.85)
+        y_pred = (stage_a_val_proba > 0.5).astype(int)
+        p = float(precision_score(y_val, y_pred, zero_division=0))
+        r = float(recall_score(y_val, y_pred, zero_division=0))
+        f1_val = float(f1_score(y_val, y_pred, zero_division=0))
+        return {
+            "config_name": config.get("name", "unnamed"),
+            "precision": p,
+            "recall": r,
+            "f1": f1_val,
+            "targets_met": False,
+            "stage_a": stage_a,
+            "stage_b": None,
+            "a_low": a_low,
+            "a_high": a_high,
+            "stage_b_threshold": 0.5,
+            "confusion_matrix": confusion_matrix(y_val, y_pred, labels=[0, 1]).tolist(),
+            "note": "single-class ambiguous subset, Stage A only",
+        }
+
     # Train Stage B
     stage_b = lgb.LGBMClassifier(
         n_estimators=config.get("b_estimators", 300),
@@ -103,7 +160,7 @@ def train_and_evaluate(
         num_leaves=config.get("b_leaves", 63),
         learning_rate=0.03,
         min_child_samples=30,
-        scale_pos_weight=(n_neg_amb / n_pos_amb) * config.get("b_scale", 0.5) if n_pos_amb > 0 else 1.0,
+        scale_pos_weight=(n_neg_amb / n_pos_amb) * config.get("b_scale", 0.5),
         subsample=0.7,
         colsample_bytree=0.7,
         reg_alpha=0.2,
@@ -139,7 +196,7 @@ def train_and_evaluate(
 
         if score > best_score:
             best_score = score
-            cm = confusion_matrix(y_val, y_pred)
+            cm = confusion_matrix(y_val, y_pred, labels=[0, 1])
             best_result = {
                 "config_name": config.get("name", "unnamed"),
                 "stage_b_threshold": float(b_thresh),
@@ -236,8 +293,16 @@ def main():
         stage_a_path = output_dir / "stageA_xgboost.json"
         stage_b_path = output_dir / "stageB_lightgbm.txt"
 
-        best_result["stage_a"].save_model(str(stage_a_path))
-        best_result["stage_b"].booster_.save_model(str(stage_b_path))
+        if best_result["stage_a"] is not None:
+            # Use get_booster() to save to JSON format
+            best_result["stage_a"].get_booster().save_model(str(stage_a_path))
+        else:
+            print("Warning: Stage A model is None, skipping save")
+
+        if best_result["stage_b"] is not None and hasattr(best_result["stage_b"], "booster_"):
+            best_result["stage_b"].booster_.save_model(str(stage_b_path))
+        else:
+            print("Warning: Stage B model is None or has no booster_, skipping save")
 
         config = {
             "version": "2.4.0",
@@ -247,14 +312,14 @@ def main():
             "stage_a": {
                 "model_type": "xgboost",
                 "features": "token_only",
-                "feature_count": 23,
+                "feature_count": len(get_token_feature_indices()),
                 "threshold_low": best_result["a_low"],
                 "threshold_high": best_result["a_high"],
             },
             "stage_b": {
                 "model_type": "lightgbm",
                 "features": "all",
-                "feature_count": 51,
+                "feature_count": X_train.shape[1],
                 "threshold": best_result["stage_b_threshold"],
             },
             "combined_metrics": {

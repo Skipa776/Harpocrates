@@ -133,15 +133,15 @@ class TestFeatureVector:
     """Tests for complete feature vector extraction."""
 
     def test_feature_vector_length(self):
-        """Test that feature vector has 51 features."""
+        """Test that feature vector has 63 features (58 original + 5 hex disambiguation)."""
         fv = FeatureVector()
         array = fv.to_array()
-        assert len(array) == 51
+        assert len(array) == 63
 
     def test_feature_names(self):
         """Test that feature names are defined."""
         names = FeatureVector.get_feature_names()
-        assert len(names) == 51
+        assert len(names) == 63
         assert "token_length" in names
         assert "var_contains_secret" in names
         assert "file_is_test" in names
@@ -274,3 +274,164 @@ class TestFeatureDifferentiation:
 
         assert features.file_is_test is True
         assert features.context_mentions_test is True
+
+
+class TestStageBPrecisionFeatures:
+    """Tests for Stage B precision improvement features (7 new features)."""
+
+    def test_hex_len_40_feature(self):
+        """Test that 40-char hex tokens are detected for git SHA handling."""
+        sha_token = "a1b2c3d4e5f6789012345678901234567890abcd"
+        finding = Finding(
+            type="ENTROPY_CANDIDATE",
+            snippet=f'commit = "{sha_token}"',
+            evidence=EvidenceType.ENTROPY,
+            token=sha_token,
+        )
+        context = CodeContext(
+            line_content=f'commit = "{sha_token}"',
+            lines_before=[],
+            lines_after=[],
+            file_path="scripts/deploy.py",
+        )
+
+        features = extract_features(finding, context)
+        assert features.is_hex_len_40 is True
+        assert features.is_hex_len_64 is False
+
+    def test_hex_len_64_feature(self):
+        """Test that 64-char hex tokens are detected for SHA256 handling."""
+        sha256 = "a1b2c3d4e5f6789012345678901234567890abcda1b2c3d4e5f6789012345678"
+        finding = Finding(
+            type="ENTROPY_CANDIDATE",
+            snippet=f'checksum = "{sha256}"',
+            evidence=EvidenceType.ENTROPY,
+            token=sha256,
+        )
+        context = CodeContext(
+            line_content=f'checksum = "{sha256}"',
+            lines_before=[],
+            lines_after=[],
+            file_path="package-lock.json",
+        )
+
+        features = extract_features(finding, context)
+        assert features.is_hex_len_40 is False
+        assert features.is_hex_len_64 is True
+
+    def test_test_token_feature(self):
+        """Test detection of test-mode tokens like sk_test_*."""
+        test_token = "sk_test_FAKEVAL02"
+        finding = Finding(
+            type="STRIPE_SECRET_KEY",
+            snippet=f'stripe_key = "{test_token}"',
+            evidence=EvidenceType.REGEX,
+            token=test_token,
+        )
+        context = CodeContext(
+            line_content=f'stripe_key = "{test_token}"',
+            lines_before=[],
+            lines_after=[],
+            file_path="tests/test_payment.py",
+        )
+
+        features = extract_features(finding, context)
+        assert features.is_test_token is True
+
+    def test_example_keyword_feature(self):
+        """Test detection of example/placeholder tokens."""
+        example_token = "AKIAIOSFODNN7EXAMPLE"
+        finding = Finding(
+            type="AWS_ACCESS_KEY_ID",
+            snippet=f'aws_key = "{example_token}"',
+            evidence=EvidenceType.REGEX,
+            token=example_token,
+        )
+        context = CodeContext(
+            line_content=f'aws_key = "{example_token}"',
+            lines_before=[],
+            lines_after=[],
+            file_path="docs/getting-started.md",
+        )
+
+        features = extract_features(finding, context)
+        assert features.contains_example_keyword is True
+
+    def test_git_related_path_feature(self):
+        """Test detection of git-related file paths."""
+        token = "a1b2c3d4e5f6789012345678901234567890abcd"
+        finding = Finding(
+            type="ENTROPY_CANDIDATE",
+            snippet=f"{token}",
+            evidence=EvidenceType.ENTROPY,
+            token=token,
+        )
+        context = CodeContext(
+            line_content=token,
+            lines_before=[],
+            lines_after=[],
+            file_path=".git/objects/pack/pack-abc123.idx",
+        )
+
+        features = extract_features(finding, context)
+        assert features.file_is_git_related is True
+
+    def test_build_path_feature(self):
+        """Test detection of build/dist directory paths."""
+        token = "a1b2c3d4e5f6789012345678901234567890abcd"
+        finding = Finding(
+            type="ENTROPY_CANDIDATE",
+            snippet=f'hash = "{token}"',
+            evidence=EvidenceType.ENTROPY,
+            token=token,
+        )
+        context = CodeContext(
+            line_content=f'hash = "{token}"',
+            lines_before=[],
+            lines_after=[],
+            file_path="node_modules/.cache/babel/hash123.json",
+        )
+
+        features = extract_features(finding, context)
+        assert features.file_is_build is True
+
+    def test_example_path_feature(self):
+        """Test detection of example/docs directory paths."""
+        token = "sk_live_FAKEVAL01"
+        finding = Finding(
+            type="STRIPE_SECRET_KEY",
+            snippet=f'api_key = "{token}"',
+            evidence=EvidenceType.REGEX,
+            token=token,
+        )
+        context = CodeContext(
+            line_content=f'api_key = "{token}"',
+            lines_before=[],
+            lines_after=[],
+            file_path="docs/examples/payment.py",
+        )
+
+        features = extract_features(finding, context)
+        assert features.file_is_example is True
+
+    def test_combined_precision_features(self):
+        """Test that multiple precision features work together."""
+        # Test token in example path with test mode prefix
+        test_token = "pk_test_FAKEVAL03"
+        finding = Finding(
+            type="STRIPE_SECRET_KEY",
+            snippet=f'stripe_pk = "{test_token}"',
+            evidence=EvidenceType.REGEX,
+            token=test_token,
+        )
+        context = CodeContext(
+            line_content=f'stripe_pk = "{test_token}"',
+            lines_before=[],
+            lines_after=[],
+            file_path="examples/checkout.py",
+        )
+
+        features = extract_features(finding, context)
+        assert features.is_test_token is True
+        assert features.contains_example_keyword is True  # 'xxxx' pattern
+        assert features.file_is_example is True
