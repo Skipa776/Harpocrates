@@ -44,9 +44,16 @@ def scan(
         0.5, "--ml-threshold",
         help="ML confidence threshold (0.0-1.0, default: 0.5)"
     ),
+    show_secrets: bool = typer.Option(
+        False, "--show-secrets",
+        help="Display full secret tokens instead of redacted versions"
+    ),
 ) -> None:
     """
     Scan a file or directory for secrets.
+
+    By default, detected secret tokens are redacted in both table and JSON
+    output. Pass --show-secrets to display full tokens (use with caution).
 
     Examples:
 
@@ -67,6 +74,9 @@ def scan(
 
         # ML with custom threshold
         harpocrates scan ./my_project --ml --ml-threshold 0.7
+
+        # Display full token values (NOT recommended outside local debugging)
+        harpocrates scan config.env --show-secrets
     """
     if not path.exists():
         error_console.print(f"[red]✗[/red] Path not found: {path}")
@@ -140,7 +150,7 @@ def scan(
             error_console.print(f"[yellow]⚠[/yellow]  {error}")
 
     if json_output:
-        print(json.dumps(result.to_dict(), indent=2))
+        print(json.dumps(result.to_dict(include_token=show_secrets), indent=2))
         raise typer.Exit(code=1 if result.found_secrets else 0)  # 1=findings, 0=clean
 
     if not result.found_secrets:
@@ -158,7 +168,7 @@ def scan(
     table.add_column("Severity", style="bold")
     table.add_column("Type", style="cyan")
     table.add_column("Location")
-    table.add_column("Evidence")
+    table.add_column("Secret")
 
     for finding in sorted(
         result.findings,
@@ -178,11 +188,17 @@ def scan(
         # Format location
         location = f"{finding.file}:{finding.line}" if finding.file else "text input"
 
+        # Redacted by default; full token only when --show-secrets is set
+        if show_secrets:
+            secret_cell = finding.token or finding.snippet or "—"
+        else:
+            secret_cell = finding.redacted_token or "—"
+
         table.add_row(
             severity_text,
             finding.type,
             location,
-            finding.evidence.value,
+            secret_cell,
         )
 
     console.print(table)
