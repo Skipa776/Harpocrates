@@ -80,9 +80,10 @@ class Finding:
         result['severity'] = self.severity.value
         return result
 
-    def to_json_dict(self) -> Dict[str, Any]:
+    def to_json_dict(self, include_token: bool = False) -> Dict[str, Any]:
         d = self.to_dict()
-        d.pop('token', None)
+        if not include_token:
+            d.pop('token', None)
         return d
 
     def __str__(self) -> str:
@@ -130,10 +131,10 @@ class ScanResult:
         """Count of high severity findings findings"""
         return sum(1 for f in self.findings if f.severity == Severity.HIGH)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, include_token: bool = False) -> Dict[str, Any]:
         """Convert scan result to a dictionary"""
         return {
-            "findings": [f.to_json_dict() for f in self.findings],
+            "findings": [f.to_json_dict(include_token=include_token) for f in self.findings],
             "scanned_files": self.scanned_files,
             "total_lines": self.total_lines,
             "duration_ms": self.duration_ms,
