@@ -16,9 +16,31 @@ from Harpocrates.utils.redaction import (
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", [None, ""])
-def test_redact_token_returns_none_for_empty_input(value) -> None:
+@pytest.mark.parametrize("value", [None, "", "   ", "\t\n"])
+def test_redact_token_returns_none_for_empty_or_whitespace_input(value) -> None:
     assert redact_token(value) is None
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "\u200b"],
+)
+def test_redact_token_replaces_too_short_tokens_with_placeholder(token) -> None:
+    # Tokens under 8 chars would over-disclose if sliced (e.g. "ab" -> "a...b").
+    # They must be replaced wholesale so no original byte leaks. Includes
+    # zero-width and other non-strip()-whitespace single chars.
+    assert redact_token(token) == "[REDACTED]"
+
+
+def test_redact_token_handles_multibyte_unicode() -> None:
+    # Multibyte chars are still code points; an 8-char unicode token slices safely.
+    token = "\u00e9" * 8  # eight é characters
+    assert redact_token(token) == "\u00e9...\u00e9"
+
+
+def test_redact_token_short_unicode_token_is_redacted() -> None:
+    # 4-char multibyte token must hit the short-token floor.
+    assert redact_token("\u00e9\u00e9\u00e9\u00e9") == "[REDACTED]"
 
 
 def test_redact_token_short_token_uses_first_and_last_char() -> None:
