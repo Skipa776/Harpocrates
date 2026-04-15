@@ -41,14 +41,22 @@ _FORBIDDEN_COLD_IMPORTS = (
 )
 
 
+_SUBPROCESS_TIMEOUT_S = 30
+
+
 def _run_in_subprocess(snippet: str) -> subprocess.CompletedProcess[str]:
-    """Run a Python snippet in a fresh interpreter and capture stdout/stderr."""
+    """Run a Python snippet in a fresh interpreter and capture stdout/stderr.
+
+    A timeout guards against a hung child silently stalling the whole suite
+    (e.g. if a leaked import triggers a network call or device probe).
+    """
     return subprocess.run(
         [sys.executable, "-c", textwrap.dedent(snippet)],
         capture_output=True,
         text=True,
         check=False,
         cwd=str(Path(__file__).resolve().parent.parent),
+        timeout=_SUBPROCESS_TIMEOUT_S,
     )
 
 
@@ -76,8 +84,8 @@ def test_importing_cli_does_not_load_ml_or_api_modules() -> None:
     _assert_none_loaded(loaded)
 
 
-def test_cli_help_does_not_load_ml_or_api_modules() -> None:
-    """Running ``scan --help`` / ``--help`` must not drag in ML deps."""
+def test_top_level_help_does_not_load_ml_or_api_modules() -> None:
+    """``harpocrates --help`` (top-level) must not drag in ML deps."""
     result = _run_in_subprocess(
         """
         import sys
@@ -87,8 +95,57 @@ def test_cli_help_does_not_load_ml_or_api_modules() -> None:
         runner = CliRunner()
         res = runner.invoke(app, ["--help"])
         assert res.exit_code == 0, res.output
+        print("\\n".join(sorted(sys.modules.keys())))
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    loaded = set(result.stdout.splitlines())
+    _assert_none_loaded(loaded)
+
+
+def test_scan_help_does_not_load_ml_or_api_modules() -> None:
+    """``harpocrates scan --help`` must not drag in ML deps.
+
+    Run in its own subprocess (separate from the top-level --help test) so
+    that a leak in either path is attributed to the correct command.
+    """
+    result = _run_in_subprocess(
+        """
+        import sys
+        from typer.testing import CliRunner
+        from Harpocrates.cli import app
+
+        runner = CliRunner()
         res = runner.invoke(app, ["scan", "--help"])
         assert res.exit_code == 0, res.output
+        print("\\n".join(sorted(sys.modules.keys())))
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    loaded = set(result.stdout.splitlines())
+    _assert_none_loaded(loaded)
+
+
+def test_scan_command_body_without_ml_does_not_load_ml_modules() -> None:
+    """``scan <path>`` (no --ml) must not import ML/training/api code.
+
+    --help only exercises typer's argument parser; this test exercises the
+    actual ``scan`` function body via a nonexistent path that exits early
+    at the path-not-found check. A top-level ML import accidentally added
+    above the ``if use_ml:`` guard would slip past the --help-only test.
+    """
+    result = _run_in_subprocess(
+        """
+        import sys
+        from typer.testing import CliRunner
+        from Harpocrates.cli import app
+
+        runner = CliRunner()
+        res = runner.invoke(app, ["scan", "/nonexistent/path/to/file"])
+        # Path not found exits 2 (CLI argument error), but we don't care
+        # about the exit code — only that no forbidden module was loaded.
         print("\\n".join(sorted(sys.modules.keys())))
         """
     )
