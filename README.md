@@ -78,8 +78,14 @@ harpocrates scan config.env
 # Scan a directory recursively
 harpocrates scan ./my_project
 
-# Output as JSON
+# Output as JSON (tokens stay redacted by default)
 harpocrates scan ./my_project --json
+
+# Show full secret values (debug only, not for CI output)
+harpocrates scan config.env --show-secrets
+
+# Use as a CI gate: fail the build only on high/critical findings
+harpocrates scan . --fail-on high
 ```
 
 ### 🤖 ML-Enhanced Scan (Fewer False Positives)
@@ -141,17 +147,46 @@ Options:
   --max-size INTEGER       Max file size in MB (default: 10)
   --ignore TEXT            Comma-separated patterns to ignore
   --ml                     Enable ML-based verification
-  --ml-threshold FLOAT     ML confidence threshold 0.0-1.0 (default: 0.19)
+  --ml-threshold FLOAT     ML confidence threshold 0.0-1.0 (default: 0.19;
+                           matches the tuned two-stage ensemble)
+  --show-secrets           Display full secret tokens instead of redacted
+                           previews (default: off — tokens are redacted)
+  --fail-on LEVEL          Minimum severity that causes a non-zero exit code.
+                           One of: critical, high, medium, low, info, none.
+                           (default: medium)
   --help                   Show help message
+```
+
+### Redaction & `--show-secrets`
+
+By default, both the rich table and `--json` output redact every detected
+token (e.g. `AKIA...MPLE`). Pass `--show-secrets` only when you explicitly
+need the full value — typically for local debugging. Redaction logic is
+centralised in `Harpocrates.utils.redaction` so every surface stays in
+sync.
+
+### CI gating with `--fail-on`
+
+`--fail-on` controls when `harpocrates scan` should return a non-zero exit
+code so CI pipelines can set their own risk threshold. Severity ordering
+is `critical > high > medium > low > info`. Use `--fail-on none` to
+report findings without failing the build.
+
+```bash
+# Fail the build only when there's a high or critical finding
+harpocrates scan . --fail-on high
+
+# Report everything, but never fail CI (useful for soft rollouts)
+harpocrates scan . --fail-on none
 ```
 
 ### Exit Codes
 
 | Code | Meaning |
 |------|---------|
-| ✅ `0` | No secrets found |
-| 🚨 `1` | Secrets detected |
-| ❌ `2` | Error (file not found, etc.) |
+| ✅ `0` | No findings at or above `--fail-on` (default: medium) |
+| 🚨 `1` | Findings at or above `--fail-on` detected |
+| ❌ `2` | Error (file not found, invalid flag value, etc.) |
 
 ---
 
