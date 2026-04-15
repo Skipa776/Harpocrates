@@ -1,5 +1,29 @@
 """
 Command-line interface for Harpocrates secrets detection.
+
+Import discipline
+-----------------
+``harpocrates --help`` must stay fast even on machines that do not have
+the optional ML/training/API extras installed, and cheap interactive
+commands (``version``, ``--help``) must not pay for heavy scientific
+imports. To keep that guarantee:
+
+* Module-level imports are restricted to the standard library, ``typer``,
+  ``rich``, and the lightweight ``Harpocrates.core`` result/scanner
+  modules.
+* Any import that pulls in ML stacks (``xgboost``, ``lightgbm``,
+  ``sklearn``), training utilities
+  (``Harpocrates.training.*``), the FastAPI service
+  (``uvicorn`` / ``Harpocrates.api.*``), or other optional dependencies
+  MUST live *inside* the command function that needs it so it is only
+  paid for when that command runs.
+* Graceful fallback: every lazy import is wrapped in ``try/except
+  ImportError`` so a missing optional dependency surfaces as a clear
+  CLI error instead of a traceback.
+
+This invariant is covered by ``tests/test_cli_lazy_imports.py`` — do
+not add new top-level ML/training/API imports without updating that
+test.
 """
 from __future__ import annotations
 
