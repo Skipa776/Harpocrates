@@ -53,25 +53,14 @@ class Finding:
         """
         Returns a redacted version of the token for safe display.
 
-        Format: Shows first 4 and last 4 characters with '...' in between.
-        Short tokens (<=10 chars) show first 2 and last 2.
-
-        Examples:
-            'AKIAIOSFODNN7EXAMPLE' -> 'AKIA...MPLE'
-            'ghp_abc123' -> 'gh...23'
-            None -> None
+        Delegates to :func:`Harpocrates.utils.redaction.redact_token` so
+        that every surface (CLI, API, logs) shares a single redaction
+        contract. Kept as a property for backward compatibility.
         """
-        if not self.token:
-            return None
-        if len(self.token) <= 8:
-            # Very short token - just show first and last char
-            return f"{self.token[0]}...{self.token[-1]}"
-        elif len(self.token) <= 10:
-            # Short token - show first 2 and last 2
-            return f"{self.token[:2]}...{self.token[-2:]}"
-        else:
-            # Normal token - show first 4 and last 4
-            return f"{self.token[:4]}...{self.token[-4:]}"
+        # Local import avoids a core <-> utils import cycle.
+        from Harpocrates.utils.redaction import redact_token
+
+        return redact_token(self.token)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert finding to dictionary representation"""
