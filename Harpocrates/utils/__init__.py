@@ -12,6 +12,11 @@ from Harpocrates.utils.path_filters import (
     load_ignore_patterns,
     should_scan_path,
 )
+from Harpocrates.utils.redaction import (
+    redact_finding,
+    redact_findings,
+    redact_token,
+)
 
 __all__ = [
     "iter_text_lines",
@@ -19,4 +24,7 @@ __all__ = [
     "DEFAULT_SKIP_EXTS",
     "load_ignore_patterns",
     "should_scan_path",
+    "redact_finding",
+    "redact_findings",
+    "redact_token",
 ]
