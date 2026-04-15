@@ -335,3 +335,24 @@ def test_cli_scan_fail_on_below_threshold_exits_zero(
     assert result.exit_code == 0, (
         f"LOW finding with --fail-on high should exit 0, got {result.exit_code}"
     )
+
+
+def test_cli_scan_ml_threshold_default_is_0_19() -> None:
+    """PRD-01 Task 9: --ml-threshold default must align with tuned model (0.19)."""
+    import inspect
+
+    from Harpocrates.cli import scan
+
+    sig = inspect.signature(scan)
+    default = sig.parameters["ml_threshold"].default
+    # Typer wraps defaults in OptionInfo objects; unwrap when present.
+    resolved = getattr(default, "default", default)
+    assert resolved == 0.19
+
+
+def test_cli_scan_ml_threshold_default_documented_in_help() -> None:
+    """--help should surface the 0.19 default so operators see it."""
+    result = runner.invoke(app, ["scan", "--help"])
+
+    assert result.exit_code == 0
+    assert "0.19" in result.stdout
