@@ -211,3 +211,127 @@ def test_cli_scan_show_secrets_no_findings(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "No secrets detected" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# --fail-on severity gate (PRD-01 Task 2)
+# ---------------------------------------------------------------------------
+
+
+def _write_critical_secret(tmp_path: Path, filename: str = "secrets.env") -> Path:
+    """Write a file containing an AWS key (detected as CRITICAL severity)."""
+    file_path = tmp_path / filename
+    file_path.write_text("AWS_KEY=AKIAIOSFODNN7EXAMPLE\n", encoding="utf-8")
+    return file_path
+
+
+def test_cli_scan_fail_on_default_medium_exits_one(tmp_path: Path) -> None:
+    """Default --fail-on medium: critical finding triggers exit 1."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path)])
+
+    assert result.exit_code == 1
+
+
+def test_cli_scan_fail_on_critical_exits_one_for_critical(tmp_path: Path) -> None:
+    """--fail-on critical: critical finding still triggers exit 1."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "critical"])
+
+    assert result.exit_code == 1
+
+
+def test_cli_scan_fail_on_none_exits_zero_with_findings(tmp_path: Path) -> None:
+    """--fail-on none: findings are reported but exit code stays 0."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "none"])
+
+    assert result.exit_code == 0
+
+
+def test_cli_scan_fail_on_none_json_exits_zero(tmp_path: Path) -> None:
+    """--fail-on none also applies to JSON output."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(
+        app, ["scan", str(file_path), "--json", "--fail-on", "none"]
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert len(data["findings"]) >= 1
+
+
+def test_cli_scan_fail_on_invalid_value_exits_two(tmp_path: Path) -> None:
+    """Invalid --fail-on value returns exit 2 (argument error)."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "bogus"])
+
+    assert result.exit_code == 2
+
+
+def test_cli_scan_fail_on_case_insensitive(tmp_path: Path) -> None:
+    """--fail-on accepts uppercase severity names (case-insensitive)."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "HIGH"])
+
+    assert result.exit_code == 1
+
+
+def test_cli_scan_fail_on_no_findings_exits_zero(tmp_path: Path) -> None:
+    """No findings: exit code is 0 regardless of --fail-on value."""
+    file_path = tmp_path / "clean.txt"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "info"])
+
+    assert result.exit_code == 0
+
+
+def test_cli_scan_fail_on_help_documents_flag() -> None:
+    """--help output mentions --fail-on and lists accepted values."""
+    result = runner.invoke(app, ["scan", "--help"])
+
+    assert result.exit_code == 0
+    assert "--fail-on" in result.stdout
+
+
+def test_cli_scan_fail_on_below_threshold_exits_zero(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Findings below the --fail-on threshold do NOT trigger exit 1.
+
+    Guards against the comparison collapsing to '==' instead of '>=' — a LOW
+    finding with --fail-on high must still produce exit 0.
+    """
+    from Harpocrates.core.result import EvidenceType, Finding, ScanResult, Severity
+
+    file_path = tmp_path / "low_severity.env"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+
+    low_finding = Finding(
+        type="ENTROPY_CANDIDATE",
+        snippet="APP_NAME=Test",
+        evidence=EvidenceType.ENTROPY,
+        severity=Severity.LOW,
+        file=str(file_path),
+        line=1,
+    )
+    fake_result = ScanResult(
+        findings=[low_finding], scanned_files=1, total_lines=1, duration_ms=0.1
+    )
+
+    monkeypatch.setattr(
+        "Harpocrates.cli.scan_file", lambda *args, **kwargs: fake_result
+    )
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "high"])
+
+    assert result.exit_code == 0, (
+        f"LOW finding with --fail-on high should exit 0, got {result.exit_code}"
+    )

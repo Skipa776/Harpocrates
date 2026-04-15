@@ -22,6 +22,56 @@ app = typer.Typer(
 console = Console()
 error_console = Console(stderr=True)
 
+# Severity ranking (higher value = more severe). Used by --fail-on to
+# determine which findings should cause a non-zero exit code.
+_SEVERITY_RANK: dict[Severity, int] = {
+    Severity.INFO: 0,
+    Severity.LOW: 1,
+    Severity.MEDIUM: 2,
+    Severity.HIGH: 3,
+    Severity.CRITICAL: 4,
+}
+
+# String tokens accepted by --fail-on. "none" disables the gate entirely
+# (findings are reported but never cause a non-zero exit code).
+_FAIL_ON_NONE = "none"
+_VALID_FAIL_ON_LEVELS = (
+    _FAIL_ON_NONE,
+    Severity.INFO.value,
+    Severity.LOW.value,
+    Severity.MEDIUM.value,
+    Severity.HIGH.value,
+    Severity.CRITICAL.value,
+)
+
+
+def _resolve_fail_on(raw: str) -> Optional[Severity]:
+    """Parse --fail-on into a minimum Severity, or None to disable the gate."""
+    normalized = raw.strip().lower()
+    if normalized == _FAIL_ON_NONE:
+        return None
+    try:
+        return Severity(normalized)
+    except ValueError as exc:
+        valid = ", ".join(_VALID_FAIL_ON_LEVELS)
+        raise typer.BadParameter(
+            f"Invalid --fail-on value {raw!r}. Must be one of: {valid}"
+        ) from exc
+
+
+def _fail_on_callback(value: str) -> str:
+    """Validate --fail-on at argument-parse time so bad input fails fast."""
+    _resolve_fail_on(value)
+    return value
+
+
+def _should_fail(findings, min_severity: Optional[Severity]) -> bool:
+    """Return True if any finding meets or exceeds the minimum severity."""
+    if min_severity is None:
+        return False
+    threshold = _SEVERITY_RANK[min_severity]
+    return any(_SEVERITY_RANK[f.severity] >= threshold for f in findings)
+
 
 @app.command()
 def scan(
@@ -47,6 +97,14 @@ def scan(
     show_secrets: bool = typer.Option(
         False, "--show-secrets",
         help="Display full secret tokens instead of redacted versions"
+    ),
+    fail_on: str = typer.Option(
+        Severity.MEDIUM.value, "--fail-on",
+        help=(
+            "Minimum severity that causes a non-zero exit code. One of: "
+            "critical, high, medium, low, info, none. Default: medium."
+        ),
+        callback=_fail_on_callback,
     ),
 ) -> None:
     """
@@ -77,6 +135,12 @@ def scan(
 
         # Display full token values (NOT recommended outside local debugging)
         harpocrates scan config.env --show-secrets
+
+        # Only fail CI on high or critical findings
+        harpocrates scan ./my_project --fail-on high
+
+        # Report findings but never return a non-zero exit code
+        harpocrates scan ./my_project --fail-on none
     """
     if not path.exists():
         error_console.print(f"[red]✗[/red] Path not found: {path}")
@@ -87,6 +151,9 @@ def scan(
             f"[red]✗[/red] --ml-threshold must be between 0.0 and 1.0, got: {ml_threshold}"
         )
         raise typer.Exit(code=2)
+
+    # Already validated by _fail_on_callback at parse time; safe to call.
+    fail_on_severity = _resolve_fail_on(fail_on)
 
     ignore_patterns = set(ignore.split(",")) if ignore else set()
 
@@ -149,9 +216,13 @@ def scan(
         for error in result.errors:
             error_console.print(f"[yellow]⚠[/yellow]  {error}")
 
+    exit_on_findings = (
+        1 if _should_fail(result.findings, fail_on_severity) else 0
+    )
+
     if json_output:
         print(json.dumps(result.to_dict(include_token=show_secrets), indent=2))
-        raise typer.Exit(code=1 if result.found_secrets else 0)  # 1=findings, 0=clean
+        raise typer.Exit(code=exit_on_findings)
 
     if not result.found_secrets:
         console.print("[green]✓[/green] No secrets detected")
@@ -211,7 +282,7 @@ def scan(
         f"{result.high_count} high severity secrets"
     )
 
-    raise typer.Exit(code=1)  # 1=findings detected
+    raise typer.Exit(code=exit_on_findings)
 
 
 @app.command()
