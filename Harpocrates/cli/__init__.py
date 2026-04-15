@@ -41,8 +41,12 @@ def scan(
         help="Enable ML-based verification to reduce false positives"
     ),
     ml_threshold: float = typer.Option(
-        0.5, "--ml-threshold",
-        help="ML confidence threshold (0.0-1.0, default: 0.5)"
+        0.19, "--ml-threshold",
+        help=(
+            "ML confidence threshold (0.0-1.0, default: 0.19). The default "
+            "matches the tuned operating point of the shipped two-stage "
+            "ensemble (~95% precision, ~97% recall)."
+        ),
     ),
 ) -> None:
     """
