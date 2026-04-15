@@ -119,3 +119,95 @@ def test_cli_version() -> None:
 
     assert result.exit_code == 0
     assert "version" in result.stdout.lower()
+
+
+# --- --show-secrets flag ----------------------------------------------------
+
+
+def _write_github_token(tmp_path: Path) -> Path:
+    file_path = tmp_path / "secrets.env"
+    token = "ghp_" + "a" * 36
+    file_path.write_text(f"GITHUB_TOKEN={token}\n", encoding="utf-8")
+    return file_path
+
+
+def test_cli_scan_show_secrets_flag_in_help() -> None:
+    """--show-secrets should be documented in scan --help."""
+    result = runner.invoke(app, ["scan", "--help"])
+    assert result.exit_code == 0
+    assert "--show-secrets" in result.stdout
+
+
+def test_cli_scan_table_redacts_by_default(tmp_path: Path) -> None:
+    """Default table output must not include the full token."""
+    file_path = _write_github_token(tmp_path)
+    full_token = "ghp_" + "a" * 36
+
+    result = runner.invoke(
+        app, ["scan", str(file_path)], env={"COLUMNS": "200"}
+    )
+
+    assert result.exit_code == 1
+    assert full_token not in result.stdout
+    # Redacted format keeps first 4 and last 4 chars with '...' between
+    assert "ghp_" in result.stdout
+    assert "..." in result.stdout
+
+
+def test_cli_scan_table_shows_full_token_with_flag(tmp_path: Path) -> None:
+    """--show-secrets must surface the full token in the table."""
+    file_path = _write_github_token(tmp_path)
+    full_token = "ghp_" + "a" * 36
+
+    result = runner.invoke(
+        app,
+        ["scan", str(file_path), "--show-secrets"],
+        env={"COLUMNS": "200"},
+    )
+
+    assert result.exit_code == 1
+    assert full_token in result.stdout
+
+
+def test_cli_scan_json_omits_token_by_default(tmp_path: Path) -> None:
+    """JSON output must not include a raw token field by default.
+
+    Note: the snippet field may still contain the raw token — snippet-level
+    redaction is handled by the reusable redaction helper (Task 4).
+    """
+    file_path = _write_github_token(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--json"])
+
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["findings"], "expected at least one finding"
+    for finding in data["findings"]:
+        assert "token" not in finding
+
+
+def test_cli_scan_json_includes_token_with_flag(tmp_path: Path) -> None:
+    """--show-secrets + --json must include the full token field."""
+    file_path = _write_github_token(tmp_path)
+    full_token = "ghp_" + "a" * 36
+
+    result = runner.invoke(
+        app, ["scan", str(file_path), "--json", "--show-secrets"]
+    )
+
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["findings"], "expected at least one finding"
+    tokens = [f.get("token") for f in data["findings"]]
+    assert full_token in tokens
+
+
+def test_cli_scan_show_secrets_no_findings(tmp_path: Path) -> None:
+    """--show-secrets is a no-op when no findings exist."""
+    file_path = tmp_path / "config.txt"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", str(file_path), "--show-secrets"])
+
+    assert result.exit_code == 0
+    assert "No secrets detected" in result.stdout
