@@ -59,6 +59,12 @@ def _resolve_fail_on(raw: str) -> Optional[Severity]:
         ) from exc
 
 
+def _fail_on_callback(value: str) -> str:
+    """Validate --fail-on at argument-parse time so bad input fails fast."""
+    _resolve_fail_on(value)
+    return value
+
+
 def _should_fail(findings, min_severity: Optional[Severity]) -> bool:
     """Return True if any finding meets or exceeds the minimum severity."""
     if min_severity is None:
@@ -94,7 +100,7 @@ def scan(
             "Minimum severity that causes a non-zero exit code. One of: "
             "critical, high, medium, low, info, none. Default: medium."
         ),
-        case_sensitive=False,
+        callback=_fail_on_callback,
     ),
 ) -> None:
     """
@@ -136,11 +142,8 @@ def scan(
         )
         raise typer.Exit(code=2)
 
-    try:
-        fail_on_severity = _resolve_fail_on(fail_on)
-    except typer.BadParameter as exc:
-        error_console.print(f"[red]✗[/red] {exc}")
-        raise typer.Exit(code=2) from exc
+    # Already validated by _fail_on_callback at parse time; safe to call.
+    fail_on_severity = _resolve_fail_on(fail_on)
 
     ignore_patterns = set(ignore.split(",")) if ignore else set()
 

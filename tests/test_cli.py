@@ -207,3 +207,39 @@ def test_cli_scan_fail_on_help_documents_flag() -> None:
 
     assert result.exit_code == 0
     assert "--fail-on" in result.stdout
+
+
+def test_cli_scan_fail_on_below_threshold_exits_zero(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Findings below the --fail-on threshold do NOT trigger exit 1.
+
+    Guards against the comparison collapsing to '==' instead of '>=' — a LOW
+    finding with --fail-on high must still produce exit 0.
+    """
+    from Harpocrates.core.result import EvidenceType, Finding, ScanResult, Severity
+
+    file_path = tmp_path / "low_severity.env"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+
+    low_finding = Finding(
+        type="ENTROPY_CANDIDATE",
+        snippet="APP_NAME=Test",
+        evidence=EvidenceType.ENTROPY,
+        severity=Severity.LOW,
+        file=str(file_path),
+        line=1,
+    )
+    fake_result = ScanResult(
+        findings=[low_finding], scanned_files=1, total_lines=1, duration_ms=0.1
+    )
+
+    monkeypatch.setattr(
+        "Harpocrates.cli.scan_file", lambda *args, **kwargs: fake_result
+    )
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "high"])
+
+    assert result.exit_code == 0, (
+        f"LOW finding with --fail-on high should exit 0, got {result.exit_code}"
+    )
