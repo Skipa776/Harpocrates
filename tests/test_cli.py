@@ -119,3 +119,91 @@ def test_cli_version() -> None:
 
     assert result.exit_code == 0
     assert "version" in result.stdout.lower()
+
+
+# ---------------------------------------------------------------------------
+# --fail-on severity gate (PRD-01 Task 2)
+# ---------------------------------------------------------------------------
+
+
+def _write_critical_secret(tmp_path: Path, filename: str = "secrets.env") -> Path:
+    """Write a file containing an AWS key (detected as CRITICAL severity)."""
+    file_path = tmp_path / filename
+    file_path.write_text("AWS_KEY=AKIAIOSFODNN7EXAMPLE\n", encoding="utf-8")
+    return file_path
+
+
+def test_cli_scan_fail_on_default_medium_exits_one(tmp_path: Path) -> None:
+    """Default --fail-on medium: critical finding triggers exit 1."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path)])
+
+    assert result.exit_code == 1
+
+
+def test_cli_scan_fail_on_critical_exits_one_for_critical(tmp_path: Path) -> None:
+    """--fail-on critical: critical finding still triggers exit 1."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "critical"])
+
+    assert result.exit_code == 1
+
+
+def test_cli_scan_fail_on_none_exits_zero_with_findings(tmp_path: Path) -> None:
+    """--fail-on none: findings are reported but exit code stays 0."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "none"])
+
+    assert result.exit_code == 0
+
+
+def test_cli_scan_fail_on_none_json_exits_zero(tmp_path: Path) -> None:
+    """--fail-on none also applies to JSON output."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(
+        app, ["scan", str(file_path), "--json", "--fail-on", "none"]
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert len(data["findings"]) >= 1
+
+
+def test_cli_scan_fail_on_invalid_value_exits_two(tmp_path: Path) -> None:
+    """Invalid --fail-on value returns exit 2 (argument error)."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "bogus"])
+
+    assert result.exit_code == 2
+
+
+def test_cli_scan_fail_on_case_insensitive(tmp_path: Path) -> None:
+    """--fail-on accepts uppercase severity names (case-insensitive)."""
+    file_path = _write_critical_secret(tmp_path)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "HIGH"])
+
+    assert result.exit_code == 1
+
+
+def test_cli_scan_fail_on_no_findings_exits_zero(tmp_path: Path) -> None:
+    """No findings: exit code is 0 regardless of --fail-on value."""
+    file_path = tmp_path / "clean.txt"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "info"])
+
+    assert result.exit_code == 0
+
+
+def test_cli_scan_fail_on_help_documents_flag() -> None:
+    """--help output mentions --fail-on and lists accepted values."""
+    result = runner.invoke(app, ["scan", "--help"])
+
+    assert result.exit_code == 0
+    assert "--fail-on" in result.stdout
