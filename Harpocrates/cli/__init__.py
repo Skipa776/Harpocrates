@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from Harpocrates.core.result import Severity
+from Harpocrates.core.result import ScanResult, Severity
 from Harpocrates.core.scanner import scan_directory, scan_file
 
 app = typer.Typer(
@@ -75,7 +75,7 @@ def _should_fail(findings, min_severity: Optional[Severity]) -> bool:
 
 @app.command()
 def scan(
-    path: Path = typer.Argument(..., help="File or directory to scan"),
+    paths: Optional[List[Path]] = typer.Argument(default=None, help="Files or directories to scan"),
     recursive: bool = typer.Option(
         True, "--recursive/--no-recursive", "-r",
         help="Scan directories recursively"
@@ -146,9 +146,9 @@ def scan(
         # Report findings but never return a non-zero exit code
         harpocrates scan ./my_project --fail-on none
     """
-    if not path.exists():
-        error_console.print(f"[red]✗[/red] Path not found: {path}")
-        raise typer.Exit(code=2)  # Error exit code
+    # Zero-file early return — pre-commit passes no files when nothing is staged.
+    if not paths:
+        raise typer.Exit(code=0)
 
     if not (0.0 <= ml_threshold <= 1.0):
         error_console.print(
@@ -197,23 +197,60 @@ def scan(
             )
             error_console.print("[yellow]⚠[/yellow] Falling back to standard detection")
 
-    # Perform scan
-    if path.is_file():
-        result = scan_file(
-            path,
-            max_file_size=max_bytes,
-            verifier=verifier,
-            ml_threshold=ml_threshold,
-        )
-    else:
-        result = scan_directory(
-            path,
-            recursive=recursive,
-            max_file_size=max_bytes,
-            ignore_patterns=ignore_patterns,
-            verifier=verifier,
-            ml_threshold=ml_threshold,
-        )
+    # Scan all paths, aggregating findings across files and directories.
+    all_findings = []
+    total_files = 0
+    total_lines = 0
+    total_duration = 0.0
+    all_errors: list = []
+
+    for path in paths:
+        if not path.exists():
+            error_console.print(f"[yellow]⚠[/yellow] Path not found, skipping: {path}")
+            continue
+
+        if path.is_dir():
+            r = scan_directory(
+                path,
+                recursive=recursive,
+                max_file_size=max_bytes,
+                ignore_patterns=ignore_patterns,
+                verifier=verifier,
+                ml_threshold=ml_threshold,
+            )
+        else:
+            try:
+                r = scan_file(
+                    path,
+                    max_file_size=max_bytes,
+                    verifier=verifier,
+                    ml_threshold=ml_threshold,
+                )
+            except UnicodeDecodeError:
+                error_console.print(
+                    f"[yellow]⚠[/yellow] Skipping binary/unreadable file: {path}"
+                )
+                continue
+            except (OSError, PermissionError) as e:
+                error_console.print(
+                    f"[yellow]⚠[/yellow] Skipping unreadable file {path}: {e}"
+                )
+                continue
+
+        all_findings.extend(r.findings)
+        total_files += r.scanned_files
+        total_lines += r.total_lines
+        total_duration += r.duration_ms
+        if r.errors:
+            all_errors.extend(r.errors)
+
+    result = ScanResult(
+        findings=all_findings,
+        scanned_files=total_files,
+        total_lines=total_lines,
+        duration_ms=total_duration,
+        errors=all_errors,
+    )
 
     # Handle errors
     if result.errors:
