@@ -1,0 +1,6 @@
+- id: harpocrates
+  name: Harpocrates secrets scan
+  entry: harpocrates scan
+  language: python
+  types_or: [text]
+  pass_filenames: true

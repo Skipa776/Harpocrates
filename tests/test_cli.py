@@ -37,12 +37,12 @@ def test_cli_scan_file_without_secrets(tmp_path: Path) -> None:
 
 
 def test_cli_scan_nonexistent_path() -> None:
-    """Test CLI with nonexistent path."""
+    """Non-existent paths produce a warning and are skipped (exit 0, no crash)."""
     result = runner.invoke(app, ["scan", "/nonexistent/path/file.txt"])
 
-    # Exit code 2 = error
-    assert result.exit_code == 2
-    assert "not found" in result.stdout.lower() or "not found" in (result.stderr or "").lower()
+    # Multi-file mode: warn-and-continue, exit 0 when nothing was found
+    assert result.exit_code == 0
+    assert "not found" in result.output.lower()
 
 
 def test_cli_scan_json_output(tmp_path: Path) -> None:
@@ -356,3 +356,43 @@ def test_cli_scan_ml_threshold_default_documented_in_help() -> None:
 
     assert result.exit_code == 0
     assert "0.19" in result.stdout
+
+
+def test_scan_multiple_files(tmp_path: Path) -> None:
+    """harpocrates scan a.txt b.txt c.env processes all three files."""
+    a = tmp_path / "a.txt"
+    b = tmp_path / "b.txt"
+    c = tmp_path / "c.env"
+    a.write_text("APP_NAME=myapp\n", encoding="utf-8")
+    b.write_text("VERSION=1.0.0\n", encoding="utf-8")
+    c.write_text("DB_HOST=localhost\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", str(a), str(b), str(c)])
+
+    # No secrets in any file — clean exit
+    assert result.exit_code == 0
+    assert "No secrets detected" in result.output
+
+
+def test_scan_zero_files() -> None:
+    """harpocrates scan with no arguments exits 0 (pre-commit no-staged-files case)."""
+    result = runner.invoke(app, ["scan"])
+
+    assert result.exit_code == 0
+    # No error message, no usage error
+    assert "error" not in result.output.lower()
+
+
+def test_scan_skips_binary_file(tmp_path: Path) -> None:
+    """Binary files are silently skipped; other files in the same call still process."""
+    binary = tmp_path / "image.bin"
+    binary.write_bytes(b"\x80\x81\x82\xff\xfe\xfd")
+
+    clean = tmp_path / "clean.txt"
+    clean.write_text("APP_NAME=myapp\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", str(binary), str(clean)])
+
+    # No crash; scanner silently skips binary via _looks_binary heuristic
+    assert result.exit_code == 0
+    assert "No secrets detected" in result.output

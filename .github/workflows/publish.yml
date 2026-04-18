@@ -1,0 +1,46 @@
+# Publishes harpocrates to PyPI on every v* tag push.
+#
+# Uses OIDC trusted publishing — no PYPI_TOKEN secret required.
+# ONE-TIME SETUP (before pushing the first tag):
+#   1. Go to https://pypi.org/manage/account/publishing/
+#   2. Add a new publisher:
+#        Owner:    Skipa776
+#        Repo:     Harpocrates
+#        Workflow: publish.yml
+#        Env:      (leave blank)
+#   Without this step the publish step will fail with HTTP 403.
+
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for OIDC trusted publishing
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: pip install build
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Smoke test — install from wheel and verify ML pipeline active
+        run: |
+          pip install "$(ls dist/*.whl)[ml]"
+          harpocrates scan tests/fixtures/test_tokens.py
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
