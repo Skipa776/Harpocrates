@@ -9,7 +9,7 @@
         "testStrategy": "`pip index versions harpocrates` returns an error (no versions). If versions are returned, escalate immediately — do not proceed.",
         "priority": "high",
         "dependencies": [],
-        "status": "pending",
+        "status": "completed",
         "subtasks": [
           {
             "id": 1,
@@ -17,7 +17,7 @@
             "description": "Execute the pip index command to check PyPI name availability",
             "dependencies": [],
             "details": "Run: pip index versions harpocrates\nSuccess: error output indicating no distribution found.\nFailure: version list returned — name is taken.",
-            "status": "pending",
+            "status": "completed",
             "testStrategy": "Command output contains 'ERROR' or 'No matching distribution'. No version numbers in output."
           },
           {
@@ -26,7 +26,7 @@
             "description": "Record the PyPI check result and make explicit go/no-go decision",
             "dependencies": [1],
             "details": "If name is available: record confirmation, proceed with 'harpocrates' everywhere.\nIf name is taken: stop, choose alternative (harpocrates-scanner, harpocrates-ml, py-harpocrates), and update all downstream tasks before any implementation.",
-            "status": "pending",
+            "status": "completed",
             "testStrategy": "Decision is documented and unambiguous. All downstream tasks reference the confirmed name."
           }
         ]
@@ -39,7 +39,7 @@
         "testStrategy": "Build with `python -m build --wheel`. Run `unzip -l dist/harpocrates-*.whl | grep -E 'models/.*\\.(json|txt)'`. Must return exactly 3 lines matching the two-stage files. Legacy model names must NOT appear.",
         "priority": "high",
         "dependencies": [1],
-        "status": "pending",
+        "status": "completed",
         "subtasks": [
           {
             "id": 1,
@@ -47,7 +47,7 @@
             "description": "Add explicit package_data section listing the three two-stage model files",
             "dependencies": [],
             "details": "Edit pyproject.toml. Add after [tool.setuptools] or create it:\n[tool.setuptools.package-data]\n\"Harpocrates.ml.models\" = [\"stageA_xgboost.json\", \"stageB_lightgbm.txt\", \"two_stage_config.json\"]\n\nDo not use wildcards. Do not include legacy model files.",
-            "status": "pending",
+            "status": "completed",
             "testStrategy": "Read pyproject.toml and verify exact section exists with exactly 3 named files. No wildcards."
           },
           {
@@ -56,7 +56,7 @@
             "description": "Build the wheel distribution and confirm exactly 3 two-stage model files are present, legacy models are absent",
             "dependencies": [1],
             "details": "Run: python -m build --wheel\nRun: unzip -l dist/harpocrates-*.whl | grep -E 'models/'\nExpect exactly 3 lines: stageA_xgboost.json, stageB_lightgbm.txt, two_stage_config.json.\nConfirm absence of: ensemble_config.json, lightgbm_v1.txt, xgboost_v1.json.",
-            "status": "pending",
+            "status": "completed",
             "testStrategy": "grep output has exactly 3 model file lines. wc -l confirms count. Legacy file names not present."
           }
         ]
@@ -445,6 +445,66 @@
             "details": "python -m venv /tmp/post-publish-verify && source activate\npip install harpocrates\npip show harpocrates | grep Version  # must be 0.1.0\nharpocrates scan tests/fixtures/test_tokens.py\nAssert 'Two-stage ML verification enabled' in output.",
             "status": "pending",
             "testStrategy": "pip show version is 0.1.0. Scan output contains ML enabled message."
+          }
+        ]
+      },
+      {
+        "id": 17,
+        "title": "Validate ML Performance on a Locked Evaluation Set",
+        "description": "Measure release-candidate ML performance on a fixed evaluation set before shipping so v0.1.0 has an explicit false-negative and false-positive baseline.",
+        "details": "Create or reuse a versioned evaluation corpus that is not modified during the release task. Run the full two-stage pipeline with the shipping thresholds (Stage A and Stage B defaults unchanged) and record precision, recall, false positives, and false negatives. Do not tune thresholds during this task; this is a validation gate, not a training task.\n\nSuccess criteria:\n1. The evaluation command is reproducible from a clean checkout.\n2. Results are written to a tracked artifact or report file under version control.\n3. Any false negatives are surfaced explicitly before publish.\n4. The report distinguishes regex-only hits from two-stage ML-confirmed hits when possible.\n\nThis task is release-safe because it validates the shipped model behavior without expanding scope into training infrastructure.",
+        "testStrategy": "Run the documented evaluation command on the locked corpus and confirm it produces a repeatable report with precision, recall, FP, and FN counts. A rerun on the same corpus should produce materially identical numbers.",
+        "priority": "high",
+        "dependencies": [5, 7],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create reproducible ML evaluation command",
+            "description": "Add a documented command or script that runs the release candidate against a fixed evaluation dataset",
+            "dependencies": [],
+            "details": "Define a single entry point for evaluation, for example a Make target, script, or documented CLI invocation. It must use the shipping model artifacts and shipping thresholds. Do not retrain. Do not change threshold defaults. The command should be runnable by another engineer without hidden local state.",
+            "status": "pending",
+            "testStrategy": "A second person can run the command from a clean checkout and obtain the same report structure without undocumented setup."
+          },
+          {
+            "id": 2,
+            "title": "Generate baseline metrics report",
+            "description": "Run the locked evaluation and capture release metrics for precision, recall, false positives, and false negatives",
+            "dependencies": [1],
+            "details": "Execute the evaluation command and write a concise report that records dataset version, model artifact names, threshold settings, total files scanned, findings, precision, recall, FP count, and FN count. Call out any false negatives explicitly because they are a release-risk signal.",
+            "status": "pending",
+            "testStrategy": "The report exists, includes the required metrics, and references the exact model artifacts and thresholds used."
+          }
+        ]
+      },
+      {
+        "id": 18,
+        "title": "Guarantee Pretrained Model Auto-Load After Install",
+        "description": "Ensure that a user who installs the scanner gets the bundled pretrained ML models loaded automatically at runtime, with a clear failure mode if model assets are missing.",
+        "details": "The installed package should load its bundled Stage A and Stage B model artifacts automatically without asking the user to train or download anything separately. Use package-relative resource loading so the behavior is identical from source, wheel install, and PyPI install.\n\nImplementation expectations:\n1. Resolve model artifacts from package resources, not developer-local paths.\n2. Initialize the shipped pretrained models automatically on scan startup when ML verification is enabled.\n3. If bundled model files are missing or unreadable, emit a clear warning or hard failure according to the intended product behavior, but never silently pretend ML is active.\n4. Keep the packaging smoke test aligned with this runtime contract.\n\nThis is the correct 0.1 wedge behavior. Training-environment optimization belongs later unless it is needed to unblock this install path.",
+        "testStrategy": "From a clean virtualenv, `pip install` the built wheel and run a scan that exercises the ML path. Confirm the installed package loads the bundled models automatically and surfaces an explicit message if model resources are unavailable.",
+        "priority": "high",
+        "dependencies": [2, 5],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Use package-resource model loading",
+            "description": "Load pretrained model artifacts from package resources instead of assuming repository-relative file paths",
+            "dependencies": [],
+            "details": "Inspect the runtime model-loading code and ensure it resolves model files using package resources appropriate for installed wheels. Avoid any path logic that only works from a source checkout. Keep the loader compatible with the exact three bundled two-stage model files.",
+            "status": "pending",
+            "testStrategy": "Runtime model loading works from an installed wheel even when the source tree is absent."
+          },
+          {
+            "id": 2,
+            "title": "Add explicit installed-runtime verification",
+            "description": "Extend packaging or integration coverage so installed-package ML auto-load is a tested contract",
+            "dependencies": [1],
+            "details": "Add or update an integration test so it proves the installed CLI is using the bundled pretrained models automatically. The assertion must go beyond exit code alone and check for a concrete signal that ML verification is enabled. Also verify the user sees a clear message if model resources are missing.",
+            "status": "pending",
+            "testStrategy": "The integration test passes when bundled models load correctly and fails when model resources are intentionally removed or unavailable."
           }
         ]
       },
