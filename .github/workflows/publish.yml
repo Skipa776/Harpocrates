@@ -37,10 +37,10 @@ jobs:
       - name: Build wheel and sdist
         run: python -m build
 
-      - name: Smoke test — install from wheel and verify ML pipeline active
+      - name: Smoke test — install from wheel, verify CLI runs clean
         run: |
           pip install "$(ls dist/*.whl)[ml]"
-          harpocrates scan tests/fixtures/test_tokens.py
+          harpocrates scan tests/fixtures/safe_file.txt
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

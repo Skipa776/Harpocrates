@@ -117,3 +117,12 @@ Thumbs.db
 
 # Claude Code agent state and plans
 .claude/
+
+# Local task management and session state
+.taskmaster/
+
+# Comparison and benchmark outputs
+comparison/
+
+# Ruff cache
+.ruff_cache/
