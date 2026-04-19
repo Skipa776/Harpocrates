@@ -100,6 +100,8 @@ Options:
 - `typer`, `rich` (core — no ML deps required for basic scan)
 - `xgboost`, `lightgbm`, `scikit-learn`, `numpy`, `pandas` (with `[ml]` extra)
 
-## License
+> **Found a secret Harpocrates missed?** [Open an issue with the `false-negative` label](https://github.com/Skipa776/Harpocrates/issues/new?labels=false-negative). This is the most valuable feedback you can give.
+
+## 🙏 Acknowledgments
 
 MIT — see [LICENSE](LICENSE).
