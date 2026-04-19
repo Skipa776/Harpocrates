@@ -580,6 +580,8 @@ MIT License — See [LICENSE](LICENSE) for details.
 
 Contributions welcome! Please open an issue or submit a pull request.
 
+> **Found a secret Harpocrates missed?** [Open an issue with the `false-negative` label](https://github.com/Skipa776/Harpocrates/issues/new?labels=false-negative). This is the most valuable feedback you can give.
+
 ## 🙏 Acknowledgments
 
 Named after [Harpocrates](https://en.wikipedia.org/wiki/Harpocrates), the Greek god of silence and secrets. 🤫
