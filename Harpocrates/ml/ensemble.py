@@ -569,9 +569,13 @@ class TwoStageVerifier(Verifier):
         self._stage_b_path = stage_b_path or STAGE_B_MODEL_PATH
 
         self._config: Optional[TwoStageConfig] = None
-        self._stage_a_model = None  # XGBoost Booster
-        self._stage_b_model = None  # LightGBM Booster
+        self._stage_a_model = None  # XGBoost Booster (native fallback)
+        self._stage_b_model = None  # LightGBM Booster (native fallback)
         self._loaded = False
+
+        # v0.2.0: ONNX-first path
+        self._onnx_verifier = None
+        self._use_onnx: bool = False
 
         if not lazy_load:
             self._load_models()
@@ -596,9 +600,32 @@ class TwoStageVerifier(Verifier):
     def reset_instance(cls) -> None:
         """Reset singleton instance (useful for testing)."""
         cls._instance = None
+        try:
+            from Harpocrates.ml.onnx_verifier import OnnxTwoStageVerifier
+        except ImportError:
+            pass
+        else:
+            OnnxTwoStageVerifier.reset_instance()
 
     def _load_models(self) -> None:
-        """Load Stage A and Stage B models plus configuration."""
+        """Load Stage A and Stage B models. Prefers ONNX runtime if available (v0.2.0)."""
+        # v0.2.0: ONNX-first path — zero native ML dependencies at inference time
+        try:
+            from Harpocrates.ml.onnx_verifier import OnnxTwoStageVerifier
+            if OnnxTwoStageVerifier.is_available():
+                self._onnx_verifier = OnnxTwoStageVerifier(lazy_load=False)
+                self._use_onnx = True
+                self._loaded = True
+                logger.info("TwoStageVerifier: ONNX runtime active (v0.2.0)")
+                return
+        except Exception as e:
+            logger.warning(
+                "ONNX load failed, falling back to native xgboost/lightgbm: %s", e
+            )
+            self._onnx_verifier = None
+            self._use_onnx = False
+
+        # Native fallback: requires xgboost + lightgbm installed
         import lightgbm as lgb
         import xgboost as xgb
 
@@ -777,6 +804,10 @@ class TwoStageVerifier(Verifier):
         """
         self._ensure_loaded()
 
+        # v0.2.0: delegate to ONNX engine when available
+        if self._use_onnx and self._onnx_verifier is not None:
+            return self._onnx_verifier.verify(finding, context)
+
         # Extract features
         features = extract_features(finding, context)
 
@@ -843,6 +874,10 @@ class TwoStageVerifier(Verifier):
             return []
 
         self._ensure_loaded()
+
+        # v0.2.0: delegate to ONNX engine when available
+        if self._use_onnx and self._onnx_verifier is not None:
+            return self._onnx_verifier.verify_batch(findings_with_context)
 
         # Extract all features
         all_features = []

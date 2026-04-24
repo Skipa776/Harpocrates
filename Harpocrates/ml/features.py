@@ -88,6 +88,21 @@ MAX_ENTROPY_ALPHANUMERIC = 5.954  # log2(62) for a-zA-Z0-9
 MAX_ENTROPY_BASE64 = 6.0  # log2(64)
 MAX_ENTROPY_HEX = 4.0  # log2(16)
 
+# v0.2.0: AI-generated placeholder detection (design doc §2 "AI Leftover" Paradigm).
+# Word-boundary anchors are intentionally omitted for underscore-joined patterns like
+# dummy_token, DUMMY_SECRET, FAKE_API_KEY which are the primary LLM leftovers.
+_AI_PLACEHOLDER_RE = re.compile(
+    r"YOUR_|_HERE|dummy|CHANGEME|PLACEHOLDER|<[A-Z_]+>|TODO|REPLACE[_\-]|FAKE|TEST[_\-]",
+    re.IGNORECASE,
+)
+
+# v0.2.0: Connection-string and credential-context keywords
+_CONNECTION_KEYWORDS = [
+    "jdbc:", "bearer", "authorization:", "database", "password",
+    "credentials", "connection_string", "dsn", "api_key", "access_key",
+    "secret_key", "private_key", "auth_token", "client_secret",
+]
+
 # Variable name N-gram weights for secret detection
 # STAGE B GENERALIZATION: Weights scaled by 0.4 (max was 1.0 → now 0.40)
 # This prevents N-gram scores from dominating predictions and forces
@@ -1878,3 +1893,4 @@ __all__ = [
     "SECRET_VAR_PATTERNS",
     "SAFE_VAR_PATTERNS",
 ]
+
