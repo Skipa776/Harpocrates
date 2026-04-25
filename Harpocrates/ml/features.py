@@ -1,7 +1,7 @@
 """
 Feature engineering for ML-based secrets verification.
 
-Extracts 51 features from tokens and their context to enable
+Extracts 65 features from tokens and their context to enable
 context-aware classification of potential secrets.
 
 Features are organized into three categories:
@@ -260,8 +260,12 @@ class FeatureVector:
     hex_in_url_or_dsn: bool = False  # Token is embedded in URL/DSN
     hex_file_suggests_secret: bool = False  # Path suggests secrets (secrets/, .env, credentials/)
 
+    # Env-loading awareness features (v0.2.0 — 63 → 65)
+    env_loader_in_context: bool = False  # Context contains env-loading pattern
+    is_env_fallback_value: bool = False  # Token is the fallback/default arg in env-loader call
+
     def to_array(self) -> List[float]:
-        """Convert to numpy-compatible array of 63 floats."""
+        """Convert to numpy-compatible array of 65 floats."""
         return [
             # Token features (23)
             float(self.token_length),
@@ -334,11 +338,14 @@ class FeatureVector:
             float(self.hex_adjacent_assignment_pattern),
             float(self.hex_in_url_or_dsn),
             float(self.hex_file_suggests_secret),
+            # Env-loading awareness features (2)
+            float(self.env_loader_in_context),
+            float(self.is_env_fallback_value),
         ]
 
     @staticmethod
     def get_feature_names() -> List[str]:
-        """Get ordered list of 63 feature names."""
+        """Get ordered list of 65 feature names."""
         return [
             # Token features (23)
             "token_length",
@@ -409,15 +416,18 @@ class FeatureVector:
             "hex_adjacent_assignment_pattern",
             "hex_in_url_or_dsn",
             "hex_file_suggests_secret",
+            # Env-loading awareness features (2)
+            "env_loader_in_context",
+            "is_env_fallback_value",
         ]
 
     @staticmethod
     def get_token_feature_names() -> List[str]:
-        """Get ordered list of 23 token-only feature names (for Stage A)."""
+        """Compat shim — returns first 23 feature names. Remove after Step 8."""
         return FeatureVector.get_feature_names()[:23]
 
     def to_token_only_array(self) -> List[float]:
-        """Convert to list of 23 token-only feature values (for Stage A)."""
+        """Compat shim — returns first 23 feature values. Remove after Step 8."""
         return self.to_array()[:23]
 
 
@@ -1739,13 +1749,68 @@ def _extract_hex_disambiguation_features(
     }
 
 
+# ---------------------------------------------------------------------------
+# Env-loading pattern awareness (v0.2.0 — features 64-65)
+# ---------------------------------------------------------------------------
+
+_ENV_LOADER_PATTERNS = [
+    re.compile(r"load_dotenv"),
+    re.compile(r"from\s+dotenv\s+import"),
+    re.compile(r"dotenv\.config"),
+    re.compile(r"os\.getenv"),
+    re.compile(r"os\.environ"),
+    re.compile(r"process\.env\."),
+    re.compile(r"ENV\["),
+    re.compile(r"ENV\.fetch"),
+    re.compile(r"viper\.\w+Get"),
+    re.compile(r"System\.getenv"),
+    re.compile(r"Environment\.GetEnvironmentVariable"),
+    re.compile(r"from_envvar"),
+    re.compile(r"env\(\s*['\"]"),
+    re.compile(r"getenv\("),
+    re.compile(r"std::env::var"),
+]
+
+_FALLBACK_LOCATORS = [
+    re.compile(r"os\.getenv\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]"),
+    re.compile(r"os\.environ\.get\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]"),
+    re.compile(r"process\.env\.\w+\s*\|\|\s*['\"]"),
+    re.compile(r"ENV\.fetch\(\s*['\"][^'\"]+['\"]\s*\)\s*\{\s*['\"]"),
+    re.compile(r"env\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]"),
+    re.compile(r"getenv\([^)]+\)\s*\?:\s*['\"]"),
+    re.compile(r"\$\{[^:}]+:-"),
+]
+
+
+def _detect_env_loader_in_context(context_text: str, line: str) -> bool:
+    """True when surrounding context contains any env-loading pattern."""
+    text = f"{context_text}\n{line}"
+    return any(pat.search(text) for pat in _ENV_LOADER_PATTERNS)
+
+
+def _detect_env_fallback_value(line: str, token_start_index: int) -> bool:
+    """True IFF the token at `token_start_index` sits inside the fallback/default
+    argument of an env-loader call.
+
+    Uses authoritative start index from upstream extraction (TokenMatch.start),
+    NOT line.find() which grabs the wrong occurrence if the token appears twice.
+    """
+    for pattern in _FALLBACK_LOCATORS:
+        match = pattern.search(line)
+        if match:
+            fallback_start = match.end()
+            if token_start_index >= fallback_start - 1:
+                return True
+    return False
+
+
 def extract_features(
     finding: "Finding",
     context: CodeContext,
     regex_match_type: int = 0,
 ) -> FeatureVector:
     """
-    Extract all 63 features from a finding and its context.
+    Extract all 65 features from a finding and its context.
 
     Args:
         finding: The Finding object with token and metadata
@@ -1753,7 +1818,7 @@ def extract_features(
         regex_match_type: Encoded type of regex match (0 = entropy-only)
 
     Returns:
-        FeatureVector with all 63 features
+        FeatureVector with all 65 features
     """
     token = finding.token or ""
 
@@ -1800,6 +1865,11 @@ def extract_features(
         embedded_in_url=token_features.get("embedded_token_flag", False),
     )
 
+    # Env-loading awareness features
+    env_in_ctx = _detect_env_loader_in_context(context.full_context, context.line_content)
+    token_pos = context.line_content.find(token)
+    env_fallback = _detect_env_fallback_value(context.line_content, token_pos) if token_pos >= 0 else False
+
     # Combine all features
     return FeatureVector(
         **token_features,
@@ -1807,6 +1877,8 @@ def extract_features(
         **context_features,
         **stage_b_features,
         **hex_features,
+        env_loader_in_context=env_in_ctx,
+        is_env_fallback_value=env_fallback,
     )
 
 
@@ -1818,7 +1890,7 @@ def extract_features_from_record(record: dict) -> FeatureVector:
         record: Dict with token, line_content, context_before, context_after, etc.
 
     Returns:
-        FeatureVector with all 63 features
+        FeatureVector with all 65 features
     """
     from Harpocrates.core.result import EvidenceType, Finding
 
