@@ -1035,12 +1035,10 @@ def _attach_features(record: Dict[str, Any]) -> Dict[str, Any]:
     record = _sanitize_record(record)
     try:
         fv = extract_features_from_record(record)
-        record["features_63"] = fv.to_array()
-        record["features_extended"] = fv.to_extended_array()
+        record["features_65"] = fv.to_array()
     except Exception as e:
         print(f"  [WARN] Feature extraction failed: {e}", file=sys.stderr)
-        record["features_63"] = None
-        record["features_extended"] = None
+        record["features_65"] = None
     return record
 
 
