@@ -852,11 +852,17 @@ _POSITIVE_GENERATORS = [
 
 
 def generate_script_positive_samples(count: int) -> List[Dict[str, Any]]:
-    return [random.choice(_POSITIVE_GENERATORS)() for _ in range(count)]
+    samples = [random.choice(_POSITIVE_GENERATORS)() for _ in range(count)]
+    for s in samples:
+        s["source"] = "script"
+    return samples
 
 
 def generate_script_negative_samples(count: int) -> List[Dict[str, Any]]:
-    return [random.choice(_NEGATIVE_GENERATORS)() for _ in range(count)]
+    samples = [random.choice(_NEGATIVE_GENERATORS)() for _ in range(count)]
+    for s in samples:
+        s["source"] = "script"
+    return samples
 
 
 # ---------------------------------------------------------------------------
@@ -942,6 +948,7 @@ def _extract_samples_from_response(
             "file_path": file_path,
             "label": label,
             "secret_type": "ENTROPY_CANDIDATE",
+            "source": "llm",
         })
 
     return samples
