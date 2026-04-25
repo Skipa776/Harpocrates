@@ -187,7 +187,7 @@ def scan(
                 )
                 error_console.print(
                     "[yellow]⚠[/yellow] Train a model with 'harpocrates train' or "
-                    "'python -m Harpocrates.training.train_two_stage'"
+                    "'python -m Harpocrates.training.train_model'"
                 )
                 error_console.print("[yellow]⚠[/yellow] Falling back to standard detection")
         except ImportError:
