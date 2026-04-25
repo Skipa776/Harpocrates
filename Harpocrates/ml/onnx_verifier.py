@@ -291,12 +291,8 @@ class OnnxVerifier(Verifier):
         return results
 
 
-# Backward compat alias — will be removed in cleanup (Step 8)
-OnnxTwoStageVerifier = OnnxVerifier
-
 __all__ = [
     "OnnxVerifier",
-    "OnnxTwoStageVerifier",
     "ONNX_MODEL_PATH",
     "ONNX_HASHES_PATH",
 ]
