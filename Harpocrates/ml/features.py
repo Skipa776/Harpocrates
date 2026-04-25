@@ -421,16 +421,6 @@ class FeatureVector:
             "is_env_fallback_value",
         ]
 
-    @staticmethod
-    def get_token_feature_names() -> List[str]:
-        """Compat shim — returns first 23 feature names. Remove after Step 8."""
-        return FeatureVector.get_feature_names()[:23]
-
-    def to_token_only_array(self) -> List[float]:
-        """Compat shim — returns first 23 feature values. Remove after Step 8."""
-        return self.to_array()[:23]
-
-
 def _get_char_class_count(token: str) -> int:
     """Count distinct character classes in token."""
     classes = 0

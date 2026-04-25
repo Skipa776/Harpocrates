@@ -625,46 +625,14 @@ class TwoStageVerifier(Verifier):
             self._onnx_verifier = None
             self._use_onnx = False
 
-        # Native fallback: requires xgboost + lightgbm installed
-        import lightgbm as lgb
-        import xgboost as xgb
-
-        # Load configuration
-        if self._config_path.exists():
-            with open(self._config_path) as f:
-                config_dict = json.load(f)
-
-            self._config = TwoStageConfig(
-                stage_a_threshold_low=config_dict.get("stage_a", {}).get(
-                    "threshold_low", 0.1
-                ),
-                stage_a_threshold_high=config_dict.get("stage_a", {}).get(
-                    "threshold_high", 0.9
-                ),
-                stage_b_threshold=config_dict.get("stage_b", {}).get("threshold", 0.55),
-            )
-        else:
-            logger.warning(
-                "Two-stage config not found at %s, using defaults", self._config_path
-            )
-            self._config = TwoStageConfig()
-
-        # Load Stage A (XGBoost)
-        if self._stage_a_path.exists():
-            self._stage_a_model = xgb.Booster()
-            self._stage_a_model.load_model(str(self._stage_a_path))
-            logger.info("Loaded Stage A model from %s", self._stage_a_path)
-        else:
-            raise FileNotFoundError(f"Stage A model not found: {self._stage_a_path}")
-
-        # Load Stage B (LightGBM)
-        if self._stage_b_path.exists():
-            self._stage_b_model = lgb.Booster(model_file=str(self._stage_b_path))
-            logger.info("Loaded Stage B model from %s", self._stage_b_path)
-        else:
-            raise FileNotFoundError(f"Stage B model not found: {self._stage_b_path}")
-
-        self._loaded = True
+        # Native fallback is no longer supported — ONNX is required.
+        # The old two-stage cascade (XGBoost + LightGBM) has been replaced
+        # by a single XGBoost model served via ONNX.
+        raise FileNotFoundError(
+            "ONNX model not found. Run `python scripts/convert_to_onnx.py` "
+            "to generate model.onnx, or install onnxruntime: "
+            "pip install onnxruntime"
+        )
 
     def _ensure_loaded(self) -> None:
         """Ensure models are loaded (lazy loading)."""
