@@ -1,15 +1,15 @@
 """
-ONNX Runtime inference engine for the two-stage ML pipeline (v0.2.0).
+ONNX Runtime inference engine for single-stage ML pipeline (v2.1.0).
 
-Replaces native xgboost/lightgbm with onnxruntime:
-  - Model files <500 KB each
-  - Single-row inference <1 ms (C-backend tree traversal)
-  - Uniform runtime for both Stage A and Stage B
+Replaces native xgboost with onnxruntime:
+  - Single ONNX model on all 65 features
+  - Dual-threshold decision: SAFE / REVIEW / SECRET
+  - Platt-calibrated probabilities from model_config.json
   - SHA-256 hash verification guards against supply-chain attacks
 
-Usage after conversion:
-    from Harpocrates.ml.onnx_verifier import OnnxTwoStageVerifier
-    verifier = OnnxTwoStageVerifier.get_instance()
+Usage:
+    from Harpocrates.ml.onnx_verifier import OnnxVerifier
+    verifier = OnnxVerifier.get_instance()
     result = verifier.verify(finding, context)
 """
 from __future__ import annotations
@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -29,33 +30,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ONNX_STAGE_A_PATH = DEFAULT_MODEL_DIR / "stageA.onnx"
-ONNX_STAGE_B_PATH = DEFAULT_MODEL_DIR / "stageB.onnx"
+ONNX_MODEL_PATH = DEFAULT_MODEL_DIR / "model.onnx"
 ONNX_HASHES_PATH = DEFAULT_MODEL_DIR / "onnx_model_hashes.json"
+MODEL_CONFIG_PATH = DEFAULT_MODEL_DIR / "model_config.json"
 
-# Thresholds from training run (two_stage_config.json v2.4.0).
-# CLAUDE.md §6: "Thresholds stay at training defaults 0.1/0.9. Never tighten them."
-_STAGE_A_LOW = 0.1
-_STAGE_A_HIGH = 0.9
-_STAGE_B_THRESHOLD = 0.30
+_DEFAULT_THRESHOLD_LOW = 0.15
+_DEFAULT_THRESHOLD_HIGH = 0.85
 
 
-def _sha256_file(path: Path) -> str:
-    """Return the SHA-256 hex digest of a file."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def _apply_platt(raw_prob: float, a: float, b: float) -> float:
+    """Apply Platt sigmoid calibration: p = 1 / (1 + exp(a*f + b))."""
+    if a == 0.0 and b == 0.0:
+        return raw_prob
+    return 1.0 / (1.0 + math.exp(a * raw_prob + b))
 
 
 def _run_session(session, features: List[List[float]]) -> List[float]:
-    """
-    Run an ONNX InferenceSession and extract positive-class probabilities.
-
-    Handles both ZipMap dict output (onnxmltools default) and dense ndarray
-    output, so the caller does not need to know the conversion format.
-    """
+    """Run ONNX InferenceSession and extract positive-class probabilities."""
     import numpy as np
 
     input_name = session.get_inputs()[0].name
@@ -70,68 +61,66 @@ def _run_session(session, features: List[List[float]]) -> List[float]:
         )
 
     probabilities = outputs[1]
-    # ZipMap output: list of {0: p_neg, 1: p_pos}
-    if isinstance(probabilities, list) and len(probabilities) > 0 and isinstance(probabilities[0], dict):
+    if (
+        isinstance(probabilities, list)
+        and len(probabilities) > 0
+        and isinstance(probabilities[0], dict)
+    ):
         return [float(p[1]) for p in probabilities]
-    # Dense ndarray output shape [n_samples, 2]
     return np.asarray(probabilities)[:, 1].tolist()
 
 
-class OnnxTwoStageVerifier(Verifier):
+class OnnxVerifier(Verifier):
     """
-    ONNX-based two-stage verifier (v0.2.0 inference engine).
+    ONNX-based single-stage verifier (v2.1.0).
 
-    Cascade:
-      Stage A (XGBoost ONNX, 23 token features) — high-recall recall gate
-        prob < _STAGE_A_LOW  → fast-reject (not a secret)
-        prob > _STAGE_A_HIGH → fast-accept (is a secret)
-        otherwise            → forward to Stage B
-      Stage B (LightGBM ONNX, 63 full features) — high-precision verifier
-        prob >= _STAGE_B_THRESHOLD → secret
+    Decision logic:
+      P(secret) < threshold_low  -> SAFE    (exit 0, silent)
+      P(secret) > threshold_high -> SECRET  (exit 1, hard block)
+      otherwise                  -> REVIEW  (exit 1, override available)
     """
 
-    _instance: Optional["OnnxTwoStageVerifier"] = None
+    _instance: Optional["OnnxVerifier"] = None
 
     def __init__(
         self,
-        stage_a_path: Optional[Path] = None,
-        stage_b_path: Optional[Path] = None,
+        model_path: Optional[Path] = None,
         hashes_path: Optional[Path] = None,
+        config_path: Optional[Path] = None,
         lazy_load: bool = True,
     ):
-        self._stage_a_path = stage_a_path or ONNX_STAGE_A_PATH
-        self._stage_b_path = stage_b_path or ONNX_STAGE_B_PATH
+        self._model_path = model_path or ONNX_MODEL_PATH
         self._hashes_path = hashes_path or ONNX_HASHES_PATH
-        self._stage_a_session = None
-        self._stage_b_session = None
+        self._config_path = config_path or MODEL_CONFIG_PATH
+        self._session = None
         self._loaded = False
 
+        self._threshold_low = _DEFAULT_THRESHOLD_LOW
+        self._threshold_high = _DEFAULT_THRESHOLD_HIGH
+        self._platt_a = 0.0
+        self._platt_b = 0.0
+
         if not lazy_load:
-            self._load_sessions()
+            self._load_session()
 
     @classmethod
     def get_instance(
         cls,
-        stage_a_path: Optional[Path] = None,
-        stage_b_path: Optional[Path] = None,
-    ) -> "OnnxTwoStageVerifier":
-        """Singleton accessor — reuses loaded sessions across scans."""
+        model_path: Optional[Path] = None,
+    ) -> "OnnxVerifier":
         if cls._instance is None:
-            cls._instance = cls(stage_a_path=stage_a_path, stage_b_path=stage_b_path)
+            cls._instance = cls(model_path=model_path)
         return cls._instance
 
     @classmethod
     def reset_instance(cls) -> None:
-        """Reset singleton — useful in tests."""
         cls._instance = None
 
     @classmethod
     def is_available(cls) -> bool:
-        """Return True if both ONNX model files exist on disk."""
-        return ONNX_STAGE_A_PATH.exists() and ONNX_STAGE_B_PATH.exists()
+        return ONNX_MODEL_PATH.exists()
 
-    def _load_sessions(self) -> None:
-        """Load and hash-verify both ONNX sessions."""
+    def _load_session(self) -> None:
         try:
             import onnxruntime as ort
         except ImportError as exc:
@@ -140,51 +129,54 @@ class OnnxTwoStageVerifier(Verifier):
                 "Install with: pip install onnxruntime"
             ) from exc
 
-        if not self._hashes_path.exists():
+        if not self._model_path.exists():
             raise FileNotFoundError(
-                f"Hash manifest not found: {self._hashes_path}. "
-                "Re-run scripts/convert_to_onnx.py to regenerate it."
+                f"ONNX model not found: {self._model_path}. "
+                "Run `python scripts/convert_to_onnx.py` to generate it."
             )
-        with open(self._hashes_path) as f:
-            expected: Dict[str, str] = json.load(f)
 
-        model_pairs = [
-            (self._stage_a_path, "_stage_a_session"),
-            (self._stage_b_path, "_stage_b_session"),
-        ]
-        for model_path, attr in model_pairs:
-            if not model_path.exists():
-                raise FileNotFoundError(
-                    f"ONNX model not found: {model_path}. "
-                    "Run `python scripts/convert_to_onnx.py` to generate it."
-                )
+        # Load config for thresholds and Platt parameters
+        if self._config_path.exists():
+            with open(self._config_path) as f:
+                config = json.load(f)
+            self._threshold_low = config.get("threshold_low", _DEFAULT_THRESHOLD_LOW)
+            self._threshold_high = config.get("threshold_high", _DEFAULT_THRESHOLD_HIGH)
+            self._platt_a = config.get("platt_a", 0.0)
+            self._platt_b = config.get("platt_b", 0.0)
 
-            # Supply-chain integrity gate (design doc §3, step 5).
-            # Key MUST be present in the manifest — absence is not a silent pass.
-            key = model_path.name
+        # Hash verification
+        if self._hashes_path.exists():
+            with open(self._hashes_path) as f:
+                expected: Dict[str, str] = json.load(f)
+
+            key = self._model_path.name
             if key not in expected:
                 raise ValueError(
                     f"Hash manifest does not contain an entry for '{key}'. "
                     "Re-run scripts/convert_to_onnx.py to regenerate the manifest."
                 )
-            # HIGH-3 fix: read bytes once → hash → pass bytes to InferenceSession,
-            # closing the TOCTOU window between verification and load.
-            model_bytes = model_path.read_bytes()
+            model_bytes = self._model_path.read_bytes()
             actual = hashlib.sha256(model_bytes).hexdigest()
             if actual != expected[key]:
                 raise ValueError(
                     f"SHA-256 mismatch for '{key}': possible supply-chain tampering. "
-                    f"Expected {expected[key][:16]}…, got {actual[:16]}…"
+                    f"Expected {expected[key][:16]}..., got {actual[:16]}..."
                 )
-
-            setattr(self, attr, ort.InferenceSession(model_bytes))
-            logger.info("Loaded ONNX session: %s", model_path.name)
+            self._session = ort.InferenceSession(model_bytes)
+        else:
+            self._session = ort.InferenceSession(str(self._model_path))
+            logger.warning(
+                "Hash manifest not found at %s — loading model without "
+                "integrity verification.",
+                self._hashes_path,
+            )
 
         self._loaded = True
+        logger.info("Loaded ONNX session: %s", self._model_path.name)
 
     def _ensure_loaded(self) -> None:
         if not self._loaded:
-            self._load_sessions()
+            self._load_session()
 
     @property
     def is_loaded(self) -> bool:
@@ -192,35 +184,22 @@ class OnnxTwoStageVerifier(Verifier):
 
     @property
     def threshold(self) -> float:
-        return _STAGE_B_THRESHOLD
+        return self._threshold_high
 
     def _route(
         self, features: FeatureVector
     ) -> Tuple[bool, float, str]:
-        """
-        Two-stage routing: returns (is_secret, confidence, routing_label).
-
-        Stage A uses only the 23 token-only features; Stage B uses all 63.
-        """
+        """Single-model routing with Platt calibration and dual thresholds."""
         self._ensure_loaded()
 
-        stage_a_prob = _run_session(
-            self._stage_a_session, [features.to_token_only_array()]
-        )[0]
+        raw_prob = _run_session(self._session, [features.to_array()])[0]
+        prob = _apply_platt(raw_prob, self._platt_a, self._platt_b)
 
-        if stage_a_prob < _STAGE_A_LOW:
-            return False, 1.0 - stage_a_prob, "rejected_by_stage_a"
-
-        if stage_a_prob > _STAGE_A_HIGH:
-            return True, stage_a_prob, "accepted_by_stage_a"
-
-        # Ambiguous — consult Stage B (full feature set)
-        stage_b_prob = _run_session(
-            self._stage_b_session, [features.to_array()]
-        )[0]
-        is_secret = stage_b_prob >= _STAGE_B_THRESHOLD
-        confidence = stage_b_prob if is_secret else (1.0 - stage_b_prob)
-        return is_secret, confidence, "decided_by_stage_b"
+        if prob < self._threshold_low:
+            return False, 1.0 - prob, "safe"
+        if prob > self._threshold_high:
+            return True, prob, "blocked"
+        return True, prob, "review"
 
     def _combine_confidence(
         self,
@@ -229,6 +208,7 @@ class OnnxTwoStageVerifier(Verifier):
         evidence_type: "EvidenceType",
     ) -> float:
         from Harpocrates.core.result import EvidenceType
+
         if evidence_type == EvidenceType.REGEX:
             return 0.6 * original + 0.4 * ml
         return 0.3 * original + 0.7 * ml
@@ -256,7 +236,9 @@ class OnnxTwoStageVerifier(Verifier):
             ml_confidence=ml_confidence,
             original_confidence=original_confidence,
             combined_confidence=combined_confidence,
-            features_used=dict(zip(FeatureVector.get_feature_names(), features.to_array())),
+            features_used=dict(
+                zip(FeatureVector.get_feature_names(), features.to_array())
+            ),
             explanation=explanation,
         )
 
@@ -268,64 +250,53 @@ class OnnxTwoStageVerifier(Verifier):
             return []
         self._ensure_loaded()
 
-        # Extract features for all findings up-front
         all_features = [extract_features(f, ctx) for f, ctx in findings_with_context]
 
-        # Stage A: single batched ONNX call over all token-only feature rows
-        stage_a_probs = _run_session(
-            self._stage_a_session,
-            [fv.to_token_only_array() for fv in all_features],
+        raw_probs = _run_session(
+            self._session,
+            [fv.to_array() for fv in all_features],
         )
-
-        # Identify which rows need Stage B (ambiguous zone)
-        ambiguous_idx = [
-            i for i, p in enumerate(stage_a_probs)
-            if _STAGE_A_LOW <= p <= _STAGE_A_HIGH
-        ]
-
-        # Stage B: single batched ONNX call for ambiguous rows only
-        stage_b_probs: Dict[int, float] = {}
-        if ambiguous_idx:
-            b_results = _run_session(
-                self._stage_b_session,
-                [all_features[i].to_array() for i in ambiguous_idx],
-            )
-            stage_b_probs = dict(zip(ambiguous_idx, b_results))
 
         results = []
         for i, (finding, _ctx) in enumerate(findings_with_context):
-            a_prob = stage_a_probs[i]
-            if a_prob < _STAGE_A_LOW:
-                is_secret, ml_confidence, routing = False, 1.0 - a_prob, "rejected_by_stage_a"
-            elif a_prob > _STAGE_A_HIGH:
-                is_secret, ml_confidence, routing = True, a_prob, "accepted_by_stage_a"
+            prob = _apply_platt(raw_probs[i], self._platt_a, self._platt_b)
+
+            if prob < self._threshold_low:
+                is_secret, ml_confidence, routing = False, 1.0 - prob, "safe"
+            elif prob > self._threshold_high:
+                is_secret, ml_confidence, routing = True, prob, "blocked"
             else:
-                b_prob = stage_b_probs[i]
-                is_secret = b_prob >= _STAGE_B_THRESHOLD
-                ml_confidence = b_prob if is_secret else (1.0 - b_prob)
-                routing = "decided_by_stage_b"
+                is_secret, ml_confidence, routing = True, prob, "review"
 
             original_confidence = finding.confidence or 0.5
             combined_confidence = self._combine_confidence(
                 original_confidence, ml_confidence, finding.evidence
             )
             label = "likely secret" if is_secret else "likely safe"
-            results.append(VerificationResult(
-                is_secret=is_secret,
-                ml_confidence=ml_confidence,
-                original_confidence=original_confidence,
-                combined_confidence=combined_confidence,
-                features_used=dict(zip(
-                    FeatureVector.get_feature_names(), all_features[i].to_array()
-                )),
-                explanation=f"{label} ({ml_confidence:.0%} confidence) [ONNX/{routing}]",
-            ))
+            results.append(
+                VerificationResult(
+                    is_secret=is_secret,
+                    ml_confidence=ml_confidence,
+                    original_confidence=original_confidence,
+                    combined_confidence=combined_confidence,
+                    features_used=dict(
+                        zip(
+                            FeatureVector.get_feature_names(),
+                            all_features[i].to_array(),
+                        )
+                    ),
+                    explanation=f"{label} ({ml_confidence:.0%} confidence) [ONNX/{routing}]",
+                )
+            )
         return results
 
 
+# Backward compat alias — will be removed in cleanup (Step 8)
+OnnxTwoStageVerifier = OnnxVerifier
+
 __all__ = [
+    "OnnxVerifier",
     "OnnxTwoStageVerifier",
-    "ONNX_STAGE_A_PATH",
-    "ONNX_STAGE_B_PATH",
+    "ONNX_MODEL_PATH",
     "ONNX_HASHES_PATH",
 ]

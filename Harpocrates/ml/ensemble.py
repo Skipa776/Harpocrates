@@ -601,19 +601,19 @@ class TwoStageVerifier(Verifier):
         """Reset singleton instance (useful for testing)."""
         cls._instance = None
         try:
-            from Harpocrates.ml.onnx_verifier import OnnxTwoStageVerifier
+            from Harpocrates.ml.onnx_verifier import OnnxVerifier
         except ImportError:
             pass
         else:
-            OnnxTwoStageVerifier.reset_instance()
+            OnnxVerifier.reset_instance()
 
     def _load_models(self) -> None:
         """Load Stage A and Stage B models. Prefers ONNX runtime if available (v0.2.0)."""
         # v0.2.0: ONNX-first path — zero native ML dependencies at inference time
         try:
-            from Harpocrates.ml.onnx_verifier import OnnxTwoStageVerifier
-            if OnnxTwoStageVerifier.is_available():
-                self._onnx_verifier = OnnxTwoStageVerifier(lazy_load=False)
+            from Harpocrates.ml.onnx_verifier import OnnxVerifier
+            if OnnxVerifier.is_available():
+                self._onnx_verifier = OnnxVerifier(lazy_load=False)
                 self._use_onnx = True
                 self._loaded = True
                 logger.info("TwoStageVerifier: ONNX runtime active (v0.2.0)")
