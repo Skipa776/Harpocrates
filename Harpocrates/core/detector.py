@@ -34,10 +34,10 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-]{20,}")
 _URL_RE = re.compile(r"(?:https?://|data:)\S+")
 
 # Tier 1: pure base64 lines of PEM / X.509 certificate bodies.
-# RFC 7468 specifies exactly 64 chars per non-terminal body line. Using {64}
-# (not a range) avoids false-matching 60–63 or 65–76 char real-credential
-# lines in non-PEM contexts (raw AES-256 keys, JWT segments, etc.).
-_PEM_BODY_RE = re.compile(r"^[A-Za-z0-9+/]{64}$")
+# RFC 7468 specifies exactly 64 chars per non-terminal body line. The regex
+# matches both full 64-char lines and terminal lines with padding (1-2 '=' chars).
+# This prevents false positives on the final (shorter, padded) line of PEM blocks.
+_PEM_BODY_RE = re.compile(r"^(?:[A-Za-z0-9+/]{64}|[A-Za-z0-9+/]{1,63}={1,2})$")
 
 # Phase 2b: sensitive-variable assignment bypass — forwards low-entropy literals
 # assigned to clearly credential-named variables directly to ML, skipping the
@@ -76,7 +76,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     findings: List[Finding] = []
     stripped = line.strip()
 
-    if not stripped or stripped.startswith(("#", "/*#")):
+    if not stripped or stripped.startswith(("#", "//", "/*", "--")):
         return findings
 
     # ------------------------------------------------------------------
@@ -162,7 +162,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         snippet=stripped[:200],
                         entropy=ent,
                         evidence=EvidenceType.ML,
-                        severity=Severity.CRITICAL,
+                        severity=_entropy_severity(ent),
                         confidence=_calculate_entropy_confidence(ent),
                         token=value,
                     )
@@ -307,7 +307,8 @@ def detect_text_with_ml(
             ml_threshold=ml_threshold,
         )
     except Exception:
-        verified_entropy = entropy_findings
+        # Drop ML_CANDIDATE findings on verification failure - they need ML verification
+        verified_entropy = [f for f in entropy_findings if f.type != "ML_CANDIDATE"]
 
     return regex_findings + verified_entropy
 
@@ -366,7 +367,8 @@ def detect_file_with_ml(
             ml_threshold=ml_threshold,
         )
     except Exception:
-        verified_entropy = entropy_findings
+        # Drop ML_CANDIDATE findings on verification failure - they need ML verification
+        verified_entropy = [f for f in entropy_findings if f.type != "ML_CANDIDATE"]
 
     return regex_findings + verified_entropy
 

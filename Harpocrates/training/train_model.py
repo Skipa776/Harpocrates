@@ -53,7 +53,7 @@ def load_records(
     record_hashes: Set[str] = set()
     tokens: Set[str] = set()
 
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -486,11 +486,11 @@ def save_model(
     """Save trained XGBoost model and configuration."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model_path = output_dir / "xgboost_model.json"
+    model_path = output_dir / "stageA_xgboost.json"
     model.save_model(str(model_path))
 
     config_path = output_dir / "model_config.json"
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         json.dump(_convert_to_serializable(config), f, indent=2)
 
     if verbose:

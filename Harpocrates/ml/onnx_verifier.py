@@ -137,16 +137,19 @@ class OnnxVerifier(Verifier):
 
         # Load config for thresholds and Platt parameters
         if self._config_path.exists():
-            with open(self._config_path) as f:
+            with open(self._config_path, encoding="utf-8") as f:
                 config = json.load(f)
             self._threshold_low = config.get("threshold_low", _DEFAULT_THRESHOLD_LOW)
             self._threshold_high = config.get("threshold_high", _DEFAULT_THRESHOLD_HIGH)
             self._platt_a = config.get("platt_a", 0.0)
             self._platt_b = config.get("platt_b", 0.0)
 
-        # Hash verification
+        # Hash verification with fail-closed policy controlled by env var
+        import os
+        require_hashes = os.getenv("HARPOCRATES_REQUIRE_HASHES", "").lower() in ("1", "true", "yes")
+
         if self._hashes_path.exists():
-            with open(self._hashes_path) as f:
+            with open(self._hashes_path, encoding="utf-8") as f:
                 expected: Dict[str, str] = json.load(f)
 
             key = self._model_path.name
@@ -164,6 +167,12 @@ class OnnxVerifier(Verifier):
                 )
             self._session = ort.InferenceSession(model_bytes)
         else:
+            if require_hashes:
+                raise ValueError(
+                    f"Hash manifest not found at {self._hashes_path} and "
+                    "HARPOCRATES_REQUIRE_HASHES is set. Cannot load model without "
+                    "integrity verification."
+                )
             self._session = ort.InferenceSession(str(self._model_path))
             logger.warning(
                 "Hash manifest not found at %s — loading model without "

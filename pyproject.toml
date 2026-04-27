@@ -121,6 +121,8 @@ exclude = ["tests*", "examples*", "scripts*", "comparison*"]
 "Harpocrates.ml.models" = [
     "stageA_xgboost.json",
     "model_config.json",
+    "model.onnx",
+    "onnx_model_hashes.json",
 ]
 
 [tool.mypy]

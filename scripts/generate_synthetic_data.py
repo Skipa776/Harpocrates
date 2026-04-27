@@ -984,6 +984,8 @@ async def generate_llm_samples_async(
     pbar = tqdm(total=count, desc=f"{progress_prefix}LLM ({label_name})",
                 disable=not has_tqdm)
 
+    last_heartbeat_bucket = -1
+
     async with aiohttp.ClientSession() as session:
         batch_size = max_concurrent * 2
 
@@ -1004,9 +1006,12 @@ async def generate_llm_samples_async(
                 samples.extend(new_samples)
                 pbar.update(len(new_samples))
 
-            if attempts % 100 == 0:
+            # Print heartbeat when crossing a 100-sample boundary
+            current_bucket = attempts // 100
+            if current_bucket != last_heartbeat_bucket:
                 print(f"  [{progress_prefix}] {len(samples)}/{count} samples after {attempts} calls",
                       file=sys.stderr)
+                last_heartbeat_bucket = current_bucket
 
     pbar.close()
 

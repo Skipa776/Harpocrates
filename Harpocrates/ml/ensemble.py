@@ -606,21 +606,19 @@ class TwoStageVerifier(Verifier):
                 self._loaded = True
                 logger.info("TwoStageVerifier: ONNX runtime active (v0.2.0)")
                 return
+            else:
+                logger.error("ONNX verifier present but model not found")
+                raise FileNotFoundError(
+                    "ONNX model not found. Run `python scripts/convert_to_onnx.py` "
+                    "to generate model.onnx"
+                )
         except Exception as e:
-            logger.warning(
-                "ONNX load failed, falling back to native xgboost/lightgbm: %s", e
+            logger.error("ONNX unavailable: %s", e)
+            raise FileNotFoundError(
+                "ONNX model not found. Run `python scripts/convert_to_onnx.py` "
+                "to generate model.onnx, or install onnxruntime: "
+                "pip install onnxruntime"
             )
-            self._onnx_verifier = None
-            self._use_onnx = False
-
-        # Native fallback is no longer supported — ONNX is required.
-        # The old two-stage cascade (XGBoost + LightGBM) has been replaced
-        # by a single XGBoost model served via ONNX.
-        raise FileNotFoundError(
-            "ONNX model not found. Run `python scripts/convert_to_onnx.py` "
-            "to generate model.onnx, or install onnxruntime: "
-            "pip install onnxruntime"
-        )
 
     def _ensure_loaded(self) -> None:
         """Ensure models are loaded (lazy loading)."""

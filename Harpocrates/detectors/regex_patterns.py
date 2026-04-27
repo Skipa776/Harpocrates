@@ -36,7 +36,7 @@ CRITICAL_SIGNATURES: Dict[str, Pattern] = {
     ),
     # OpenAI legacy key and current project-scoped key.
     "OPENAI_API_KEY": re.compile(
-        r"\b(?:sk-[a-zA-Z0-9]{48}|sk-proj-[a-zA-Z0-9]{20}T3[a-zA-Z0-9]{20,})\b"
+        r"\b(?:sk-[a-zA-Z0-9]{48}|sk-proj-[a-zA-Z0-9]{48,})\b"
     ),
     # Anthropic Claude API key.
     "ANTHROPIC_API_KEY": re.compile(

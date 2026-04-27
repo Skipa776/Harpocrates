@@ -38,7 +38,7 @@ DEFAULT_IGNORE_PATTERNS = {
     # Tier 3: source map files — generated build artifacts, never contain secrets.
     "*.css.map", "*.js.map",
     # Tier 3: SAML/SP metadata XML — contain X.509 cert bodies, not credentials.
-    "*-metadata*.xml", "*sp.xml", "*idp.xml",
+    "*-metadata*.xml", "*-sp.xml", "*_sp.xml", "*-idp.xml", "*_idp.xml",
 }
 
 def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
@@ -60,10 +60,14 @@ def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
     if path_names & exact_patterns:
         return False
 
-    # Glob match against the file name only
+    # Glob match against the file name and also ancestor directory names
     for pattern in glob_patterns:
         if fnmatch.fnmatch(path.name, pattern):
             return False
+        # Also check ancestor directory component names
+        for ancestor in path.parents:
+            if fnmatch.fnmatch(ancestor.name, pattern):
+                return False
 
     return path.is_file()
 

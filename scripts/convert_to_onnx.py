@@ -67,21 +67,18 @@ def convert_xgboost(model_path: Path, output_path: Path, n_features: int) -> Non
 
 
 def smoke_test(model_path: Path) -> None:
-    """Quick single-row inference smoke test."""
+    """Quick single-row inference smoke test. Raises on failure."""
     print("\nRunning smoke test...")
-    try:
-        import numpy as np
-        import onnxruntime as ort
+    import numpy as np
+    import onnxruntime as ort
 
-        session = ort.InferenceSession(str(model_path))
-        dummy = np.zeros((1, N_FEATURES), dtype=np.float32)
-        result = session.run(None, {session.get_inputs()[0].name: dummy})
-        shapes = [
-            r.shape if hasattr(r, "shape") else type(r).__name__ for r in result
-        ]
-        print(f"  {model_path.name}: OK (output shapes: {shapes})")
-    except Exception as e:
-        print(f"  [WARN] Smoke test failed: {e}")
+    session = ort.InferenceSession(str(model_path))
+    dummy = np.zeros((1, N_FEATURES), dtype=np.float32)
+    result = session.run(None, {session.get_inputs()[0].name: dummy})
+    shapes = [
+        r.shape if hasattr(r, "shape") else type(r).__name__ for r in result
+    ]
+    print(f"  {model_path.name}: OK (output shapes: {shapes})")
 
 
 def write_hash_manifest(hashes: dict, manifest_path: Path) -> None:
@@ -105,7 +102,7 @@ def main() -> None:
         "--input",
         type=Path,
         default=None,
-        help="Path to xgboost_model.json (default: <model-dir>/xgboost_model.json)",
+        help="Path to stageA_xgboost.json (default: <model-dir>/stageA_xgboost.json)",
     )
     parser.add_argument(
         "--no-smoke-test",
@@ -115,7 +112,7 @@ def main() -> None:
     args = parser.parse_args()
 
     model_dir: Path = args.model_dir
-    model_in = args.input or model_dir / "xgboost_model.json"
+    model_in = args.input or model_dir / "stageA_xgboost.json"
     model_out = model_dir / "model.onnx"
     manifest_path = model_dir / "onnx_model_hashes.json"
 
@@ -126,7 +123,12 @@ def main() -> None:
     convert_xgboost(model_in, model_out, N_FEATURES)
 
     if not args.no_smoke_test:
-        smoke_test(model_out)
+        try:
+            smoke_test(model_out)
+        except Exception as e:
+            print(f"\nERROR: Smoke test failed: {e}")
+            print("ONNX model is broken. Not writing hash manifest.")
+            sys.exit(1)
 
     hashes = {model_out.name: _sha256(model_out)}
     write_hash_manifest(hashes, manifest_path)

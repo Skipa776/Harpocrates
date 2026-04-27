@@ -50,7 +50,7 @@ Pick one for the top of your README.
 
 ## Logo Lockups
 
-Use these anywhere a "logo" is needed — pure-type, no external assets required.
+Use these anywhere a "logo" is needed — PNG image assets are included; no external downloads or third-party dependencies required.
 
 **Horizontal**
 ```md

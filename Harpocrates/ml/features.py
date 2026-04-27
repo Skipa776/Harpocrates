@@ -1779,8 +1779,9 @@ def _detect_env_fallback_value(line: str, token_start_index: int) -> bool:
     """True IFF the token at `token_start_index` sits inside the fallback/default
     argument of an env-loader call.
 
-    Uses authoritative start index from upstream extraction (TokenMatch.start),
-    NOT line.find() which grabs the wrong occurrence if the token appears twice.
+    NOTE: Current callers may pass a find()-derived index (not authoritative).
+    For lines with duplicate token literals, this may match the wrong occurrence.
+    Ideally, upstream token extraction should provide precise start offsets.
     """
     for pattern in _FALLBACK_LOCATORS:
         match = pattern.search(line)
@@ -1854,6 +1855,8 @@ def extract_features(
 
     # Env-loading awareness features
     env_in_ctx = _detect_env_loader_in_context(context.full_context, context.line_content)
+    # Use find() to get token start - this may be wrong for duplicate tokens,
+    # but upstream doesn't currently provide authoritative position
     token_pos = context.line_content.find(token)
     env_fallback = _detect_env_fallback_value(context.line_content, token_pos) if token_pos >= 0 else False
 

@@ -206,7 +206,7 @@ def train_stage_b(
     if verbose:
         print("\n=== STAGE B: HIGH-PRECISION CONTEXT VERIFIER ===")
         print(f"Ambiguous samples: {len(y_train_ambiguous)} / {len(y_train)}")
-        print("Using all 63 features (including hex disambiguation features)")
+        print("Using all 65 features (including hex disambiguation features)")
 
     if len(X_train_ambiguous) < 100:
         if verbose:
@@ -592,7 +592,7 @@ def main():
         "stage_b": {
             "model_type": "lightgbm",
             "features": "all",
-            "feature_count": 58,
+            "feature_count": 65,
             "threshold": stage_b_threshold,
             "metrics": stage_b_metrics,
         },
