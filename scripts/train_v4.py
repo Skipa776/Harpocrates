@@ -68,7 +68,7 @@ def train_and_evaluate(
     """Train both stages and evaluate combined pipeline."""
     import lightgbm as lgb
     import xgboost as xgb
-    from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+    from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score
 
     token_indices = get_token_feature_indices()
     X_train_tokens = X_train[:, token_indices]

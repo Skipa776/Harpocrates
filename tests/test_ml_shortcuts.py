@@ -15,23 +15,18 @@ from __future__ import annotations
 
 import re
 import string
-from collections import Counter
-from typing import List, Set
-
-import pytest
 
 from Harpocrates.ml.features import FeatureVector, extract_features_from_record
 from Harpocrates.training.generators.generate_data import (
+    NEGATIVE_DISTRIBUTION,
+    POSITIVE_DISTRIBUTION,
     generate_adversarial_test_data,
     generate_training_data,
-    POSITIVE_DISTRIBUTION,
-    NEGATIVE_DISTRIBUTION,
 )
 from Harpocrates.training.generators.secret_templates import (
     generate_fake_prefixed_token,
     generate_hex_secret,
 )
-
 
 # Known secret prefixes
 KNOWN_PREFIXES = {"AKIA", "ghp_", "gho_", "sk-", "sk_live_", "sk_test_", "xoxb-", "xoxp-", "eyJ"}
@@ -290,7 +285,6 @@ class TestAdversarialRobustness:
         records = generate_adversarial_test_data(count=1000, seed=42)
 
         positive_count = sum(1 for r in records if r["label"] == 1)
-        negative_count = len(records) - positive_count
 
         # Should be roughly 50/50 (within 10%)
         ratio = positive_count / len(records)

@@ -22,14 +22,14 @@ Usage:
 """
 from __future__ import annotations
 
-from Harpocrates.llm.verifier import LLMVerifier, LLMVerificationResult
 from Harpocrates.llm.providers import (
+    AnthropicProvider,
     LLMProvider,
     OllamaProvider,
-    AnthropicProvider,
     OpenAIProvider,
     get_provider,
 )
+from Harpocrates.llm.verifier import LLMVerificationResult, LLMVerifier
 
 __all__ = [
     "LLMVerifier",

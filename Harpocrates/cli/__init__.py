@@ -435,7 +435,7 @@ def train(
             train_lightgbm_model,
             train_model,
         )
-    except ImportError as e:
+    except ImportError:
         error_console.print(
             "[red]✗[/red] ML dependencies not installed. "
             "Install with: pip install harpocrates[ml]"
@@ -562,7 +562,7 @@ def train(
         model_type=model_type,
     )
 
-    console.print(f"\n[green]✓[/green] Training complete!")
+    console.print("\n[green]✓[/green] Training complete!")
     if "precision" in metrics:
         console.print(f"  Precision: {metrics['precision']:.3f}")
         console.print(f"  Recall: {metrics['recall']:.3f}")
@@ -690,7 +690,7 @@ def generate_data(
         _write_jsonl(val_path, val_data)
         _write_jsonl(test_path, test_data)
 
-        console.print(f"\n[green]✓[/green] Generated split datasets:")
+        console.print("\n[green]✓[/green] Generated split datasets:")
         console.print(f"  Train: {train_path} ({len(train_data)} examples)")
         console.print(f"  Val: {val_path} ({len(val_data)} examples)")
         console.print(f"  Test: {test_path} ({len(test_data)} examples)")
@@ -800,7 +800,7 @@ def serve(
     if reload:
         os.environ["HARPOCRATES_DEBUG"] = "true"
 
-    console.print(f"[cyan]ℹ[/cyan] Starting Harpocrates API server...")
+    console.print("[cyan]ℹ[/cyan] Starting Harpocrates API server...")
     console.print(f"  Host: {host}")
     console.print(f"  Port: {port}")
     console.print(f"  Workers: {workers}")

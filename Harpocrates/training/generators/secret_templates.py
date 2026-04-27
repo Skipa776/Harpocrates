@@ -764,15 +764,15 @@ def generate_content_hash_with_context() -> Tuple[str, str, str]:
 
     var_names = [
         f"file_checksum_{hash_type}",
-        f"content_hash",
-        f"integrity_hash",
-        f"package_hash",
+        "content_hash",
+        "integrity_hash",
+        "package_hash",
         f"checksum_{hash_type}",
         f"digest_{hash_type}",
         f"{hash_type}_hash",
         f"file_{hash_type}",
-        f"expected_hash",
-        f"computed_hash",
+        "expected_hash",
+        "computed_hash",
     ]
     var_name = random.choice(var_names)
     return hash_value, var_name, hash_type

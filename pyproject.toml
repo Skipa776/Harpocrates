@@ -85,11 +85,24 @@ target-version = "py38"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
-ignore = ["E501"]  # Line too long (handled by formatter)
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "N999",   # Invalid module name — capital 'Harpocrates' is intentional brand casing
+]
 
 [tool.ruff.lint.per-file-ignores]
-# N803/N806: X_train, X_val, etc. follow sklearn/numpy ML convention (uppercase = feature matrix)
+# N803/N806: uppercase X_train/X_val follow sklearn/numpy ML convention
 "Harpocrates/training/train_model.py" = ["N803", "N806"]
+"Harpocrates/training/train_two_stage.py" = ["N803", "N806"]
+"Harpocrates/training/cross_validation.py" = ["N803", "N806"]
+"Harpocrates/training/train.py" = ["N806"]
+"Harpocrates/training/evaluate.py" = ["N806"]
+"Harpocrates/training/generators/generate_data.py" = ["N806"]
+# scripts/ are dev-only exploratory tools — ML naming conventions and late imports expected
+"scripts/*.py" = ["N803", "N806", "E402", "F841"]
+# E402: intentional late import (optional heavy deps loaded after availability check)
+"Harpocrates/api/main.py" = ["E402"]
+"Harpocrates/ml/ensemble.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

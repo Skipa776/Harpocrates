@@ -155,7 +155,8 @@ def _rand_hex(n: int) -> str:
 
 
 def _rand_b64(n_bytes: int) -> str:
-    import base64, os
+    import base64
+    import os
     return base64.b64encode(os.urandom(n_bytes)).decode("ascii").rstrip("=")
 
 
@@ -475,7 +476,7 @@ def _neg_bcrypt_hash() -> Dict[str, Any]:
     return {
         "token": full_hash,
         "line_content": f'    "{var}": "{full_hash}",',
-        "context_before": ['  "user": {', f'    "email": "alice@example.com",'],
+        "context_before": ['  "user": {', '    "email": "alice@example.com",'],
         "context_after":  ['    "created_at": "2024-01-15T10:30:00Z"', "  },"],
         "file_path": random.choice(["db/seeds.json", "tests/fixtures/users.json",
                                      "data/user_dump.json"]),

@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from Harpocrates.llm.providers import LLMProvider, LLMResponse
 

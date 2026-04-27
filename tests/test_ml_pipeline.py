@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -100,7 +99,6 @@ class TestDataGeneration:
         data = generate_training_data(count=1000, balance=0.5, seed=42)
 
         positive_count = sum(1 for d in data if d["label"] == 1)
-        negative_count = len(data) - positive_count
 
         # Allow 10% tolerance
         assert 0.4 <= positive_count / len(data) <= 0.6
@@ -181,7 +179,7 @@ class TestVerifierNoCrash:
         # These tests just verify no exceptions are raised
         # Model may not be trained, so we catch FileNotFoundError
         try:
-            verifier = XGBoostVerifier(lazy_load=True)
+            XGBoostVerifier(lazy_load=True)
         except (ImportError, FileNotFoundError):
             pytest.skip("XGBoost or model not available")
 
@@ -342,11 +340,11 @@ class TestTrainingFunctions:
     def test_train_model_import(self):
         """Test training functions can be imported."""
         try:
-            from Harpocrates.training.train import (
-                train_model,
-                train_lightgbm_model,
-                train_ensemble,
+            from Harpocrates.training.train import (  # noqa: F401
                 save_model,
+                train_ensemble,
+                train_lightgbm_model,
+                train_model,
             )
         except ImportError:
             pytest.skip("ML dependencies not available")

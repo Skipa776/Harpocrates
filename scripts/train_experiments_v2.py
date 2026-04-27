@@ -17,10 +17,9 @@ from __future__ import annotations
 import json
 import pickle
 import sys
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
@@ -31,7 +30,7 @@ def load_training_data(
     data_path: Path,
 ) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
     """Load training data from pickle file."""
-    from Harpocrates.ml.features import FeatureVector, extract_features_from_record
+    from Harpocrates.ml.features import extract_features_from_record
 
     with open(data_path, "rb") as f:
         # WARNING: pickle can execute arbitrary code. Only load from trusted sources.
@@ -71,7 +70,7 @@ def analyze_feature_importance(
 ) -> Dict[str, Any]:
     """Analyze feature importance and correlation with errors."""
     import lightgbm as lgb
-    from sklearn.metrics import precision_score, recall_score
+
     from Harpocrates.ml.features import FeatureVector
 
     feature_names = FeatureVector.get_feature_names()
@@ -129,7 +128,7 @@ def train_with_focal_loss(
 ) -> Tuple[Any, Dict[str, float]]:
     """Train with focal loss for harder examples."""
     import lightgbm as lgb
-    from sklearn.metrics import precision_score, recall_score, f1_score
+    from sklearn.metrics import f1_score, precision_score, recall_score
 
     # LightGBM with focal loss via custom objective
     def focal_loss_lgb(y_true, y_pred):
@@ -220,7 +219,7 @@ def train_ensemble_stage_b(
     import lightgbm as lgb
     import xgboost as xgb
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import precision_score, recall_score, f1_score
+    from sklearn.metrics import f1_score, precision_score, recall_score
 
     models = []
 
@@ -302,8 +301,7 @@ def train_with_high_precision_focus(
 ) -> Dict[str, Any]:
     """Train with focus on high precision while maintaining 90% recall."""
     import lightgbm as lgb
-    import xgboost as xgb
-    from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+    from sklearn.metrics import f1_score, precision_score, recall_score
 
     token_indices = get_token_feature_indices()
     X_train_tokens = X_train[:, token_indices]
@@ -444,7 +442,7 @@ def run_v2_experiments():
     print("=" * 60)
 
     import xgboost as xgb
-    from sklearn.metrics import precision_recall_curve, roc_auc_score
+    from sklearn.metrics import roc_auc_score
 
     token_indices = get_token_feature_indices()
     X_train_tokens = X_train[:, token_indices]
@@ -547,7 +545,7 @@ def run_v2_experiments():
         high_recall = [r for r in all_results if r["recall"] >= 0.90]
         if high_recall:
             best_prec = max(high_recall, key=lambda x: x["precision"])
-            print(f"\nBest precision with recall >= 90%:")
+            print("\nBest precision with recall >= 90%:")
             print(f"  Stage A: ({best_prec['stage_a_low']:.2f}, {best_prec['stage_a_high']:.2f})")
             print(f"  Stage B threshold: {best_prec['stage_b_threshold']:.2f}")
             print(f"  Precision: {best_prec['precision']:.2%}")
