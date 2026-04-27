@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -131,11 +132,14 @@ def _write_github_token(tmp_path: Path) -> Path:
     return file_path
 
 
+_ANSI_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+
 def test_cli_scan_show_secrets_flag_in_help() -> None:
     """--show-secrets should be documented in scan --help."""
     result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0
-    assert "--show-secrets" in result.stdout
+    assert "--show-secrets" in _ANSI_RE.sub("", result.stdout)
 
 
 def test_cli_scan_table_redacts_by_default(tmp_path: Path) -> None:
@@ -298,7 +302,7 @@ def test_cli_scan_fail_on_help_documents_flag() -> None:
     result = runner.invoke(app, ["scan", "--help"])
 
     assert result.exit_code == 0
-    assert "--fail-on" in result.stdout
+    assert "--fail-on" in _ANSI_RE.sub("", result.stdout)
 
 
 def test_cli_scan_fail_on_below_threshold_exits_zero(
