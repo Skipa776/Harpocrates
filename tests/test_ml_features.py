@@ -133,15 +133,15 @@ class TestFeatureVector:
     """Tests for complete feature vector extraction."""
 
     def test_feature_vector_length(self):
-        """Test that feature vector has 63 features (58 original + 5 hex disambiguation)."""
+        """Test that feature vector has 65 features (63 original + 2 env-loading features)."""
         fv = FeatureVector()
         array = fv.to_array()
-        assert len(array) == 63
+        assert len(array) == 65
 
     def test_feature_names(self):
         """Test that feature names are defined."""
         names = FeatureVector.get_feature_names()
-        assert len(names) == 63
+        assert len(names) == 65
         assert "token_length" in names
         assert "var_contains_secret" in names
         assert "file_is_test" in names

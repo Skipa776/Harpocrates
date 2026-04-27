@@ -59,7 +59,7 @@ def test_scan_directory_with_secrets(tmp_path: Path) -> None:
 
     assert result.found_secrets
     assert result.scanned_files >= 1
-    assert any(f.type == "GITHUB_TOKEN" for f in result.findings)
+    assert any(f.type == "GITHUB_PAT" for f in result.findings)
 
 
 def test_scan_directory_recursive(tmp_path: Path) -> None:

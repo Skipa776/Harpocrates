@@ -87,6 +87,10 @@ target-version = "py38"
 select = ["E", "F", "I", "N", "W"]
 ignore = ["E501"]  # Line too long (handled by formatter)
 
+[tool.ruff.lint.per-file-ignores]
+# N803/N806: X_train, X_val, etc. follow sklearn/numpy ML convention (uppercase = feature matrix)
+"Harpocrates/training/train_model.py" = ["N803", "N806"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -100,11 +104,7 @@ exclude = ["tests*", "examples*", "scripts*", "comparison*"]
 [tool.setuptools.package-data]
 "Harpocrates.ml.models" = [
     "stageA_xgboost.json",
-    "stageB_lightgbm.txt",
-    "two_stage_config.json",
-    "stageA.onnx",
-    "stageB.onnx",
-    "onnx_model_hashes.json",
+    "model_config.json",
 ]
 
 [tool.mypy]

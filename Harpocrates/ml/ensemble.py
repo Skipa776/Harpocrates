@@ -147,12 +147,7 @@ class EnsembleVerifier(Verifier):
         except (ImportError, FileNotFoundError) as e:
             if self._config.require_both_models:
                 raise
-            logger.warning(
-                "XGBoost model failed to load (path=%s): %s",
-                self._xgboost_path,
-                str(e),
-                exc_info=True,
-            )
+            logger.info("XGBoost model not loaded (path=%s): %s", self._xgboost_path, str(e))
             self._xgboost_verifier = None
 
         # Load LightGBM (optional)
@@ -166,12 +161,7 @@ class EnsembleVerifier(Verifier):
         except (ImportError, FileNotFoundError) as e:
             if self._config.require_both_models:
                 raise
-            logger.warning(
-                "LightGBM model failed to load (path=%s): %s",
-                self._lightgbm_path,
-                str(e),
-                exc_info=True,
-            )
+            logger.info("LightGBM model not loaded (path=%s): %s", self._lightgbm_path, str(e))
             self._lightgbm_verifier = None
 
         # Ensure at least one model is loaded
@@ -915,18 +905,21 @@ class TwoStageVerifier(Verifier):
         return results
 
 
+SINGLE_STAGE_MODEL_PATH = DEFAULT_MODEL_DIR / "stageA_xgboost.json"
+
+
 def get_verifier(mode: str = "auto") -> Verifier:
     """
     Get the appropriate verifier based on mode.
 
     Args:
         mode: "two_stage", "single_stage", or "auto" (default)
-              - "auto": Uses two-stage if models exist, else single-stage
-              - "two_stage": Forces two-stage (raises error if unavailable)
-              - "single_stage": Forces single-stage legacy mode
+              - "auto": ONNX (if model.onnx exists) → native XGBoost
+              - "two_stage": Forces TwoStageVerifier (ONNX-backed)
+              - "single_stage": Forces legacy EnsembleVerifier (old installs)
 
     Returns:
-        Verifier instance (TwoStageVerifier or EnsembleVerifier)
+        Verifier instance
     """
     if mode == "two_stage":
         return TwoStageVerifier.get_instance()
@@ -934,15 +927,22 @@ def get_verifier(mode: str = "auto") -> Verifier:
     if mode == "single_stage":
         return EnsembleVerifier.get_instance()
 
-    # Auto mode: prefer two-stage if available
-    if TWO_STAGE_CONFIG_PATH.exists() and STAGE_A_MODEL_PATH.exists():
-        try:
-            return TwoStageVerifier.get_instance()
-        except Exception as e:
-            logger.warning("Failed to load two-stage verifier: %s", e)
+    # Auto mode (v0.2.0): ONNX first, then native single-stage XGBoost.
+    # The legacy EnsembleVerifier (lightgbm-dependent) is never reached here.
+    try:
+        from Harpocrates.ml.onnx_verifier import OnnxVerifier
+        if OnnxVerifier.is_available():
+            return OnnxVerifier.get_instance()
+    except ImportError:
+        pass  # onnxruntime not installed; fall through to native XGBoost
 
-    # Fallback to single-stage
-    return EnsembleVerifier.get_instance()
+    if SINGLE_STAGE_MODEL_PATH.exists():
+        return XGBoostVerifier.get_instance(model_path=SINGLE_STAGE_MODEL_PATH)
+
+    raise FileNotFoundError(
+        f"No ML model available. Expected {SINGLE_STAGE_MODEL_PATH.name} "
+        f"or model.onnx in {DEFAULT_MODEL_DIR}. Train one with `harpocrates train`."
+    )
 
 
 __all__ = [

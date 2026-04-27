@@ -4,11 +4,20 @@ Single-stage XGBoost training for Harpocrates ML.
 Trains a single XGBoost model on all 65 features with Platt scaling
 for calibrated probabilities and dual-threshold decision logic.
 
-Usage:
-    python -m Harpocrates.training.train_model \
-        --train-data train_transformed.jsonl \
-        --val-data test_holdout.jsonl \
-        --output-dir Harpocrates/ml/models \
+Usage (auto-split 65/10/10/15, with OOD golden eval):
+    python -m Harpocrates.training.train_model \\
+        --data data/synthetic_v2_full.jsonl \\
+        --golden-data data/golden_test.jsonl \\
+        --output-dir Harpocrates/ml/models \\
+        --seed 42
+
+Usage (explicit splits):
+    python -m Harpocrates.training.train_model \\
+        --train-data train.jsonl \\
+        --val-data val.jsonl \\
+        --cal-data cal.jsonl \\
+        --test-data test.jsonl \\
+        --output-dir Harpocrates/ml/models \\
         --seed 42
 """
 from __future__ import annotations
@@ -17,43 +26,192 @@ import argparse
 import json
 import sys
 from datetime import datetime
+from hashlib import sha1
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
-
 
 N_FEATURES = 65
 
 
-def load_dataset(path: Path) -> Tuple[np.ndarray, np.ndarray, List[dict]]:
-    """Load dataset and extract 65-feature vectors from JSONL records."""
-    from Harpocrates.ml.features import extract_features_from_record
+# ---------------------------------------------------------------------------
+# Phase 1 helpers: load records (no feature extraction yet)
+# ---------------------------------------------------------------------------
 
+
+def load_records(
+    path: Path, deduplicate: bool = True
+) -> Tuple[List[dict], Set[str], Set[str]]:
+    """Load JSONL and optionally deduplicate within the file.
+
+    Returns (records, record_hashes, tokens) where:
+    - record_hashes: sha1(token + "|" + line_content) per surviving record
+    - tokens: unique token strings from surviving records
+    """
     records: List[dict] = []
-    features: List[List[float]] = []
-    labels: List[int] = []
+    record_hashes: Set[str] = set()
+    tokens: Set[str] = set()
 
     with open(path) as f:
         for line in f:
+            line = line.strip()
+            if not line:
+                continue
             record = json.loads(line)
+            h = sha1(
+                f"{record['token']}|{record['line_content']}".encode()
+            ).hexdigest()
+            if deduplicate and h in record_hashes:
+                continue
+            record_hashes.add(h)
+            tokens.add(record["token"])
             records.append(record)
-            try:
-                fv = extract_features_from_record(record)
-                arr = fv.to_array()
-                if len(arr) != N_FEATURES:
-                    print(
-                        f"Warning: Expected {N_FEATURES} features, got {len(arr)}. "
-                        f"Skipping record."
-                    )
-                    continue
-                features.append(arr)
-                labels.append(record["label"])
-            except Exception as e:
-                print(f"Warning: Failed to extract features: {e}")
+
+    return records, record_hashes, tokens
+
+
+def extract_features_from_records(
+    records: List[dict],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Extract 65-dim feature vectors and labels from in-memory records."""
+    from Harpocrates.ml.features import extract_features_from_record
+
+    features: List[List[float]] = []
+    labels: List[int] = []
+
+    for i, record in enumerate(records):
+        try:
+            fv = extract_features_from_record(record)
+            arr = fv.to_array()
+            if len(arr) != N_FEATURES:
+                print(
+                    f"Warning: Expected {N_FEATURES} features, got {len(arr)} "
+                    f"(record {i}). Skipping."
+                )
+                continue
+            features.append(arr)
+            labels.append(record["label"])
+        except Exception as e:
+            print(f"Warning: Feature extraction failed for record {i}: {e}")
+            continue
+
+    return np.array(features), np.array(labels)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 helper: cross-split overlap protection
+# ---------------------------------------------------------------------------
+
+
+def check_cross_split_overlap(
+    split_records: Dict[str, List[dict]],
+    split_record_hashes: Dict[str, Set[str]],
+    split_tokens: Dict[str, Set[str]],
+    max_drop_pct: float = 0.20,
+    verbose: bool = True,
+) -> Dict[str, List[dict]]:
+    """Three-tier cross-split protection.
+
+    Exact record-hash overlap between any two splits → raises ValueError.
+    Token-only overlap → records dropped from the lower-priority split
+    (train stays pristine; val > cal > test in priority order).
+    Drop budget: if token-dropping would remove > max_drop_pct of any
+    held-out split → raises ValueError instead of silently shrinking.
+    """
+    priority = {"train": 0, "val": 1, "cal": 2, "test": 3}
+    splits = sorted(split_records.keys(), key=lambda s: priority.get(s, 99))
+
+    filtered_records = {k: list(v) for k, v in split_records.items()}
+    filtered_tokens: Dict[str, Set[str]] = {k: set(v) for k, v in split_tokens.items()}
+
+    for i, split_a in enumerate(splits):
+        for split_b in splits[i + 1 :]:
+            pa = priority.get(split_a, 99)
+            pb = priority.get(split_b, 99)
+            higher, lower = (split_a, split_b) if pa <= pb else (split_b, split_a)
+
+            # Exact duplicate check — always fatal.
+            hash_overlap = split_record_hashes[split_a] & split_record_hashes[split_b]
+            if hash_overlap:
+                samples = list(hash_overlap)[:5]
+                raise ValueError(
+                    f"Exact duplicate records between '{split_a}' and '{split_b}': "
+                    f"{len(hash_overlap)} duplicates. First 5 hashes: {samples}"
+                )
+
+            # Token-only overlap — drop from the lower-priority split.
+            token_overlap = filtered_tokens[higher] & filtered_tokens[lower]
+            if not token_overlap:
                 continue
 
-    return np.array(features), np.array(labels), records
+            current = filtered_records[lower]
+            would_drop = sum(1 for r in current if r["token"] in token_overlap)
+            if current:
+                drop_pct = would_drop / len(current)
+                if drop_pct > max_drop_pct:
+                    samples = list(token_overlap)[:5]
+                    raise ValueError(
+                        f"Token overlap between '{higher}' and '{lower}' would drop "
+                        f"{drop_pct:.1%} ({would_drop}/{len(current)} records) — "
+                        f"exceeds max_drop_pct={max_drop_pct:.0%}. "
+                        f"Data generator is producing too much overlap. "
+                        f"First 5 overlapping tokens: {samples}"
+                    )
+
+            filtered_records[lower] = [
+                r for r in current if r["token"] not in token_overlap
+            ]
+            if verbose:
+                print(
+                    f"  Cross-split: dropped {would_drop} token-overlapping records "
+                    f"from '{lower}' (overlap with '{higher}')"
+                )
+            filtered_tokens[lower] = {r["token"] for r in filtered_records[lower]}
+
+    return filtered_records
+
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+
+
+def report_feature_importance(
+    model: Any,
+    top_n: int = 10,
+    dominance_threshold: float = 0.80,
+    verbose: bool = True,
+) -> Dict[str, float]:
+    """Print top feature importances and warn if a single feature dominates."""
+    from Harpocrates.ml.features import FeatureVector
+
+    importances = model.feature_importances_
+    feature_names = FeatureVector.get_feature_names()
+    pairs = sorted(zip(feature_names, importances), key=lambda x: -x[1])
+    top = pairs[:top_n]
+
+    if verbose:
+        print(f"\n=== FEATURE IMPORTANCE (Top {top_n}) ===")
+        for name, imp in top:
+            print(f"  {name:<42} {imp:.4f}")
+
+    total = float(importances.sum())
+    if total > 0:
+        top1_pct = float(importances.max()) / total
+        if top1_pct > dominance_threshold:
+            top1_name = feature_names[int(importances.argmax())]
+            print(
+                f"\nWARNING: '{top1_name}' accounts for {top1_pct:.1%} of total "
+                f"importance — possible leakage signal."
+            )
+
+    return {name: float(imp) for name, imp in top}
+
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
 
 
 def train_xgboost(
@@ -117,34 +275,35 @@ def train_xgboost(
         y_proba = model.predict_proba(X_val)[:, 1]
         metrics["auc_roc"] = float(roc_auc_score(y_val, y_proba))
         if verbose:
-            print(f"\nRaw XGBoost AUC-ROC: {metrics['auc_roc']:.4f}")
+            print(f"\nRaw XGBoost AUC-ROC (val): {metrics['auc_roc']:.4f}")
 
     return model, metrics
 
 
 def calibrate_model(
     model: Any,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
+    X_cal: np.ndarray,
+    y_cal: np.ndarray,
     verbose: bool = True,
 ) -> Any:
-    """Fit Platt scaling on validation set for calibrated probabilities.
+    """Fit Platt scaling on the calibration set for calibrated probabilities.
 
-    After calibration, P=0.85 means "85% of tokens with this score are
-    actually secrets."
+    The calibration set must be disjoint from the validation set used for
+    early stopping. After calibration, P=0.85 means "85% of tokens with
+    this score are actually secrets."
     """
     from sklearn.calibration import CalibratedClassifierCV
     from sklearn.metrics import brier_score_loss
 
     calibrator = CalibratedClassifierCV(model, method="sigmoid", cv="prefit")
-    calibrator.fit(X_val, y_val)
+    calibrator.fit(X_cal, y_cal)
 
     if verbose:
-        raw_proba = model.predict_proba(X_val)[:, 1]
-        cal_proba = calibrator.predict_proba(X_val)[:, 1]
-        raw_brier = brier_score_loss(y_val, raw_proba)
-        cal_brier = brier_score_loss(y_val, cal_proba)
-        print(f"\n=== PLATT SCALING ===")
+        raw_proba = model.predict_proba(X_cal)[:, 1]
+        cal_proba = calibrator.predict_proba(X_cal)[:, 1]
+        raw_brier = brier_score_loss(y_cal, raw_proba)
+        cal_brier = brier_score_loss(y_cal, cal_proba)
+        print("\n=== PLATT SCALING ===")
         print(f"Brier score (raw):        {raw_brier:.4f}")
         print(f"Brier score (calibrated): {cal_brier:.4f}")
         if cal_brier > 0.1:
@@ -197,19 +356,25 @@ def find_dual_thresholds(
         threshold_high = 0.85
 
     # F1-maximizing single threshold
-    f1_scores = 2 * precisions[:-1] * recalls[:-1] / (
-        precisions[:-1] + recalls[:-1] + 1e-10
+    f1_scores = (
+        2
+        * precisions[:-1]
+        * recalls[:-1]
+        / (precisions[:-1] + recalls[:-1] + 1e-10)
     )
     optimal_idx = np.argmax(f1_scores)
     optimal_threshold = float(thresholds[optimal_idx])
 
     if verbose:
-        print(f"\n=== DUAL THRESHOLDS ===")
-        print(f"Threshold low  (recall >= {target_recall:.0%}):    {threshold_low:.4f}")
-        print(f"Threshold high (precision >= {target_precision:.0%}): {threshold_high:.4f}")
+        print("\n=== DUAL THRESHOLDS ===")
+        print(
+            f"Threshold low  (recall >= {target_recall:.0%}):    {threshold_low:.4f}"
+        )
+        print(
+            f"Threshold high (precision >= {target_precision:.0%}): {threshold_high:.4f}"
+        )
         print(f"Optimal F1 threshold:                    {optimal_threshold:.4f}")
 
-        # Review zone stats
         review_mask = (y_proba >= threshold_low) & (y_proba <= threshold_high)
         review_pct = review_mask.sum() / len(y_proba) * 100
         print(f"Review zone:  {review_mask.sum()}/{len(y_proba)} ({review_pct:.1f}%)")
@@ -221,11 +386,16 @@ def evaluate(
     calibrator: Any,
     threshold_low: float,
     threshold_high: float,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    label: str = "TEST",
     verbose: bool = True,
 ) -> Dict[str, Any]:
-    """Evaluate model with dual-threshold decision logic."""
+    """Evaluate model with dual-threshold decision logic on a held-out test set.
+
+    `label` is used only in printed headers to distinguish evaluation passes
+    (e.g. "SYNTHETIC TEST" vs "GOLDEN OOD").
+    """
     from sklearn.metrics import (
         accuracy_score,
         classification_report,
@@ -236,21 +406,20 @@ def evaluate(
         roc_auc_score,
     )
 
-    y_proba = calibrator.predict_proba(X_val)[:, 1]
+    y_proba = calibrator.predict_proba(X_test)[:, 1]
 
-    # Apply dual thresholds
     safe_mask = y_proba < threshold_low
     secret_mask = y_proba > threshold_high
     review_mask = ~safe_mask & ~secret_mask
 
-    # For evaluation: REVIEW and SECRET both count as "flagged"
+    # REVIEW and SECRET both count as "flagged"
     y_pred = np.where(safe_mask, 0, 1)
 
-    precision = precision_score(y_val, y_pred)
-    recall = recall_score(y_val, y_pred)
-    f1 = f1_score(y_val, y_pred)
-    accuracy = accuracy_score(y_val, y_pred)
-    auc_roc = roc_auc_score(y_val, y_proba)
+    precision = precision_score(y_test, y_pred)
+    recall = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    accuracy = accuracy_score(y_test, y_pred)
+    auc_roc = roc_auc_score(y_test, y_proba)
 
     metrics = {
         "precision": float(precision),
@@ -263,29 +432,34 @@ def evaluate(
         "safe_count": int(safe_mask.sum()),
         "secret_count": int(secret_mask.sum()),
         "review_count": int(review_mask.sum()),
-        "review_zone_pct": float(review_mask.sum() / len(y_val) * 100),
+        "review_zone_pct": float(review_mask.sum() / len(y_test) * 100),
     }
 
     if verbose:
-        print("\n=== EVALUATION RESULTS ===")
+        print(f"\n=== EVALUATION: {label} ===")
         print(f"Precision: {precision:.2%}")
         print(f"Recall:    {recall:.2%}")
         print(f"F1 Score:  {f1:.4f}")
         print(f"Accuracy:  {accuracy:.2%}")
         print(f"AUC-ROC:   {auc_roc:.4f}")
-        print(f"\nRouting breakdown:")
-        print(f"  SAFE:    {safe_mask.sum()} ({safe_mask.sum()/len(y_val):.1%})")
-        print(f"  REVIEW:  {review_mask.sum()} ({review_mask.sum()/len(y_val):.1%})")
-        print(f"  SECRET:  {secret_mask.sum()} ({secret_mask.sum()/len(y_val):.1%})")
+        print("\nRouting breakdown:")
+        print(f"  SAFE:    {safe_mask.sum()} ({safe_mask.sum()/len(y_test):.1%})")
+        print(f"  REVIEW:  {review_mask.sum()} ({review_mask.sum()/len(y_test):.1%})")
+        print(f"  SECRET:  {secret_mask.sum()} ({secret_mask.sum()/len(y_test):.1%})")
         print(
-            f"\n{classification_report(y_val, y_pred, target_names=['Non-Secret', 'Secret'])}"
+            f"\n{classification_report(y_test, y_pred, target_names=['Non-Secret', 'Secret'])}"
         )
-        cm = confusion_matrix(y_val, y_pred)
-        print(f"Confusion Matrix:")
+        cm = confusion_matrix(y_test, y_pred)
+        print("Confusion Matrix:")
         print(f"  TN={cm[0, 0]}, FP={cm[0, 1]}")
         print(f"  FN={cm[1, 0]}, TP={cm[1, 1]}")
 
     return metrics
+
+
+# ---------------------------------------------------------------------------
+# Serialization + persistence
+# ---------------------------------------------------------------------------
 
 
 def _convert_to_serializable(obj: Any) -> Any:
@@ -320,29 +494,64 @@ def save_model(
         json.dump(_convert_to_serializable(config), f, indent=2)
 
     if verbose:
-        print(f"\nModel saved:")
+        print("\nModel saved:")
         print(f"  XGBoost: {model_path}")
         print(f"  Config:  {config_path}")
 
     return {"model": model_path, "config": config_path}
 
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Train single-stage XGBoost model for secret detection"
     )
-    parser.add_argument(
+
+    # Data source: --data (auto-split) OR --train-data (explicit splits).
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
+        "--data",
+        "-d",
+        type=Path,
+        metavar="JSONL",
+        help="Single JSONL; auto-split 65/10/10/15 (train/val/cal/test)",
+    )
+    source_group.add_argument(
         "--train-data",
         "-t",
         type=Path,
-        required=True,
-        help="Path to training data JSONL file",
+        metavar="JSONL",
+        help="Training data JSONL",
     )
     parser.add_argument(
         "--val-data",
         "-v",
         type=Path,
-        help="Path to validation data JSONL file (required for calibration)",
+        metavar="JSONL",
+        help="Validation JSONL (early stopping only)",
+    )
+    parser.add_argument(
+        "--cal-data",
+        type=Path,
+        metavar="JSONL",
+        help="Calibration JSONL (Platt scaling + threshold search only)",
+    )
+    parser.add_argument(
+        "--test-data",
+        type=Path,
+        metavar="JSONL",
+        help="Test JSONL (final synthetic evaluation only)",
+    )
+    parser.add_argument(
+        "--golden-data",
+        type=Path,
+        default=None,
+        metavar="JSONL",
+        help="OOD golden test set JSONL — quarantined, evaluated independently",
     )
     parser.add_argument(
         "--output-dir",
@@ -351,12 +560,7 @@ def main() -> None:
         default=Path("Harpocrates/ml/models"),
         help="Output directory for models",
     )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed for reproducibility",
-    )
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--target-recall",
         type=float,
@@ -370,11 +574,14 @@ def main() -> None:
         help="Minimum precision for threshold_high",
     )
     parser.add_argument(
-        "--quiet",
-        "-q",
-        action="store_true",
-        help="Suppress verbose output",
+        "--max-overlap",
+        type=float,
+        default=0.20,
+        metavar="FRAC",
+        help="Max fraction of a held-out split that may be dropped due to token overlap "
+        "before raising an error (default: 0.20)",
     )
+    parser.add_argument("--quiet", "-q", action="store_true")
 
     args = parser.parse_args()
     verbose = not args.quiet
@@ -382,66 +589,208 @@ def main() -> None:
     try:
         import xgboost  # noqa: F401
     except ImportError as e:
-        print(f"Error: Missing ML dependency. Install with: pip install harpocrates[ml]")
+        print("Error: Missing ML dependency. Install with: pip install harpocrates[ml]")
         print(f"Details: {e}")
         sys.exit(1)
 
-    # Load data
-    if verbose:
-        print(f"Loading training data from {args.train_data}...")
-    X_train, y_train, _ = load_dataset(args.train_data)
-    if verbose:
-        print(f"Loaded {len(X_train)} training samples ({N_FEATURES} features)")
+    # ------------------------------------------------------------------ #
+    # Phase 1: Load records (no feature extraction yet).                  #
+    # ------------------------------------------------------------------ #
+    split_records: Dict[str, List[dict]] = {}
+    split_hashes: Dict[str, Set[str]] = {}
+    split_tokens: Dict[str, Set[str]] = {}
 
-    X_val, y_val = None, None
-    if args.val_data:
-        if verbose:
-            print(f"Loading validation data from {args.val_data}...")
-        X_val, y_val, _ = load_dataset(args.val_data)
-        if verbose:
-            print(f"Loaded {len(X_val)} validation samples")
+    if args.data:
+        from Harpocrates.training.dataset import train_val_cal_test_split
 
-    # Train XGBoost on all 65 features
+        if verbose:
+            print(f"Loading {args.data} for auto 65/10/10/15 split …")
+        all_records, _, _ = load_records(args.data, deduplicate=True)
+        if verbose:
+            print(f"  {len(all_records)} records after intra-file dedup")
+
+        train_recs, val_recs, cal_recs, test_recs = train_val_cal_test_split(
+            all_records, seed=args.seed
+        )
+        for name, recs in (
+            ("train", train_recs),
+            ("val", val_recs),
+            ("cal", cal_recs),
+            ("test", test_recs),
+        ):
+            split_records[name] = recs
+            split_hashes[name] = {
+                sha1(f"{r['token']}|{r['line_content']}".encode()).hexdigest()
+                for r in recs
+            }
+            split_tokens[name] = {r["token"] for r in recs}
+            if verbose:
+                print(f"  {name}: {len(recs)} records")
+    else:
+        if verbose:
+            print(f"Loading training data from {args.train_data} …")
+        recs, hashes, tokens = load_records(args.train_data, deduplicate=True)
+        split_records["train"] = recs
+        split_hashes["train"] = hashes
+        split_tokens["train"] = tokens
+        if verbose:
+            print(f"  train: {len(recs)} records")
+
+        for name, path in (
+            ("val", args.val_data),
+            ("cal", args.cal_data),
+            ("test", args.test_data),
+        ):
+            if path is None:
+                continue
+            if verbose:
+                print(f"Loading {name} data from {path} …")
+            recs, hashes, tokens = load_records(path, deduplicate=True)
+            split_records[name] = recs
+            split_hashes[name] = hashes
+            split_tokens[name] = tokens
+            if verbose:
+                print(f"  {name}: {len(recs)} records")
+
+        if "cal" not in split_records and "val" in split_records:
+            print(
+                "\nWARNING: No --cal-data provided. Calibration will reuse --val-data "
+                "(same split used for early stopping). Use --cal-data for a clean pipeline."
+            )
+
+    # ------------------------------------------------------------------ #
+    # Phase 2: Cross-split overlap protection.                            #
+    # ------------------------------------------------------------------ #
+    if len(split_records) > 1:
+        if verbose:
+            print("\nRunning cross-split overlap check …")
+        split_records = check_cross_split_overlap(
+            split_records, split_hashes, split_tokens,
+            max_drop_pct=args.max_overlap, verbose=verbose,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Phase 3: Extract features from filtered records.                    #
+    # ------------------------------------------------------------------ #
+    if verbose:
+        print("\nExtracting features …")
+    X_train, y_train = extract_features_from_records(split_records["train"])
+    if verbose:
+        print(f"  train: {len(X_train)} samples ({N_FEATURES} features)")
+
+    X_val: Optional[np.ndarray] = None
+    y_val: Optional[np.ndarray] = None
+    if "val" in split_records:
+        X_val, y_val = extract_features_from_records(split_records["val"])
+
+    X_cal: Optional[np.ndarray] = None
+    y_cal: Optional[np.ndarray] = None
+    if "cal" in split_records:
+        X_cal, y_cal = extract_features_from_records(split_records["cal"])
+
+    X_test: Optional[np.ndarray] = None
+    y_test: Optional[np.ndarray] = None
+    if "test" in split_records:
+        X_test, y_test = extract_features_from_records(split_records["test"])
+
+    # ------------------------------------------------------------------ #
+    # Phase 4: Load golden data — quarantined, bypasses phases 1–3.       #
+    # ------------------------------------------------------------------ #
+    X_golden: Optional[np.ndarray] = None
+    y_golden: Optional[np.ndarray] = None
+    if args.golden_data:
+        if verbose:
+            print(f"\nLoading golden OOD data from {args.golden_data} …")
+        golden_recs, _, _ = load_records(args.golden_data, deduplicate=False)
+        X_golden, y_golden = extract_features_from_records(golden_recs)
+        if verbose:
+            print(f"  golden: {len(X_golden)} samples (quarantined)")
+
+    # ------------------------------------------------------------------ #
+    # Phase 5: Train.                                                      #
+    # ------------------------------------------------------------------ #
     model, raw_metrics = train_xgboost(
         X_train, y_train, X_val, y_val, seed=args.seed, verbose=verbose
     )
 
-    # Calibrate and evaluate
+    feature_importance_top10 = report_feature_importance(model, verbose=verbose)
+
+    # ------------------------------------------------------------------ #
+    # Phase 6: Calibrate and find thresholds.                             #
+    # ------------------------------------------------------------------ #
     threshold_low = 0.15
     threshold_high = 0.85
     optimal_threshold = 0.5
-    eval_metrics: Dict[str, Any] = {}
+    platt_a = 0.0
+    platt_b = 0.0
+    calibrator = None
 
-    if X_val is not None and y_val is not None:
-        calibrator = calibrate_model(model, X_val, y_val, verbose=verbose)
-        cal_proba = calibrator.predict_proba(X_val)[:, 1]
+    # Resolve calibration data: prefer dedicated cal split, fall back to val.
+    X_calib = X_cal if X_cal is not None else X_val
+    y_calib = y_cal if y_cal is not None else y_val
 
+    if X_calib is not None and y_calib is not None:
+        calibrator = calibrate_model(model, X_calib, y_calib, verbose=verbose)
+        cal_proba = calibrator.predict_proba(X_calib)[:, 1]
         threshold_low, threshold_high, optimal_threshold = find_dual_thresholds(
-            y_val,
+            y_calib,
             cal_proba,
             target_recall=args.target_recall,
             target_precision=args.target_precision,
             verbose=verbose,
         )
-
-        eval_metrics = evaluate(
-            calibrator, threshold_low, threshold_high, X_val, y_val, verbose=verbose
-        )
-
-        # Save the calibrated model's underlying XGBoost (for ONNX conversion)
-        # The Platt sigmoid params are stored in config for inference-time application
         platt_estimator = calibrator.calibrated_classifiers_[0]
         platt_a = float(platt_estimator.calibrators[0].a_)
         platt_b = float(platt_estimator.calibrators[0].b_)
     else:
-        platt_a = 0.0
-        platt_b = 0.0
         if verbose:
             print(
-                "\nWARNING: No validation data — skipping calibration and "
+                "\nWARNING: No calibration data — skipping Platt scaling and "
                 "threshold search. Using default thresholds."
             )
 
+    # ------------------------------------------------------------------ #
+    # Phase 7: Evaluate on synthetic test set, then golden OOD.          #
+    # ------------------------------------------------------------------ #
+    eval_metrics: Dict[str, Any] = {}
+    golden_metrics: Dict[str, Any] = {}
+
+    if calibrator is not None:
+        # Synthetic evaluation: prefer dedicated test split, fall back to cal.
+        X_eval = X_test if X_test is not None else X_calib
+        y_eval = y_test if y_test is not None else y_calib
+        eval_label = (
+            "SYNTHETIC TEST"
+            if X_test is not None
+            else "CALIBRATION (no --test-data provided)"
+        )
+
+        if X_eval is not None and y_eval is not None:
+            eval_metrics = evaluate(
+                calibrator,
+                threshold_low,
+                threshold_high,
+                X_eval,
+                y_eval,
+                label=eval_label,
+                verbose=verbose,
+            )
+
+        # Golden OOD evaluation — same calibrator, same thresholds.
+        if X_golden is not None and y_golden is not None:
+            golden_metrics = evaluate(
+                calibrator,
+                threshold_low,
+                threshold_high,
+                X_golden,
+                y_golden,
+                label="GOLDEN OOD",
+                verbose=verbose,
+            )
+
+    # ------------------------------------------------------------------ #
+    # Phase 8: Save model and config.                                      #
+    # ------------------------------------------------------------------ #
     config = {
         "version": "2.1.0",
         "mode": "single_stage",
@@ -453,24 +802,55 @@ def main() -> None:
         "platt_a": platt_a,
         "platt_b": platt_b,
         "metrics": eval_metrics if eval_metrics else raw_metrics,
+        "golden_metrics": golden_metrics,
         "training_samples": len(X_train),
         "validation_samples": len(X_val) if X_val is not None else 0,
+        "calibration_samples": len(X_calib) if X_calib is not None else 0,
+        "test_samples": len(X_test) if X_test is not None else 0,
+        "golden_samples": len(X_golden) if X_golden is not None else 0,
+        "feature_importance_top10": feature_importance_top10,
         "created_at": datetime.now().isoformat(),
         "seed": args.seed,
     }
 
     save_model(model, config, args.output_dir, verbose=verbose)
 
+    # ------------------------------------------------------------------ #
+    # Phase 9: Side-by-side summary.                                       #
+    # ------------------------------------------------------------------ #
     if verbose:
-        print("\n=== TRAINING COMPLETE ===")
+        print("\n" + "=" * 60)
+        print("TRAINING COMPLETE")
+        print("=" * 60)
+
         if eval_metrics:
-            print(f"Precision:       {eval_metrics['precision']:.2%}")
-            print(f"Recall:          {eval_metrics['recall']:.2%}")
-            print(f"F1:              {eval_metrics['f1']:.4f}")
-            print(f"AUC-ROC:         {eval_metrics['auc_roc']:.4f}")
-            print(f"Review zone:     {eval_metrics['review_zone_pct']:.1f}%")
-            print(f"Threshold low:   {threshold_low:.4f}")
-            print(f"Threshold high:  {threshold_high:.4f}")
+            has_golden = bool(golden_metrics)
+            header = f"  {'Metric':<18} {'Synthetic Test':>15}"
+            if has_golden:
+                header += f" {'Golden OOD':>12}"
+            print(header)
+            print("  " + "-" * (35 + (13 if has_golden else 0)))
+
+            for key, label in (
+                ("precision", "Precision"),
+                ("recall", "Recall"),
+                ("f1", "F1 Score"),
+                ("auc_roc", "AUC-ROC"),
+                ("review_zone_pct", "Review zone %"),
+            ):
+                syn_val = eval_metrics.get(key, float("nan"))
+                row = f"  {label:<18} {syn_val:>15.4f}"
+                if has_golden:
+                    gold_val = golden_metrics.get(key, float("nan"))
+                    row += f" {gold_val:>12.4f}"
+                print(row)
+        elif raw_metrics:
+            print(f"  Raw AUC-ROC (val): {raw_metrics.get('auc_roc', 'N/A'):.4f}")
+
+        print(f"\n  Threshold low:   {threshold_low:.4f}")
+        print(f"  Threshold high:  {threshold_high:.4f}")
+        print(f"  Output dir:      {args.output_dir}")
+        print("=" * 60)
 
 
 if __name__ == "__main__":

@@ -241,6 +241,98 @@ def train_val_test_split(
         )
 
 
+def train_val_cal_test_split(
+    records: List[Dict[str, Any]],
+    train_ratio: float = 0.65,
+    val_ratio: float = 0.10,
+    cal_ratio: float = 0.10,
+    seed: Optional[int] = None,
+    stratify: bool = True,
+) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict]]:
+    """Split records into train/val/cal/test sets.
+
+    test ratio = 1 - train_ratio - val_ratio - cal_ratio (default 0.15).
+
+    2D stratification: groups on (label, source) to preserve both the class
+    ratio and the LLM/script ratio identically across all four splits.
+    Records missing 'source' are grouped under 'unknown'.
+    """
+    import random
+
+    if seed is not None:
+        random.seed(seed)
+
+    test_ratio = 1.0 - train_ratio - val_ratio - cal_ratio
+    if test_ratio <= 0:
+        raise DatasetError(
+            f"Ratios sum to >= 1.0: train={train_ratio}, val={val_ratio}, "
+            f"cal={cal_ratio}. Implied test ratio would be {test_ratio:.3f}."
+        )
+
+    if stratify:
+        strata: Dict[str, List[Dict]] = {}
+        for r in records:
+            key = f"{r['label']}_{r.get('source', 'unknown')}"
+            strata.setdefault(key, []).append(r)
+
+        train_out: List[Dict] = []
+        val_out: List[Dict] = []
+        cal_out: List[Dict] = []
+        test_out: List[Dict] = []
+
+        for stratum_key, stratum in strata.items():
+            random.shuffle(stratum)
+            n = len(stratum)
+            t_end = int(n * train_ratio)
+            v_end = int(n * (train_ratio + val_ratio))
+            c_end = int(n * (train_ratio + val_ratio + cal_ratio))
+
+            s_train = stratum[:t_end]
+            s_val = stratum[t_end:v_end]
+            s_cal = stratum[v_end:c_end]
+            s_test = stratum[c_end:]
+
+            for split_name, split_data in (
+                ("train", s_train),
+                ("val", s_val),
+                ("cal", s_cal),
+                ("test", s_test),
+            ):
+                if not split_data:
+                    raise DatasetError(
+                        f"Stratum '{stratum_key}' ({n} records) produced an empty "
+                        f"'{split_name}' split with ratios "
+                        f"{train_ratio}/{val_ratio}/{cal_ratio}/{test_ratio:.2f}. "
+                        f"Provide more data for this stratum."
+                    )
+
+            train_out.extend(s_train)
+            val_out.extend(s_val)
+            cal_out.extend(s_cal)
+            test_out.extend(s_test)
+
+        random.shuffle(train_out)
+        random.shuffle(val_out)
+        random.shuffle(cal_out)
+        random.shuffle(test_out)
+
+        return train_out, val_out, cal_out, test_out
+    else:
+        shuffled = records.copy()
+        random.shuffle(shuffled)
+        n = len(shuffled)
+        t_end = int(n * train_ratio)
+        v_end = int(n * (train_ratio + val_ratio))
+        c_end = int(n * (train_ratio + val_ratio + cal_ratio))
+
+        return (
+            shuffled[:t_end],
+            shuffled[t_end:v_end],
+            shuffled[v_end:c_end],
+            shuffled[c_end:],
+        )
+
+
 def get_label_distribution(records: List[Dict[str, Any]]) -> Dict[str, int]:
     """Get distribution of labels in dataset."""
     positive = sum(1 for r in records if r["label"] == 1)
