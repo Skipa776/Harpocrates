@@ -11,11 +11,9 @@ between secret and non-secret contexts.
 """
 from __future__ import annotations
 
-import pytest
-
 from Harpocrates.core.result import EvidenceType, Finding
 from Harpocrates.ml.context import CodeContext
-from Harpocrates.ml.features import FeatureVector, extract_features
+from Harpocrates.ml.features import extract_features
 
 
 class TestKnownSecrets:

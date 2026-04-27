@@ -72,7 +72,7 @@ def train_precision_focused(
     """Train with precision-focused hyperparameters."""
     import lightgbm as lgb
     import xgboost as xgb
-    from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+    from sklearn.metrics import f1_score, precision_score, recall_score
 
     token_indices = get_token_feature_indices()
     X_train_tokens = X_train[:, token_indices]

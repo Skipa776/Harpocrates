@@ -26,7 +26,7 @@ import numpy as np
 
 def load_dataset(path: Path) -> Tuple[np.ndarray, np.ndarray, List[dict]]:
     """Load dataset and extract features."""
-    from Harpocrates.ml.features import FeatureVector, extract_features_from_record
+    from Harpocrates.ml.features import extract_features_from_record
 
     records = []
     features = []
@@ -157,7 +157,7 @@ def train_stage_a(
         }
 
         if verbose:
-            print(f"\nStage A Results:")
+            print("\nStage A Results:")
             print(f"  Threshold: {optimal_threshold:.4f}")
             print(f"  Precision: {optimal_precision:.2%}")
             print(f"  Recall: {optimal_recall:.2%}")
@@ -206,7 +206,7 @@ def train_stage_b(
     if verbose:
         print("\n=== STAGE B: HIGH-PRECISION CONTEXT VERIFIER ===")
         print(f"Ambiguous samples: {len(y_train_ambiguous)} / {len(y_train)}")
-        print(f"Using all 63 features (including hex disambiguation features)")
+        print("Using all 63 features (including hex disambiguation features)")
 
     if len(X_train_ambiguous) < 100:
         if verbose:
@@ -312,7 +312,7 @@ def train_stage_b(
         }
 
         if verbose:
-            print(f"\nStage B Results:")
+            print("\nStage B Results:")
             print(f"  Threshold: {optimal_threshold:.4f}")
             print(f"  Precision: {optimal_precision:.2%}")
             print(f"  Recall: {optimal_recall:.2%}")
@@ -402,7 +402,7 @@ def evaluate_two_stage(
         print(f"Recall: {recall:.2%}")
         print(f"F1 Score: {f1:.4f}")
         print(f"Accuracy: {accuracy:.2%}")
-        print(f"\nRouting breakdown:")
+        print("\nRouting breakdown:")
         print(f"  Rejected by Stage A: {sum(low_mask)} ({sum(low_mask)/len(y_val):.1%})")
         print(f"  Accepted by Stage A: {sum(high_mask)} ({sum(high_mask)/len(y_val):.1%})")
         print(f"  Sent to Stage B: {sum(ambiguous_mask)} ({sum(ambiguous_mask)/len(y_val):.1%})")
@@ -410,7 +410,7 @@ def evaluate_two_stage(
         print(f"\n{classification_report(y_val, y_pred, target_names=['Non-Secret', 'Secret'])}")
 
         cm = confusion_matrix(y_val, y_pred)
-        print(f"Confusion Matrix:")
+        print("Confusion Matrix:")
         print(f"  TN={cm[0,0]}, FP={cm[0,1]}")
         print(f"  FN={cm[1,0]}, TP={cm[1,1]}")
 
@@ -454,7 +454,7 @@ def save_models(
         json.dump(convert_to_serializable(config), f, indent=2)
 
     if verbose:
-        print(f"\nModels saved:")
+        print("\nModels saved:")
         print(f"  Stage A: {stage_a_path}")
         print(f"  Stage B: {stage_b_path}")
         print(f"  Config: {config_path}")
@@ -520,10 +520,10 @@ def main():
 
     # Check dependencies
     try:
-        import lightgbm
-        import xgboost
+        import lightgbm as _lgb  # noqa: F401
+        import xgboost as _xgb  # noqa: F401
     except ImportError as e:
-        print(f"Error: Missing ML dependencies. Install with: pip install harpocrates[ml]")
+        print("Error: Missing ML dependencies. Install with: pip install harpocrates[ml]")
         print(f"Details: {e}")
         sys.exit(1)
 
@@ -602,7 +602,7 @@ def main():
     }
 
     # Save models
-    paths = save_models(
+    save_models(
         stage_a_model, stage_b_model, config, args.output_dir, verbose=verbose
     )
 

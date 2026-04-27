@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
@@ -50,7 +50,7 @@ def load_training_data(
     import logging
 
     logger = logging.getLogger(__name__)
-    from Harpocrates.ml.features import FeatureVector, extract_features_from_record
+    from Harpocrates.ml.features import extract_features_from_record
 
     with open(data_path, "rb") as f:
         records = pickle.load(f)
@@ -96,10 +96,10 @@ def train_and_evaluate(
     import lightgbm as lgb
     import xgboost as xgb
     from sklearn.metrics import (
+        f1_score,
         precision_recall_curve,
         precision_score,
         recall_score,
-        f1_score,
         roc_auc_score,
     )
 
@@ -293,7 +293,7 @@ def run_experiments() -> List[Dict[str, Any]]:
     print("=" * 60)
     print("HARPOCRATES ML TRAINING EXPERIMENTS")
     print("=" * 60)
-    print(f"Target: Precision >= 90%, Recall >= 90%")
+    print("Target: Precision >= 90%, Recall >= 90%")
     print()
 
     # Load data
@@ -491,7 +491,7 @@ def run_experiments() -> List[Dict[str, Any]]:
                   f"{result['combined']['sent_to_stage_b']} to Stage B")
 
             if result["targets_met"]:
-                print(f"  *** TARGETS MET! ***")
+                print("  *** TARGETS MET! ***")
 
             # Track best result
             # Score: prioritize meeting targets, then F1

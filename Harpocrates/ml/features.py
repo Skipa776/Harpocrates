@@ -538,9 +538,6 @@ def _calculate_normalized_entropy(token: str) -> float:
     raw_entropy = shannon_entropy(token)
 
     # Determine the character set used
-    has_lower = any(c.islower() for c in token)
-    has_upper = any(c.isupper() for c in token)
-    has_digit = any(c.isdigit() for c in token)
     has_special = any(not c.isalnum() for c in token)
 
     # Determine max entropy based on character set

@@ -11,13 +11,12 @@ The two-stage pipeline provides better precision-recall tradeoff by:
 """
 from __future__ import annotations
 
-import json
 import logging
 import traceback
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +207,6 @@ class EnsembleVerifier(Verifier):
         Returns:
             Dict mapping model name to list of probabilities
         """
-        import numpy as np
 
         predictions = {}
         failed_models = []
