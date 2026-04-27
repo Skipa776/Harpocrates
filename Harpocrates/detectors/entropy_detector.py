@@ -4,7 +4,7 @@ import math
 import re
 from collections import Counter
 
-_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-.]{8,}")
+_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-]{20,}")
 
 
 def shannon_entropy(s: str) -> float:
@@ -80,6 +80,17 @@ def looks_like_secret(s: str, threshold: float = 4.0) -> bool:
     has_special = any(not c.isalnum() for c in s)
 
     if sum([has_upper, has_lower, has_digit, has_special]) < 2:
+        return False
+
+    # Tier 3: pure-alpha tokens (camelCase identifiers) are not machine-generated
+    # secrets — all real credential schemes use at least one digit or special char.
+    if not has_digit and not has_special:
+        return False
+
+    # Tier 3: lowercase-only + hyphen/slash but no digit = CSS class name, URL
+    # slug, or file path component. UUID-style API keys always contain hex digits
+    # (0-9a-f), so this rule never fires on them.
+    if has_lower and not has_upper and not has_digit:
         return False
 
     return shannon_entropy(s) >= threshold

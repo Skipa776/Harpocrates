@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 # Default model path relative to package
 DEFAULT_MODEL_DIR = Path(__file__).parent / "models"
-DEFAULT_MODEL_PATH = DEFAULT_MODEL_DIR / "xgboost_v1.json"
+DEFAULT_MODEL_PATH = DEFAULT_MODEL_DIR / "stageA_xgboost.json"
 DEFAULT_CONFIG_PATH = DEFAULT_MODEL_DIR / "feature_config.json"
 
 # Default threshold for ML classification

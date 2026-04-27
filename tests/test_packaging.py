@@ -16,7 +16,7 @@ FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "test_tokens.py"
 @pytest.mark.integration
 def test_wheel_installs_with_ml_pipeline() -> None:
     """
-    Build the wheel, install in a clean venv, and confirm the two-stage ML
+    Build the wheel, install in a clean venv, and confirm the ML
     pipeline loads from bundled model files (not from source tree).
 
     Fails if:
@@ -80,7 +80,7 @@ def test_wheel_installs_with_ml_pipeline() -> None:
         )
 
         # Step 6: ML pipeline must be active (bundled models loaded)
-        assert "Two-stage ML verification enabled" in result.stdout, (
+        assert "ML verification enabled" in result.stdout, (
             f"ML pipeline not active after wheel install. "
             f"Models may be missing from wheel.\n"
             f"stdout: {result.stdout!r}\n"

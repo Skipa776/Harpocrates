@@ -16,7 +16,7 @@ def test_detect_text_finds_github_token() -> None:
 
     assert findings
     assert all(isinstance(f, Finding) for f in findings)
-    assert any(f.type == "GITHUB_TOKEN" for f in findings)
+    assert any(f.type == "GITHUB_PAT" for f in findings)
     assert any(f.evidence == EvidenceType.REGEX for f in findings)
     # Confidence should be set for regex matches
     assert all(f.confidence is not None for f in findings)
@@ -78,7 +78,7 @@ def test_detect_file_smoke(tmp_path: Path) -> None:
 
     assert findings
     assert all(isinstance(f, Finding) for f in findings)
-    assert any(f.type == "GITHUB_TOKEN" for f in findings)
+    assert any(f.type == "GITHUB_PAT" for f in findings)
     # All findings should report the correct file path
     assert all(str(file_path) in (f.file or "") for f in findings)
 
@@ -128,7 +128,7 @@ def test_finding_confidence_score() -> None:
     findings = detect_text(text)
 
     if findings:
-        # Regex matches should have 0.95 confidence
+        # CRITICAL regex matches have 0.99; HIGH have 0.95
         regex_findings = [f for f in findings if f.evidence == EvidenceType.REGEX]
         for f in regex_findings:
-            assert f.confidence == 0.95
+            assert f.confidence >= 0.95

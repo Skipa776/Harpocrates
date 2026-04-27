@@ -1,7 +1,13 @@
 """
 Core detection engine for Harpocrates.
-Combines regex patterns, entropy analysis, and optional ML verification
-to detect secrets with context-aware false positive filtering.
+
+Three-phase pipeline per line:
+  1. CRITICAL regex  → Finding(CRITICAL, confidence=0.99) — skips ML
+  2. HIGH regex      → Finding(HIGH,     confidence=0.95) — skips ML
+  3. Entropy         → Finding(ENTROPY_CANDIDATE)         → ML verification
+
+Regex hits bypass XGBoost entirely; only entropy candidates are forwarded
+to the ML verifier. This keeps the fast path deterministic and CPU-free.
 """
 from __future__ import annotations
 
@@ -11,140 +17,156 @@ from typing import TYPE_CHECKING, List, Optional
 
 from Harpocrates.core.result import EvidenceType, Finding, Severity
 from Harpocrates.detectors.entropy_detector import looks_like_secret, shannon_entropy
-from Harpocrates.detectors.regex_patterns import SIGNATURES
+from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNATURES
 from Harpocrates.utils.file_utils import iter_text_lines
 
 if TYPE_CHECKING:
     from Harpocrates.ml.verifier import Verifier
 
-# Token pattern for entropy detection (alphanumeric + common special chars)
-_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-.]{8,}")
+# Tier 2: tightened token alphabet — drops '.' so dotted identifiers and URLs
+# no longer form single long tokens. Retains '-' for UUID-style and hyphenated
+# API keys (Azure SAS, some OAuth tokens). Minimum length matches the
+# looks_like_secret() floor, eliminating a redundant per-token short check.
+_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-]{20,}")
+
+# Tier 2: strip URL and data: URI runs before tokenizing so CDN/IDP/doc URLs
+# and inline sourcemap data URIs don't generate entropy candidates.
+_URL_RE = re.compile(r"(?:https?://|data:)\S+")
+
+# Tier 1: pure base64 lines of PEM / X.509 certificate bodies.
+# RFC 7468 specifies exactly 64 chars per non-terminal body line. Using {64}
+# (not a range) avoids false-matching 60–63 or 65–76 char real-credential
+# lines in non-PEM contexts (raw AES-256 keys, JWT segments, etc.).
+_PEM_BODY_RE = re.compile(r"^[A-Za-z0-9+/]{64}$")
+
+# Phase 2b: sensitive-variable assignment bypass — forwards low-entropy literals
+# assigned to clearly credential-named variables directly to ML, skipping the
+# entropy gate. Only fires when regex phases found nothing on the line.
+_SENSITIVE_ASSIGNMENT_RE = re.compile(
+    r"(?i)(?<![a-zA-Z])(?:pass(?:word|wd|w)?|pwd|usr(?:name)?|user|host|conn(?:ection|str)?|secret|token|key|auth|cred)[a-z0-9_]*\s*[:=]\s*['\"]([^'\"]{3,100})['\"]"
+)
 
 
-def _assess_severity(
-    evidence_type: EvidenceType,
-    entropy_val: Optional[float],
-    secret_type: str
-) -> Severity:
-    """
-    Determine severity based on detection method and secret type.
-
-    Args:
-        evidence_type: How the secret was detected
-        entropy_val: Shannon entropy (if available)
-        secret_type: Type of secret detected
-
-    Returns:
-        Severity level
-    """
-    # Regex matches are generally high confidence
-    if evidence_type == EvidenceType.REGEX:
-        # Known high-value secrets
-        if any(x in secret_type for x in ["AWS", "GITHUB", "STRIPE", "OPENAI"]):
-            return Severity.CRITICAL
-        return Severity.HIGH
-
-    # Entropy-only detections are less certain
-    if evidence_type == EvidenceType.ENTROPY:
-        if entropy_val and entropy_val >= 4.5:
-            return Severity.MEDIUM
-        return Severity.LOW
-
-    return Severity.MEDIUM
+def _calculate_entropy_confidence(entropy_val: Optional[float]) -> float:
+    """Map entropy 4.0–5.5 linearly to confidence 0.6–0.8."""
+    if entropy_val is None:
+        return 0.6
+    if entropy_val >= 5.5:
+        return 0.8
+    if entropy_val >= 4.0:
+        return 0.6 + (entropy_val - 4.0) * (0.2 / 1.5)
+    return 0.6
 
 
-def _calculate_confidence(
-    evidence_type: EvidenceType,
-    entropy_val: Optional[float],
-) -> float:
-    """
-    Calculate confidence score for a finding.
-
-    Args:
-        evidence_type: How the secret was detected
-        entropy_val: Shannon entropy (if available)
-
-    Returns:
-        Confidence score between 0.0 and 1.0
-    """
-    if evidence_type == EvidenceType.REGEX:
-        # Regex patterns are high confidence (known formats)
-        return 0.95
-
-    if evidence_type == EvidenceType.ENTROPY:
-        # Entropy-based detection: scale from 0.6 to 0.8 based on entropy
-        # Higher entropy = more likely to be a secret
-        if entropy_val is None:
-            return 0.6
-        # Map entropy 4.0-5.5 to confidence 0.6-0.8
-        base = 0.6
-        if entropy_val >= 5.5:
-            return 0.8
-        if entropy_val >= 4.0:
-            # Linear interpolation: 4.0->0.6, 5.5->0.8
-            return base + (entropy_val - 4.0) * (0.2 / 1.5)
-        return base
-
-    return 0.5  # Default for unknown evidence types
+def _entropy_severity(entropy_val: Optional[float]) -> Severity:
+    # Tier 1: entropy-only findings default to INFO so they don't trip the
+    # default --fail-on=medium gate. ML-verified (evidence=hybrid) findings
+    # keep this severity; users can opt in with --fail-on=info.
+    _ = entropy_val
+    return Severity.INFO
 
 
 def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     """
-    Scan a single line for regex signatures and entropy-based candidates.
+    Scan one line through all three detection phases.
 
-    Args:
-        line: The line of text to scan
-        lineno: Line number in the file
-        file: File path (None for text scans)
-
-    Returns:
-        List of findings detected in this line
+    Returns findings ordered: CRITICAL regex → HIGH regex → entropy.
+    Entropy phase is skipped if any regex hit is found on the line.
     """
     findings: List[Finding] = []
     stripped = line.strip()
 
-    # Skip empty lines and comments
-    if not stripped or stripped.startswith('#'):
+    if not stripped or stripped.startswith(("#", "/*#")):
         return findings
 
-    # Phase 1: Regex pattern matching (high precision)
-    for sig_name, pattern in SIGNATURES.items():
+    # ------------------------------------------------------------------
+    # Phase 1a: CRITICAL regex — deterministic, no ML needed.
+    # ------------------------------------------------------------------
+    for sig_name, pattern in CRITICAL_SIGNATURES.items():
         for match in pattern.finditer(stripped):
             token = match.group()
-            entropy_val = shannon_entropy(token) if token else 0.0
-
-            finding = Finding(
-                type=sig_name,
-                file=file,
-                line=lineno,
-                snippet=stripped[:200],  # Truncate long lines
-                entropy=entropy_val,
-                evidence=EvidenceType.REGEX,
-                severity=_assess_severity(EvidenceType.REGEX, entropy_val, sig_name),
-                confidence=_calculate_confidence(EvidenceType.REGEX, entropy_val),
-                token=token,
-            )
-            findings.append(finding)
-
-    # Phase 2: Entropy-based detection (high recall)
-    # Only run if no regex matches (avoid duplicates)
-    if not findings:
-        for token in _TOKEN_RE.findall(stripped):
-            if looks_like_secret(token):
-                ent = shannon_entropy(token)
-
-                finding = Finding(
-                    type="ENTROPY_CANDIDATE",
+            findings.append(
+                Finding(
+                    type=sig_name,
                     file=file,
                     line=lineno,
                     snippet=stripped[:200],
-                    entropy=ent,
-                    evidence=EvidenceType.ENTROPY,
-                    severity=_assess_severity(EvidenceType.ENTROPY, ent, "ENTROPY"),
-                    confidence=_calculate_confidence(EvidenceType.ENTROPY, ent),
+                    entropy=shannon_entropy(token) if token else 0.0,
+                    evidence=EvidenceType.REGEX,
+                    severity=Severity.CRITICAL,
+                    confidence=0.99,
                     token=token,
                 )
-                findings.append(finding)
+            )
+
+    # ------------------------------------------------------------------
+    # Phase 1b: HIGH regex — also deterministic, also bypasses ML.
+    # ------------------------------------------------------------------
+    for sig_name, pattern in HIGH_SIGNATURES.items():
+        for match in pattern.finditer(stripped):
+            token = match.group()
+            findings.append(
+                Finding(
+                    type=sig_name,
+                    file=file,
+                    line=lineno,
+                    snippet=stripped[:200],
+                    entropy=shannon_entropy(token) if token else 0.0,
+                    evidence=EvidenceType.REGEX,
+                    severity=Severity.HIGH,
+                    confidence=0.95,
+                    token=token,
+                )
+            )
+
+    # ------------------------------------------------------------------
+    # Phase 2: Entropy fallback — only when regex found nothing.
+    # ------------------------------------------------------------------
+    if not findings:
+        # Tier 1: skip PEM/X.509 certificate body lines (pure base64, 60-76
+        # chars). The BEGIN header was already caught by the regex tier above.
+        if _PEM_BODY_RE.match(stripped):
+            return findings
+
+        # Tier 2: strip URL substrings before tokenizing so CDN/IDP/doc URLs
+        # don't generate entropy candidates from their path components.
+        scan_text = _URL_RE.sub(" ", stripped)
+
+        for token in _TOKEN_RE.findall(scan_text):
+            if looks_like_secret(token):
+                ent = shannon_entropy(token)
+                findings.append(
+                    Finding(
+                        type="ENTROPY_CANDIDATE",
+                        file=file,
+                        line=lineno,
+                        snippet=stripped[:200],
+                        entropy=ent,
+                        evidence=EvidenceType.ENTROPY,
+                        severity=_entropy_severity(ent),
+                        confidence=_calculate_entropy_confidence(ent),
+                        token=token,
+                    )
+                )
+
+        found_tokens = {f.token for f in findings}
+        for match in _SENSITIVE_ASSIGNMENT_RE.finditer(stripped):
+            value = match.group(1)
+            if value not in found_tokens:
+                ent = shannon_entropy(value)
+                findings.append(
+                    Finding(
+                        type="ML_CANDIDATE",
+                        file=file,
+                        line=lineno,
+                        snippet=stripped[:200],
+                        entropy=ent,
+                        evidence=EvidenceType.ML,
+                        severity=Severity.CRITICAL,
+                        confidence=_calculate_entropy_confidence(ent),
+                        token=value,
+                    )
+                )
 
     return findings
 
@@ -154,28 +176,24 @@ def detect_text(
     threshold: float = 4.0,
 ) -> List[Finding]:
     """
-    Detect secrets in a text blob.
+    Detect secrets in a text blob (regex + entropy, no ML).
 
     Args:
         text: Text content to scan
-        threshold: Entropy threshold (currently unused but reserved)
+        threshold: Entropy threshold (reserved for future use)
 
     Returns:
-        List of findings detected
+        List of findings
 
     Example:
-        >>> findings = detect_text("aws_key = AKIAIOSFODNN7EXAMPLE")
-        >>> len(findings)
-        1
+        >>> findings = detect_text("aws_key = AKIAIOSFODNN7EXAMPLE1234")
         >>> findings[0].type
         'AWS_ACCESS_KEY_ID'
     """
-    _ = threshold  # Reserved for future use
+    _ = threshold
     findings: List[Finding] = []
-
     for lineno, line in enumerate(text.splitlines(), start=1):
         findings.extend(_scan_line(line, lineno, file=None))
-
     return findings
 
 
@@ -185,41 +203,34 @@ def detect_file(
     max_bytes: Optional[int] = None,
 ) -> List[Finding]:
     """
-    Detect secrets in a file on disk.
+    Detect secrets in a file on disk (regex + entropy, no ML).
 
-    Uses safe text iteration that:
-    - Skips binary files
-    - Handles encoding errors gracefully
-    - Respects max_bytes limit
-    - Returns empty list for nonexistent files
+    Skips binary files, handles encoding errors gracefully, and
+    returns an empty list for nonexistent files.
 
     Args:
         path: Path to the file to scan
         threshold: Entropy threshold (reserved)
-        max_bytes: Maximum bytes to read from file
+        max_bytes: Maximum bytes to read
 
     Returns:
-        List of findings detected (empty list if file doesn't exist)
-
-    Example:
-        >>> findings = detect_file("secrets.env")
-        >>> for f in findings:
-        ...     print(f"{f.file}:{f.line} - {f.type}")
+        List of findings
     """
-    _ = threshold  # Reserved for future use
+    _ = threshold
     path_obj = Path(path)
-
-    # Return empty list for nonexistent files
     if not path_obj.exists():
         return []
 
     file_name = str(path_obj)
     findings: List[Finding] = []
-
     for lineno, line in iter_text_lines(path_obj, max_bytes=max_bytes):
         findings.extend(_scan_line(line, lineno, file=file_name))
-
     return findings
+
+
+# ---------------------------------------------------------------------------
+# ML verification — applied only to entropy candidates, never regex hits.
+# ---------------------------------------------------------------------------
 
 
 def _apply_ml_verification(
@@ -228,51 +239,33 @@ def _apply_ml_verification(
     verifier: "Verifier",
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
-    """
-    Apply ML verification to filter false positives.
-
-    Args:
-        findings: List of findings to verify
-        full_content: Full file/text content for context extraction
-        verifier: ML verifier instance
-        ml_threshold: Minimum combined confidence to keep finding
-
-    Returns:
-        Filtered list of findings with updated confidence/evidence
-    """
+    """Filter entropy candidates through the ML verifier."""
     from Harpocrates.ml.context import extract_context
 
-    verified_findings = []
-
+    verified: List[Finding] = []
     for finding in findings:
-        # Extract context for this finding
         line_num = finding.line or 1
         context = extract_context(
             content=full_content,
             line_number=line_num,
             file_path=finding.file,
         )
-
-        # Verify with ML model
         result = verifier.verify(finding, context)
-
-        # Filter based on threshold and classification
         if result.is_secret and result.combined_confidence >= ml_threshold:
-            # Update finding with ML results
-            updated_finding = Finding(
-                type=finding.type,
-                file=finding.file,
-                line=finding.line,
-                snippet=finding.snippet,
-                entropy=finding.entropy,
-                evidence=EvidenceType.HYBRID,  # Now ML-verified
-                severity=finding.severity,
-                confidence=result.combined_confidence,
-                token=finding.token,
+            verified.append(
+                Finding(
+                    type=finding.type,
+                    file=finding.file,
+                    line=finding.line,
+                    snippet=finding.snippet,
+                    entropy=finding.entropy,
+                    evidence=EvidenceType.HYBRID,
+                    severity=finding.severity,
+                    confidence=result.combined_confidence,
+                    token=finding.token,
+                )
             )
-            verified_findings.append(updated_finding)
-
-    return verified_findings
+    return verified
 
 
 def detect_text_with_ml(
@@ -282,44 +275,41 @@ def detect_text_with_ml(
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
     """
-    Detect secrets in text with ML-based false positive filtering.
+    Detect secrets in text with ML verification for entropy candidates.
 
-    Uses a three-phase approach:
-    1. Regex pattern matching (high precision)
-    2. Entropy-based detection (high recall)
-    3. ML verification (context-aware filtering)
+    Regex hits (CRITICAL/HIGH) are returned immediately — no ML call.
+    Entropy candidates are forwarded to XGBoost for false-positive filtering.
 
     Args:
         text: Text content to scan
         verifier: ML verifier instance
         threshold: Entropy threshold (reserved)
-        ml_threshold: Minimum ML confidence to keep finding
+        ml_threshold: Minimum ML confidence to keep an entropy finding
 
     Returns:
-        List of verified findings
-
-    Example:
-        >>> from Harpocrates.ml.verifier import XGBoostVerifier
-        >>> verifier = XGBoostVerifier()
-        >>> findings = detect_text_with_ml("secret = 'abc123'", verifier)
+        List of findings
     """
-    # Phase 1 & 2: Standard detection
     findings = detect_text(text, threshold)
-
     if not findings:
         return findings
 
-    # Phase 3: ML verification (guard against verifier failures)
+    regex_findings = [f for f in findings if f.evidence == EvidenceType.REGEX]
+    entropy_findings = [f for f in findings if f.evidence != EvidenceType.REGEX]
+
+    if not entropy_findings:
+        return regex_findings
+
     try:
-        return _apply_ml_verification(
-            findings=findings,
+        verified_entropy = _apply_ml_verification(
+            findings=entropy_findings,
             full_content=text,
             verifier=verifier,
             ml_threshold=ml_threshold,
         )
     except Exception:
-        # On ML failure, return unverified findings rather than aborting the scan
-        return findings
+        verified_entropy = entropy_findings
+
+    return regex_findings + verified_entropy
 
 
 def detect_file_with_ml(
@@ -330,40 +320,35 @@ def detect_file_with_ml(
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
     """
-    Detect secrets in a file with ML-based false positive filtering.
+    Detect secrets in a file with ML verification for entropy candidates.
 
-    Uses a three-phase approach:
-    1. Regex pattern matching (high precision)
-    2. Entropy-based detection (high recall)
-    3. ML verification (context-aware filtering)
+    Regex hits (CRITICAL/HIGH) are returned immediately — no ML call.
+    Entropy candidates are forwarded to XGBoost for false-positive filtering.
 
     Args:
-        path: Path to the file to scan
+        path: Path to the file
         verifier: ML verifier instance
         threshold: Entropy threshold (reserved)
-        max_bytes: Maximum bytes to read from file
-        ml_threshold: Minimum ML confidence to keep finding
+        max_bytes: Maximum bytes to read
+        ml_threshold: Minimum ML confidence to keep an entropy finding
 
     Returns:
-        List of verified findings (empty list if file doesn't exist)
-
-    Example:
-        >>> from Harpocrates.ml.verifier import XGBoostVerifier
-        >>> verifier = XGBoostVerifier()
-        >>> findings = detect_file_with_ml("config.py", verifier)
+        List of findings
     """
     path_obj = Path(path)
-
     if not path_obj.exists():
         return []
 
-    # Phase 1 & 2: Standard detection
     findings = detect_file(path, threshold, max_bytes)
-
     if not findings:
         return findings
 
-    # Read content for context extraction (respect max_bytes cap)
+    regex_findings = [f for f in findings if f.evidence == EvidenceType.REGEX]
+    entropy_findings = [f for f in findings if f.evidence != EvidenceType.REGEX]
+
+    if not entropy_findings:
+        return regex_findings
+
     try:
         if max_bytes:
             with open(path_obj, "r", encoding="utf-8", errors="ignore") as f:
@@ -371,20 +356,19 @@ def detect_file_with_ml(
         else:
             full_content = path_obj.read_text(encoding="utf-8", errors="ignore")
     except (OSError, IOError):
-        # If we can't read for context, return unverified findings
         return findings
 
-    # Phase 3: ML verification (guard against verifier failures)
     try:
-        return _apply_ml_verification(
-            findings=findings,
+        verified_entropy = _apply_ml_verification(
+            findings=entropy_findings,
             full_content=full_content,
             verifier=verifier,
             ml_threshold=ml_threshold,
         )
     except Exception:
-        # On ML failure, return unverified findings rather than aborting the scan
-        return findings
+        verified_entropy = entropy_findings
+
+    return regex_findings + verified_entropy
 
 
 __all__ = [

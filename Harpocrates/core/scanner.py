@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Set
@@ -27,35 +28,41 @@ DEFAULT_IGNORE_PATTERNS = {
     "*.png", "*.jpg", "*.jpeg", "*.gif", "*.mp4", "*.mp3",
     # Docs (binary formats)
     "*.pdf", "*.doc", "*.docx",
+    # Tier 1: minified / transpiled bundles — high token density, zero secrets.
+    "*.min.js", "*.min.css", "*.min.map", "*.bundle.js", "*.bundle.css",
+    # Tier 1: package lockfiles — deterministic hashes, not secrets.
+    "package-lock.json", "yarn.lock", "Pipfile.lock", "poetry.lock",
+    "Cargo.lock", "go.sum", "composer.lock",
+    # Tier 1: vendored third-party code.
+    "vendor",
+    # Tier 3: source map files — generated build artifacts, never contain secrets.
+    "*.css.map", "*.js.map",
+    # Tier 3: SAML/SP metadata XML — contain X.509 cert bodies, not credentials.
+    "*-metadata*.xml", "*sp.xml", "*idp.xml",
 }
 
 def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
     """
     Determine if a file should be scanned.
 
-    Args:
-        path: File path to check
-        ignore_patterns: Set of patterns to ignore
-
-    Returns:
-        True if file should be scanned
+    Patterns without wildcards are matched exactly against any path component
+    (file name or directory name). Patterns with '*' are matched against the
+    file name using fnmatch, supporting glob syntax like '*.min.js'.
     """
-    # Skip symlinks to prevent infinite loops
     if path.is_symlink():
         return False
 
-    # Check parent directories against ignore patterns
-    for parent in path.parents:
-        if parent.name in ignore_patterns:
-            return False
+    glob_patterns = {p for p in ignore_patterns if "*" in p}
+    exact_patterns = ignore_patterns - glob_patterns
 
-    # Check filename against ignore patterns
-    if path.name in ignore_patterns:
+    # Exact match against any component (file name or ancestor directory name)
+    path_names = {path.name} | {p.name for p in path.parents}
+    if path_names & exact_patterns:
         return False
 
-    # Check extension patterns (e.g., "*.pyc")
-    for pattern in ignore_patterns:
-        if pattern.startswith("*") and path.name.endswith(pattern[1:]):
+    # Glob match against the file name only
+    for pattern in glob_patterns:
+        if fnmatch.fnmatch(path.name, pattern):
             return False
 
     return path.is_file()
