@@ -150,7 +150,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                 )
 
         found_tokens = {f.token for f in findings}
-        for match in _SENSITIVE_ASSIGNMENT_RE.finditer(stripped):
+        for match in _SENSITIVE_ASSIGNMENT_RE.finditer(scan_text):
             value = match.group(1)
             if value not in found_tokens:
                 ent = shannon_entropy(value)
@@ -162,12 +162,29 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         snippet=stripped[:200],
                         entropy=ent,
                         evidence=EvidenceType.ML,
-                        severity=Severity.CRITICAL,
-                        confidence=_calculate_entropy_confidence(ent),
+                        severity=_entropy_severity(ent),
+                        confidence=0.5,
                         token=value,
                     )
                 )
 
+    return findings
+
+
+def _collect_text_findings(text: str) -> List[Finding]:
+    """Raw scan of text — returns all findings including evidence=ML."""
+    findings: List[Finding] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        findings.extend(_scan_line(line, lineno, file=None))
+    return findings
+
+
+def _collect_file_findings(path_obj: Path, max_bytes: Optional[int]) -> List[Finding]:
+    """Raw scan of a file — returns all findings including evidence=ML."""
+    file_name = str(path_obj)
+    findings: List[Finding] = []
+    for lineno, line in iter_text_lines(path_obj, max_bytes=max_bytes):
+        findings.extend(_scan_line(line, lineno, file=file_name))
     return findings
 
 
@@ -191,10 +208,7 @@ def detect_text(
         'AWS_ACCESS_KEY_ID'
     """
     _ = threshold
-    findings: List[Finding] = []
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        findings.extend(_scan_line(line, lineno, file=None))
-    return findings
+    return [f for f in _collect_text_findings(text) if f.evidence != EvidenceType.ML]
 
 
 def detect_file(
@@ -220,12 +234,7 @@ def detect_file(
     path_obj = Path(path)
     if not path_obj.exists():
         return []
-
-    file_name = str(path_obj)
-    findings: List[Finding] = []
-    for lineno, line in iter_text_lines(path_obj, max_bytes=max_bytes):
-        findings.extend(_scan_line(line, lineno, file=file_name))
-    return findings
+    return [f for f in _collect_file_findings(path_obj, max_bytes) if f.evidence != EvidenceType.ML]
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +298,8 @@ def detect_text_with_ml(
     Returns:
         List of findings
     """
-    findings = detect_text(text, threshold)
+    _ = threshold
+    findings = _collect_text_findings(text)
     if not findings:
         return findings
 
@@ -307,7 +317,7 @@ def detect_text_with_ml(
             ml_threshold=ml_threshold,
         )
     except Exception:
-        verified_entropy = entropy_findings
+        verified_entropy = [f for f in entropy_findings if f.evidence != EvidenceType.ML]
 
     return regex_findings + verified_entropy
 
@@ -335,11 +345,12 @@ def detect_file_with_ml(
     Returns:
         List of findings
     """
+    _ = threshold
     path_obj = Path(path)
     if not path_obj.exists():
         return []
 
-    findings = detect_file(path, threshold, max_bytes)
+    findings = _collect_file_findings(path_obj, max_bytes)
     if not findings:
         return findings
 
@@ -356,7 +367,7 @@ def detect_file_with_ml(
         else:
             full_content = path_obj.read_text(encoding="utf-8", errors="ignore")
     except (OSError, IOError):
-        return findings
+        return [f for f in findings if f.evidence != EvidenceType.ML]
 
     try:
         verified_entropy = _apply_ml_verification(
@@ -366,7 +377,7 @@ def detect_file_with_ml(
             ml_threshold=ml_threshold,
         )
     except Exception:
-        verified_entropy = entropy_findings
+        verified_entropy = [f for f in entropy_findings if f.evidence != EvidenceType.ML]
 
     return regex_findings + verified_entropy
 
