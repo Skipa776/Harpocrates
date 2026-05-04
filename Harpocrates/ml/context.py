@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Pattern, Tuple
 
+from Harpocrates.ml.tokens import TokenMatch
+
 # Variable name extraction patterns for different languages/formats
 VAR_ASSIGNMENT_PATTERNS: List[Tuple[str, Pattern[str]]] = [
     # Python/Ruby: var = "value" or var = 'value'
@@ -83,6 +85,7 @@ class CodeContext:
     in_string_literal: bool = True  # Most secrets are in strings
     line_number: Optional[int] = None  # 1-based line number in file
     total_lines: Optional[int] = None  # Total lines in file
+    token_match: Optional[TokenMatch] = None
 
     @property
     def file_extension(self) -> Optional[str]:
