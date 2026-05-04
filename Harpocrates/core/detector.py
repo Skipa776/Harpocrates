@@ -96,6 +96,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     severity=Severity.CRITICAL,
                     confidence=0.99,
                     token=token,
+                    token_start=match.start(),
+                    token_end=match.end(),
                 )
             )
 
@@ -116,6 +118,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     severity=Severity.HIGH,
                     confidence=0.95,
                     token=token,
+                    token_start=match.start(),
+                    token_end=match.end(),
                 )
             )
 
@@ -132,6 +136,9 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
         # don't generate entropy candidates from their path components.
         scan_text = _URL_RE.sub(" ", stripped)
 
+        # TODO(v0.3): switch to finditer to capture offsets → TokenMatch for entropy candidates.
+        # URL stripping does not preserve length so offsets would be scan_text-relative;
+        # re-derive against stripped once the ONNX is retrained on correct features.
         for token in _TOKEN_RE.findall(scan_text):
             if looks_like_secret(token):
                 ent = shannon_entropy(token)
@@ -165,6 +172,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         severity=_entropy_severity(ent),
                         confidence=0.5,
                         token=value,
+                        token_start=match.start(1),
+                        token_end=match.end(1),
                     )
                 )
 
@@ -250,6 +259,7 @@ def _apply_ml_verification(
 ) -> List[Finding]:
     """Filter entropy candidates through the ML verifier."""
     from Harpocrates.ml.context import extract_context
+    from Harpocrates.ml.tokens import TokenMatch
 
     verified: List[Finding] = []
     for finding in findings:
@@ -259,6 +269,13 @@ def _apply_ml_verification(
             line_number=line_num,
             file_path=finding.file,
         )
+        if finding.token is not None and finding.token_start is not None and finding.token_end is not None:
+            context.token_match = TokenMatch(
+                token=finding.token,
+                start=finding.token_start,
+                end=finding.token_end,
+                kind="regex" if finding.evidence == EvidenceType.REGEX else "sensitive_assignment",
+            )
         result = verifier.verify(finding, context)
         if result.is_secret and result.combined_confidence >= ml_threshold:
             verified.append(
@@ -272,6 +289,8 @@ def _apply_ml_verification(
                     severity=finding.severity,
                     confidence=result.combined_confidence,
                     token=finding.token,
+                    token_start=finding.token_start,
+                    token_end=finding.token_end,
                 )
             )
     return verified

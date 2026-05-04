@@ -47,6 +47,8 @@ class Finding:
     severity: Severity = Severity.MEDIUM
     confidence: Optional[float] = None
     token: Optional[str] = None
+    token_start: Optional[int] = None
+    token_end: Optional[int] = None
 
     @property
     def redacted_token(self) -> Optional[str]:
@@ -67,6 +69,8 @@ class Finding:
         result = asdict(self)
         result['evidence'] = self.evidence.value
         result['severity'] = self.severity.value
+        result.pop('token_start', None)
+        result.pop('token_end', None)
         return result
 
     def to_json_dict(self, include_token: bool = False) -> Dict[str, Any]:
