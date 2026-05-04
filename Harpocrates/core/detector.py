@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
+from Harpocrates.core.classification import extract_var_name, infer_category
 from Harpocrates.core.result import EvidenceType, Finding, Severity
 from Harpocrates.detectors.entropy_detector import looks_like_secret, shannon_entropy
 from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNATURES
@@ -97,6 +98,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     for sig_name, pattern in CRITICAL_SIGNATURES.items():
         for match in pattern.finditer(scan_target):
             token = match.group()
+            _inf = infer_category(signature_name=sig_name, var_name=None, token=token)
             findings.append(
                 Finding(
                     type=sig_name,
@@ -111,6 +113,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     token_start=match.start(),
                     token_end=match.end(),
                     in_comment=in_comment,
+                    category=_inf.category.value,
+                    category_reason=_inf.reason,
                 )
             )
 
@@ -120,6 +124,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     for sig_name, pattern in HIGH_SIGNATURES.items():
         for match in pattern.finditer(scan_target):
             token = match.group()
+            _inf = infer_category(signature_name=sig_name, var_name=None, token=token)
             findings.append(
                 Finding(
                     type=sig_name,
@@ -134,6 +139,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     token_start=match.start(),
                     token_end=match.end(),
                     in_comment=in_comment,
+                    category=_inf.category.value,
+                    category_reason=_inf.reason,
                 )
             )
 
@@ -162,6 +169,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
         for token in _TOKEN_RE.findall(scan_text):
             if looks_like_secret(token):
                 ent = shannon_entropy(token)
+                _vn = extract_var_name(scan_target, token)
+                _inf = infer_category(signature_name=None, var_name=_vn, token=token)
                 findings.append(
                     Finding(
                         type="ENTROPY_CANDIDATE",
@@ -174,6 +183,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         confidence=_calculate_entropy_confidence(ent),
                         token=token,
                         in_comment=in_comment,
+                        category=_inf.category.value,
+                        category_reason=_inf.reason,
                     )
                 )
 
@@ -189,6 +200,10 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
             value = match.group(1)
             if value not in found_tokens:
                 ent = shannon_entropy(value)
+                # var name: everything left of the value in the match, stripped
+                _vn = scan_text[:match.start(1)].split("=")[0].split(":")[0].strip()
+                _vn = _vn or None
+                _inf = infer_category(signature_name=None, var_name=_vn, token=value)
                 findings.append(
                     Finding(
                         type="ML_CANDIDATE",
@@ -203,6 +218,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         token_start=match.start(1),
                         token_end=match.end(1),
                         in_comment=in_comment,
+                        category=_inf.category.value,
+                        category_reason=_inf.reason,
                     )
                 )
 
@@ -321,6 +338,8 @@ def _apply_ml_verification(
                     token_start=finding.token_start,
                     token_end=finding.token_end,
                     in_comment=finding.in_comment,
+                    category=finding.category,
+                    category_reason=finding.category_reason,
                 )
             )
     return verified

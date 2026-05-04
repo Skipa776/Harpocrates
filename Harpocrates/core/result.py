@@ -50,6 +50,12 @@ class Finding:
     token_start: Optional[int] = None
     token_end: Optional[int] = None
     in_comment: Optional[bool] = None
+    # Violation classification — WHAT was leaked and WHY the category was inferred.
+    # category: ViolationCategory.value string (e.g., "password", "api_token").
+    # category_reason: structured debug trace (layer, matched pattern, confidence).
+    # Both are intentionally additive / optional so existing callers remain unaffected.
+    category: Optional[str] = None
+    category_reason: Optional[str] = None
 
     @property
     def redacted_token(self) -> Optional[str]:
@@ -86,8 +92,9 @@ class Finding:
     def __str__(self) -> str:
         """Human-readable string representation"""
         loc = f"{self.file}:{self.line}" if self.file and self.line else "text"
+        cat_str = f" [{self.category}]" if self.category else ""
         return (
-            f"[{self.severity.value.upper()}] {self.type} "
+            f"[{self.severity.value.upper()}] {self.type}{cat_str} "
             f"at {loc} (evidence: {self.evidence.value})"
         )
 
