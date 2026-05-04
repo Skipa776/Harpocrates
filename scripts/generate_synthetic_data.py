@@ -692,6 +692,186 @@ def _neg_env_loaded_secret() -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Duplicate-token negative generators (Phase 3.5 augmentation)
+# ---------------------------------------------------------------------------
+
+def _neg_env_loaded_v2() -> Dict[str, Any]:
+    """Negative (v2): env-loaded secret with token_start pointing to the lookup site, not pos 0.
+
+    The original _neg_env_loaded_secret sets token=var and emits no offset, so
+    line.find(var) returns position 0 (the variable declaration), not the getenv
+    call. This version emits token_start at the second occurrence of var in the line.
+    """
+    var = random.choice(["API_KEY", "SECRET_KEY", "DATABASE_PASSWORD",
+                         "AUTH_TOKEN", "STRIPE_KEY", "JWT_SECRET"])
+    loader_templates = [
+        f'{var} = os.getenv("{var}")',
+        f'{var} = os.environ["{var}"]',
+        f'{var} = os.environ.get("{var}")',
+    ]
+    line = random.choice(loader_templates)
+    token = var
+    first_pos = line.find(var)
+    second_pos = line.find(var, first_pos + len(var))
+    token_start = second_pos if second_pos >= 0 else None
+    token_end = second_pos + len(var) if second_pos >= 0 else None
+    return {
+        "token": token,
+        "token_start": token_start,
+        "token_end": token_end,
+        "line_content": line,
+        "context_before": [
+            random.choice(["from dotenv import load_dotenv", "import os", "load_dotenv()"]),
+            "",
+        ],
+        "context_after": [
+            random.choice([
+                f'if not {var}: raise ValueError("Missing {var}")',
+                f"assert {var.lower()}, '{var} must be set'",
+            ]),
+            "",
+        ],
+        "file_path": random.choice(["config/settings.py", "src/config.ts",
+                                     "config/application.rb"]),
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _neg_value_matches_var_typed_default() -> Dict[str, Any]:
+    """Negative: config default whose value contains the var name — documented, not a secret."""
+    _CONFIGS = [
+        ("PORT", "PORT_DEFAULT_8080"),
+        ("HOST", "HOST_DEFAULT_LOCALHOST"),
+        ("MAX_RETRIES", "MAX_RETRIES_DEFAULT_3"),
+        ("LOG_LEVEL", "LOG_LEVEL_DEFAULT_INFO"),
+        ("CACHE_TTL", "CACHE_TTL_DEFAULT_300"),
+    ]
+    var, base_val = random.choice(_CONFIGS)
+    rand_suffix = _rand_hex(8)
+    token = f"{base_val}_{rand_suffix}"
+    line = f'{var} = "{token}"  # default, override via env'
+    token_start = len(f'{var} = "')
+    return {
+        "token": token,
+        "token_start": token_start,
+        "token_end": token_start + len(token),
+        "line_content": line,
+        "context_before": ["# Application defaults — safe to commit", ""],
+        "context_after": ["", ""],
+        "file_path": random.choice(["config/defaults.py", "settings/base.py"]),
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _neg_logger_template() -> Dict[str, Any]:
+    """Negative: log line that contains a sensitive-sounding var name plus a trace ID."""
+    _SENSITIVE_NAMES = ["api_key", "secret", "token", "password", "auth"]
+    var = random.choice(_SENSITIVE_NAMES)
+    trace_id = _rand_hex(24)
+    token = trace_id
+    template = random.choice([
+        f'logger.info("request completed", extra={{"{var}": "[REDACTED]", "trace_id": "{trace_id}"}})',
+        f'logger.debug("{var}=******* trace_id={trace_id}")',
+        f'log.Printf("{var}=[REDACTED] trace_id=%s", "{trace_id}")',
+    ])
+    line = template
+    token_pos = line.find(trace_id)
+    return {
+        "token": token,
+        "token_start": token_pos if token_pos >= 0 else None,
+        "token_end": token_pos + len(trace_id) if token_pos >= 0 else None,
+        "line_content": line,
+        "context_before": [f"def handle_request({var}, request_id):", ""],
+        "context_after": ["return result", ""],
+        "file_path": random.choice(["src/handlers.py", "middleware/auth.py",
+                                     "handlers/api.go"]),
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _neg_test_assertion_with_var_name() -> Dict[str, Any]:
+    """Negative: test assertion where value contains the var name by fixture convention."""
+    _FIXTURES = [
+        ("token", "test_token_for_unit_test_only"),
+        ("secret", "test_secret_fixture_abc"),
+        ("api_key", "test_api_key_mock_value"),
+        ("password", "test_password_fixture_xyz"),
+        ("auth_token", "test_auth_token_unit_test"),
+    ]
+    var, base_value = random.choice(_FIXTURES)
+    rand_suffix = _rand_hex(8)
+    token_value = f"{base_value}_{rand_suffix}"
+    line = random.choice([
+        f'assert response.{var} == "{token_value}"',
+        f'self.assertEqual(result["{var}"], "{token_value}")',
+        f'expect(auth.{var}).to eq("{token_value}")',
+    ])
+    token_pos = line.rfind(token_value)
+    return {
+        "token": token_value,
+        "token_start": token_pos if token_pos >= 0 else None,
+        "token_end": token_pos + len(token_value) if token_pos >= 0 else None,
+        "line_content": line,
+        "context_before": [
+            random.choice(["def test_authentication(self):", "it 'returns valid token' do",
+                           "func TestAuth(t *testing.T) {"]),
+            "",
+        ],
+        "context_after": [random.choice(["    # verify all fields", "end", "}"]), ""],
+        "file_path": random.choice(["tests/test_auth.py", "spec/auth_spec.rb",
+                                     "auth_test.go"]),
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _neg_llm_placeholder() -> Dict[str, Any]:
+    """Negative: LLM-style placeholder that looks like a credential but is documentation."""
+    _PLACEHOLDERS = [
+        ("API_KEY", "YOUR_API_KEY_HERE"),
+        ("SECRET_KEY", "REPLACE_ME_WITH_YOUR_SECRET"),
+        ("DATABASE_PASSWORD", "CHANGEME_BEFORE_DEPLOY"),
+        ("GITHUB_TOKEN", "YOUR_GITHUB_TOKEN_HERE"),
+        ("STRIPE_SECRET_KEY", "REPLACE_WITH_REAL_STRIPE_KEY"),
+        ("JWT_SECRET", "CHANGEME_USE_STRONG_SECRET_IN_PROD"),
+        ("AWS_SECRET_ACCESS_KEY", "YOUR_AWS_SECRET_HERE"),
+        ("API_SECRET", "INSERT_API_SECRET_HERE"),
+    ]
+    var, placeholder = random.choice(_PLACEHOLDERS)
+    line = random.choice([
+        f'{var} = "{placeholder}"',
+        f'{var} = os.getenv("{var}", "{placeholder}")',
+        f'export {var}="{placeholder}"',
+        f'{var.lower()} = "{placeholder}"',
+    ])
+    token_pos = line.rfind(placeholder)
+    return {
+        "token": placeholder,
+        "token_start": token_pos if token_pos >= 0 else None,
+        "token_end": token_pos + len(placeholder) if token_pos >= 0 else None,
+        "line_content": line,
+        "context_before": [
+            random.choice(["# TODO: replace before deploying",
+                           "# See README for setup instructions",
+                           "# EXAMPLE CONFIG"]),
+            "",
+        ],
+        "context_after": [
+            random.choice(["# Update this value in .env",
+                           "# DO NOT USE IN PRODUCTION", ""]),
+            "",
+        ],
+        "file_path": random.choice(["README.md", "config.example.py",
+                                     ".env.example", "docs/setup.md"]),
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
 _NEGATIVE_GENERATORS = [
     _neg_lock_file_hash,
     _neg_css_hex_color,
@@ -709,6 +889,19 @@ _NEGATIVE_GENERATORS = [
     _neg_csprng_nonce,
     _neg_content_addressable_hash,
     _neg_env_loaded_secret,
+    _neg_env_loaded_v2,
+    _neg_value_matches_var_typed_default,
+    _neg_logger_template,
+    _neg_test_assertion_with_var_name,
+    _neg_llm_placeholder,
+]
+
+_AUGMENT_NEGATIVE_GENERATORS = [
+    _neg_env_loaded_v2,
+    _neg_value_matches_var_typed_default,
+    _neg_logger_template,
+    _neg_test_assertion_with_var_name,
+    _neg_llm_placeholder,
 ]
 
 
@@ -815,14 +1008,29 @@ def _pos_env_fallback_secret() -> Dict[str, Any]:
     secret_value = prefix + _rand_b64(random.randint(16, 32))
     var = random.choice(["SECRET_KEY", "API_KEY", "DATABASE_PASSWORD",
                          "STRIPE_SECRET_KEY", "JWT_SECRET"])
+    var_lower = var.lower()
+    var_dotted = var_lower.replace("_", ".")
     pattern = random.choice([
+        # Original 4
         f'{var} = os.getenv("{var}", "{secret_value}")',
         f'{var} = os.environ.get("{var}", "{secret_value}")',
-        f'const {var.lower()} = process.env.{var} || "{secret_value}"',
-        f'{var.lower()} = ENV.fetch("{var}") {{ "{secret_value}" }}',
+        f'const {var_lower} = process.env.{var} || "{secret_value}"',
+        f'{var_lower} = ENV.fetch("{var}") {{ "{secret_value}" }}',
+        # 8 additional framework templates
+        f'{var} = config("{var}", default="{secret_value}")',
+        f'{var_lower}: str = "{secret_value}"',
+        f'@Value("${{{var_dotted}:{secret_value}}}") private String {var_lower};',
+        f'Rails.application.credentials.dig(:{var_lower}) || "{secret_value}"',
+        f'const {var_lower} = process.env.{var} ?? "{secret_value}";',
+        f'const env = envSchema.parse({{ {var}: process.env.{var} ?? "{secret_value}" }});',
+        f'{var_lower}: {{{{ .Values.{var_lower} | default "{secret_value}" }}}}',
+        f'goEnv := os.Getenv("{var}"); if goEnv == "" {{ goEnv = "{secret_value}" }}',
     ])
+    token_pos = pattern.find(secret_value)
     return {
         "token": secret_value,
+        "token_start": token_pos if token_pos >= 0 else None,
+        "token_end": token_pos + len(secret_value) if token_pos >= 0 else None,
         "line_content": pattern,
         "context_before": [
             random.choice(["from dotenv import load_dotenv", "import os",
@@ -832,7 +1040,7 @@ def _pos_env_fallback_secret() -> Dict[str, Any]:
         "context_after": [
             random.choice([
                 f"app.config['{var}'] = {var}",
-                f"client = Client({var.lower()})",
+                f"client = Client({var_lower})",
                 "# WARNING: fallback should only be used in development",
             ]),
             "",
@@ -844,10 +1052,213 @@ def _pos_env_fallback_secret() -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Duplicate-token positive generators (Phase 3.5 augmentation)
+# These cover lines where the token contains the variable name as a substring,
+# exposing the feature extractor to the common case that was missing from the
+# original 40k corpus.
+# ---------------------------------------------------------------------------
+
+def _pos_value_contains_var_name() -> Dict[str, Any]:
+    """Positive: value starts with the variable name as a substring (e.g. password='passwordXyz')."""
+    _VARS = ["password", "apiKey", "secret", "token", "dbPass", "authKey", "clientSecret"]
+    var = random.choice(_VARS)
+    suffix = _rand_hex(random.randint(16, 28))
+    token = f"{var}{suffix}"
+    line = f'{var} = "{token}"'
+    token_start = len(f'{var} = "')
+    return {
+        "token": token,
+        "token_start": token_start,
+        "token_end": token_start + len(token),
+        "line_content": line,
+        "context_before": [
+            random.choice(["import os", "from flask import Flask",
+                           "from django.conf import settings"]),
+            "",
+        ],
+        "context_after": [
+            random.choice([f"auth = authenticate({var}=val)",
+                           f"client = Client(secret={var})", ""]),
+            "",
+        ],
+        "file_path": random.choice(["config.py", "settings.py", "auth/config.py"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_value_equals_var_name_uppercase() -> Dict[str, Any]:
+    """Positive: value embeds the var name uppercased — legacy 'tag-inside-secret' pattern."""
+    var = random.choice(["API_KEY", "SECRET_KEY", "STRIPE_SECRET",
+                         "JWT_SECRET", "DB_PASSWORD"])
+    suffix = random.choice(["LIVE", "PROD", "v2", "2024", "main"])
+    rand_part = _rand_hex(random.randint(16, 24))
+    token = f"{var}_{suffix}_{rand_part}"
+    line = f'{var} = "{token}"'
+    token_start = len(f'{var} = "')
+    return {
+        "token": token,
+        "token_start": token_start,
+        "token_end": token_start + len(token),
+        "line_content": line,
+        "context_before": [
+            random.choice(["import os", "# Legacy config", "# Production settings"]),
+            "",
+        ],
+        "context_after": [
+            random.choice([f"client.authenticate({var})",
+                           f"headers = {{'X-API-Key': {var}}}", ""]),
+            "",
+        ],
+        "file_path": random.choice(["config/prod.py", "settings/production.py",
+                                     "legacy/config.py"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_yaml_duplicate_key_value() -> Dict[str, Any]:
+    """Positive: YAML key name appears as prefix in the value."""
+    yaml_keys = ["database_password", "api_key", "secret_key",
+                 "auth_token", "stripe_key"]
+    key = random.choice(yaml_keys)
+    rand_part = _rand_hex(random.randint(16, 24))
+    token = f"{key}_2024_{rand_part}"
+    line = f'{key}: "{token}"'
+    token_start = len(f'{key}: "')
+    return {
+        "token": token,
+        "token_start": token_start,
+        "token_end": token_start + len(token),
+        "line_content": line,
+        "context_before": [
+            random.choice(["  security:", "  database:", "  credentials:"]),
+            "",
+        ],
+        "context_after": [
+            random.choice(["  host: localhost", "  port: 5432", ""]),
+            "",
+        ],
+        "file_path": random.choice(["config/application.yml", "config/secrets.yml",
+                                     "k8s/secret.yaml"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_jsonish_duplicate() -> Dict[str, Any]:
+    """Positive: JS/JSON config where key name appears as prefix in the value."""
+    json_keys = ["apiKey", "secretToken", "clientSecret",
+                 "accessToken", "privateKey"]
+    key = random.choice(json_keys)
+    env = random.choice(["prod", "live", "production"])
+    rand_part = _rand_hex(random.randint(16, 24))
+    token = f"{key}-{env}-{rand_part}"
+    line = f'  "{key}": "{token}",'
+    token_start = len(f'  "{key}": "')
+    return {
+        "token": token,
+        "token_start": token_start,
+        "token_end": token_start + len(token),
+        "line_content": line,
+        "context_before": [
+            random.choice(['const config = {', 'module.exports = {']),
+            "",
+        ],
+        "context_after": [
+            random.choice(['  "baseUrl": "https://api.example.com",', "};", ""]),
+            "",
+        ],
+        "file_path": random.choice(["config/api.json", "src/config.ts", "lib/config.js"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_env_file_duplicate() -> Dict[str, Any]:
+    """Positive: .env file where the var name appears as a prefix inside the value."""
+    var_bases = ["DATABASE", "API", "SECRET", "AUTH", "STRIPE"]
+    base = random.choice(var_bases)
+    var = f"{base}_KEY" if base != "DATABASE" else "DATABASE_URL"
+    rand_part = _rand_hex(random.randint(20, 32))
+    token = f"{var}_{rand_part}"
+    line = f"{var}={token}"
+    token_start = len(f"{var}=")
+    return {
+        "token": token,
+        "token_start": token_start,
+        "token_end": token_start + len(token),
+        "line_content": line,
+        "context_before": [
+            random.choice(["# Production environment", "# DO NOT COMMIT", "# Secrets"]),
+            "",
+        ],
+        "context_after": [
+            random.choice([f"{base}_REGION=us-east-1", "PORT=8080", ""]),
+            "",
+        ],
+        "file_path": random.choice([".env", ".env.production", "config/.env"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_cross_lang_duplicate() -> Dict[str, Any]:
+    """Positive: JS/TS/Go/Java/Ruby where the value starts with the variable name."""
+    var_names = ["apiKey", "secretKey", "authToken", "clientSecret", "privateKey"]
+    var = random.choice(var_names)
+    rand_part = _rand_hex(random.randint(16, 24))
+    token = f"{var}{rand_part}"
+
+    q = "'"
+    dq = '"'
+    lang_templates = [
+        (f"const {var} = {q}{token}{q};", "src/config.ts"),
+        (f"const {var} = {dq}{token}{dq};", "src/auth.js"),
+        (f'var {var} = {dq}{token}{dq}', "config/config.go"),
+        (f'{var} := {dq}{token}{dq}', "cmd/server.go"),
+        (f'private static final String {var.upper()} = {dq}{token}{dq};',
+         "src/main/java/Config.java"),
+        (f'String {var} = {dq}{token}{dq};', "src/main/java/Service.java"),
+        (f"{var.upper()} = {q}{token}{q}", "config/initializers/secrets.rb"),
+        (f"{var} = {q}{token}{q}", "lib/config.rb"),
+    ]
+    line, file_path = random.choice(lang_templates)
+    token_pos = line.find(token)
+    return {
+        "token": token,
+        "token_start": token_pos if token_pos >= 0 else None,
+        "token_end": token_pos + len(token) if token_pos >= 0 else None,
+        "line_content": line,
+        "context_before": ["", ""],
+        "context_after": ["", ""],
+        "file_path": file_path,
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
 _POSITIVE_GENERATORS = [
     _pos_hardcoded_api_key,
     _pos_connection_string,
     _pos_private_key_pem,
+    _pos_env_fallback_secret,
+    _pos_value_contains_var_name,
+    _pos_value_equals_var_name_uppercase,
+    _pos_yaml_duplicate_key_value,
+    _pos_jsonish_duplicate,
+    _pos_env_file_duplicate,
+    _pos_cross_lang_duplicate,
+]
+
+_AUGMENT_POSITIVE_GENERATORS = [
+    _pos_value_contains_var_name,
+    _pos_value_equals_var_name_uppercase,
+    _pos_yaml_duplicate_key_value,
+    _pos_jsonish_duplicate,
+    _pos_env_file_duplicate,
+    _pos_cross_lang_duplicate,
     _pos_env_fallback_secret,
 ]
 
@@ -1070,13 +1481,68 @@ def main() -> None:
                         help="Skip LLM generation — script-generated samples only")
     parser.add_argument("--no-features", action="store_true",
                         help="Skip feature extraction (faster, no feature columns)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Random seed for reproducible output")
+    parser.add_argument("--augment-only", action="store_true",
+                        help=(
+                            "Generate augmentation samples only (new generators, no LLM). "
+                            "Default output: data/synthetic_v2_augmented.jsonl. "
+                            "Target: 8000 positive + 5000 negative = 13000 samples."
+                        ))
     # Legacy alias for backward compatibility
     parser.add_argument("--ollama-url", type=str, default=None,
                         help=argparse.SUPPRESS)
     args = parser.parse_args()
 
+    if args.seed is not None:
+        random.seed(args.seed)
+
     if args.ollama_url and args.lm_studio_url == _DEFAULT_LM_STUDIO_URL:
         args.lm_studio_url = args.ollama_url
+
+    # --augment-only: generate from new generators only, no LLM, separate default output
+    if args.augment_only:
+        if args.output == Path("data/synthetic_v2.jsonl"):
+            args.output = Path("data/synthetic_v2_augmented.jsonl")
+        # Fixed target volumes matching the Phase 3.5 plan
+        n_pos_augment = 8000
+        n_neg_augment = 5000
+        print(f"[augment-only] {n_pos_augment} positive + {n_neg_augment} negative "
+              f"→ {args.output}")
+
+        all_samples: List[Dict[str, Any]] = []
+
+        print(f"\n[+] Generating {n_pos_augment} augmentation positives...")
+        pos_samples = [random.choice(_AUGMENT_POSITIVE_GENERATORS)()
+                       for _ in range(n_pos_augment)]
+        for s in pos_samples:
+            s["source"] = "script_augment"
+        all_samples.extend(pos_samples)
+
+        print(f"[-] Generating {n_neg_augment} augmentation negatives...")
+        neg_samples = [random.choice(_AUGMENT_NEGATIVE_GENERATORS)()
+                       for _ in range(n_neg_augment)]
+        for s in neg_samples:
+            s["source"] = "script_augment"
+        all_samples.extend(neg_samples)
+
+        random.shuffle(all_samples)
+
+        if not args.no_features:
+            print(f"\n[F] Extracting features from {len(all_samples)} records...")
+            all_samples = [_attach_features(s) for s in all_samples]
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.output, "w") as f:
+            for record in all_samples:
+                f.write(json.dumps(record) + "\n")
+
+        pos_n = sum(1 for r in all_samples if r.get("label") == 1)
+        neg_n = sum(1 for r in all_samples if r.get("label") == 0)
+        print(f"\nWrote {len(all_samples)} records → {args.output}")
+        print(f"  positive (secret): {pos_n}")
+        print(f"  negative (safe):   {neg_n}")
+        return
 
     n_positive = int(args.count * args.balance)
     n_negative = args.count - n_positive
@@ -1091,7 +1557,7 @@ def main() -> None:
     print(f"  Positive: {n_pos_llm} LLM + {n_pos_script} script")
     print(f"  Negative: {n_neg_llm} LLM + {n_neg_script} script")
 
-    all_samples: List[Dict[str, Any]] = []
+    all_samples = []
 
     # Script-generated samples (no LLM needed)
     print(f"\n[+] Generating {n_pos_script} script-generated positives...")
