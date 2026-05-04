@@ -132,3 +132,56 @@ def test_finding_confidence_score() -> None:
         regex_findings = [f for f in findings if f.evidence == EvidenceType.REGEX]
         for f in regex_findings:
             assert f.confidence >= 0.95
+
+
+def test_detect_text_does_not_expose_ml_candidates() -> None:
+    """detect_text (non-ML entrypoint) must never return evidence=ML findings."""
+    # This line matches _SENSITIVE_ASSIGNMENT_RE and would generate an ML_CANDIDATE
+    # inside _scan_line — but detect_text must filter them before returning.
+    text = 'password = "hunter2_long_enough_to_match_threshold"\n'
+
+    findings = detect_text(text)
+
+    ml_findings = [f for f in findings if f.evidence == EvidenceType.ML]
+    assert ml_findings == [], (
+        f"detect_text returned {len(ml_findings)} unverified ML_CANDIDATE(s) — "
+        "non-ML entrypoints must strip evidence=ML findings before returning"
+    )
+
+
+def test_detect_text_with_ml_drops_ml_candidates_on_verifier_failure() -> None:
+    """On verifier exception, detect_text_with_ml must drop ML_CANDIDATEs."""
+    from unittest.mock import MagicMock
+
+    from Harpocrates.core.detector import detect_text_with_ml
+
+    failing_verifier = MagicMock()
+    failing_verifier.verify.side_effect = RuntimeError("simulated verifier failure")
+
+    text = 'secret = "aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890_long"\n'
+
+    findings = detect_text_with_ml(text, verifier=failing_verifier)
+
+    ml_findings = [f for f in findings if f.evidence == EvidenceType.ML]
+    assert ml_findings == [], (
+        "On verifier failure, ML_CANDIDATEs must be dropped — "
+        f"got {len(ml_findings)} unverified finding(s)"
+    )
+
+
+def test_detect_text_never_exposes_ml_candidates_for_any_input() -> None:
+    """detect_text must not return evidence=ML findings for any input.
+
+    This is a second ML-filter invariant check using a URL-containing line
+    where the sensitive-assignment pattern might fire after URL stripping.
+    Distinct from test_detect_text_does_not_expose_ml_candidates which uses
+    a plain assignment — together they confirm the filter holds across input shapes.
+    """
+    text = "endpoint = https://user:secret_password_value_long@host.example.com/db\n"
+
+    findings = detect_text(text)
+
+    ml_findings = [f for f in findings if f.evidence == EvidenceType.ML]
+    assert ml_findings == [], (
+        "detect_text must not expose ML_CANDIDATEs regardless of input shape"
+    )
