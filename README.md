@@ -152,6 +152,31 @@ The ML model is bundled with the package. `pip install "harpocrates[ml]"` is all
 
 ---
 
+## MCP Server
+
+Harpocrates ships an MCP (Model Context Protocol) server that exposes `scan_text` and `scan_file` to compatible agents via stdio transport.
+
+**Install:**
+```bash
+pip install "harpocrates[mcp]"   # requires Python 3.10+
+```
+
+**Run:**
+```bash
+harpocrates-mcp                  # listens on stdio, speaks JSON-RPC
+```
+
+**Tools exposed:**
+
+| Tool | Arguments | Returns |
+|------|-----------|---------|
+| `scan_text` | `text: str`, `include_token: bool = False` | List of finding dicts |
+| `scan_file` | `path: str`, `include_token: bool = False`, `max_bytes: int\|None = None` | List of finding dicts |
+
+Tokens are redacted by default (`include_token=False`). The MCP process has the same filesystem read scope as the user who launched it.
+
+---
+
 ![Contributing](images/divider-contributing.png)
 
 ## Contributing
