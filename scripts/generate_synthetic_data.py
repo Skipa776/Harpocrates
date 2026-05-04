@@ -176,6 +176,12 @@ _POS_FILE_TYPES = [
     "database migration", "initializer/bootstrap", "CLI tool entrypoint",
     "REST API client library", "background job/worker", "Makefile or Taskfile",
     "infrastructure-as-code (Terraform/Ansible/K8s)", "Docker Compose file",
+    # AI-code-specific patterns (Phase 3.6.2)
+    "AI-generated API integration scaffold (as an AI assistant would write it, with inline keys)",
+    "Dockerfile with ENV instructions containing literal secret values",
+    "Helm values.yaml with database passwords and API key defaults inline",
+    "Terraform .tf provider configuration with access_key/secret_key inline",
+    "Jupyter notebook code cell demonstrating API usage with an inline key",
 ]
 
 _POS_INDUSTRIES = [
@@ -207,6 +213,9 @@ _POS_ASSIGNMENT_PATTERNS = [
     "stored in a YAML/JSON value field",
     "assigned in a ${VAR:-hardcoded_default} Docker pattern",
     "set via ENV.fetch('KEY') { 'hardcoded_fallback' } Ruby pattern",
+    # Phase 3.6.2 — commented-out and dev/prod swap patterns
+    "commented out (# old production value: api_key = 'sk_live_xxx') — still a leak in git history",
+    "present as both a test key on the active line and a prod key in a trailing comment (# PROD: sk_live_xxx)",
 ]
 
 _POS_NOISE_ELEMENTS = [
@@ -292,6 +301,14 @@ _NEG_HIGH_ENTROPY_TYPES = [
     "UUID v4 correlation IDs and trace identifiers",
     "IPFS CID content identifiers",
     "git tree/blob object hashes",
+    # Phase 3.6.2 — runtime generation and correct env-var loading
+    "runtime-generated tokens using secrets.token_hex(), secrets.token_urlsafe(), "
+    "uuid.uuid4().hex, or crypto.randomBytes() — the value is produced AT RUNTIME, "
+    "never stored as a literal string anywhere in the source file",
+    "correct environment variable loading: os.environ['KEY'] or process.env.KEY or "
+    "os.Getenv('KEY') with no fallback literal — the value comes entirely from the environment",
+    "documentation examples with explicit placeholder text (YOUR_API_KEY, REPLACE_ME, "
+    "INSERT_SECRET_HERE) clearly marked as examples in docstrings or README-style comments",
 ]
 
 _NEG_CONTEXT_HINTS = [
@@ -304,6 +321,11 @@ _NEG_CONTEXT_HINTS = [
     "use in a deduplication or integrity-checking context",
     "embed in test fixture setup/teardown methods",
     "include in a content-addressable or cache-key context",
+    # Phase 3.6.2 — runtime generation context hints
+    "show the token generation call (secrets.token_hex / crypto.randomBytes / uuid.uuid4) "
+    "prominently — the variable is assigned the RETURN VALUE of the call, never a literal",
+    "load secrets ONLY via environment variables — never use a fallback string, "
+    "use sys.exit(1) or raise ValueError if the env var is missing",
 ]
 
 _NEG_FILE_PATHS: Dict[str, List[str]] = {
@@ -872,6 +894,113 @@ def _neg_llm_placeholder() -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 3.6.3 — new negative generators
+# ---------------------------------------------------------------------------
+
+_RUNTIME_GENERATION_CALLS: List[Tuple[str, str]] = [
+    # (language_hint, line_template)  token = var name (LHS)
+    ("python",      "{var} = secrets.token_hex(32)"),
+    ("python",      "{var} = secrets.token_urlsafe(48)"),
+    ("python",      "{var} = secrets.token_bytes(16).hex()"),
+    ("python",      "{var} = hashlib.sha256(salt + nonce).hexdigest()"),
+    ("python",      "{var} = uuid.uuid4().hex"),
+    ("javascript",  "const {var} = crypto.randomBytes(32).toString('hex');"),
+    ("javascript",  "const {var} = crypto.randomUUID();"),
+    ("javascript",  "const {var} = Math.random().toString(36).slice(2) + Date.now();"),
+    ("go",          "{var} := hex.EncodeToString(randBytes)  // from crypto/rand"),
+    ("go",          "{var} := uuid.New().String()"),
+    ("java",        "String {var} = UUID.randomUUID().toString().replace(\"-\", \"\");"),
+    ("java",        "byte[] {var}Bytes = new byte[32]; new SecureRandom().nextBytes({var}Bytes);"),
+    ("ruby",        "{var} = SecureRandom.hex(32)"),
+    ("rust",        "let {var} = Uuid::new_v4().to_string();"),
+]
+
+_RUNTIME_VARS: List[str] = [
+    "api_token", "session_key", "csrf_token", "auth_token", "nonce",
+    "access_token", "signing_key", "request_id", "correlation_id",
+    "client_secret", "api_key", "session_token", "refresh_token",
+]
+
+
+def _neg_runtime_token_generation() -> Dict[str, Any]:
+    """Runtime token-generation calls: these are NOT literal hardcoded secrets."""
+    var = random.choice(_RUNTIME_VARS)
+    lang, tmpl = random.choice(_RUNTIME_GENERATION_CALLS)
+    line = tmpl.format(var=var)
+    token_start = line.find(var)
+    token_end = token_start + len(var)
+    context: List[str] = []
+    if lang == "python":
+        context = [
+            random.choice(["import secrets", "import hashlib", "import uuid"]),
+            "",
+        ]
+    elif lang == "javascript":
+        context = ["const crypto = require('crypto');", ""]
+    elif lang == "go":
+        context = ["import (", '    "crypto/rand"', '    "encoding/hex"', ")"]
+    return {
+        "token": var,
+        "token_start": token_start,
+        "token_end": token_end,
+        "line_content": line,
+        "context_before": context,
+        "context_after": [
+            f"// {var} is generated fresh for each request",
+            random.choice(["return " + var, var + " = renew_on_expiry(" + var + ")",
+                           "store_token(" + var + ")"]),
+        ],
+        "file_path": random.choice(["auth/tokens.py", "utils/security.go",
+                                     "src/auth.js", "src/crypto.ts",
+                                     "lib/auth.rb", "auth/token_service.java"]),
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+_DOCSTRING_PLACEHOLDER_CONTEXTS: List[Tuple[str, str, str]] = [
+    # (language, before_line, example_line)
+    ("python",  '    """', '    api_key = "YOUR_API_KEY_HERE"'),
+    ("python",  "    # Example:", "    secret = \"REPLACE_ME_BEFORE_DEPLOY\""),
+    ("python",  '    """Configuration example:',
+     '    database_password = "INSERT_DB_PASSWORD_HERE"'),
+    ("markdown", "```python", 'API_KEY = "YOUR_API_KEY"'),
+    ("markdown", "```", 'password = "CHANGEME"'),
+    ("rst",     ".. code-block:: python", '   AWS_SECRET = "YOUR_AWS_SECRET_HERE"'),
+    ("jsdoc",   " * @example", " * const token = 'YOUR_TOKEN_HERE';"),
+    ("jsdoc",   " * Usage:", " * apiKey: 'INSERT_API_KEY_HERE'"),
+]
+
+
+def _neg_documented_placeholder_in_docstring() -> Dict[str, Any]:
+    """Placeholder strings inside docstrings/docs — NOT real secrets."""
+    lang, before, line = random.choice(_DOCSTRING_PLACEHOLDER_CONTEXTS)
+    # Find the placeholder in the line
+    for placeholder in ("YOUR_API_KEY_HERE", "REPLACE_ME_BEFORE_DEPLOY",
+                        "INSERT_DB_PASSWORD_HERE", "YOUR_API_KEY", "CHANGEME",
+                        "YOUR_AWS_SECRET_HERE", "YOUR_TOKEN_HERE", "INSERT_API_KEY_HERE"):
+        if placeholder in line:
+            pos = line.find(placeholder)
+            return {
+                "token": placeholder,
+                "token_start": pos,
+                "token_end": pos + len(placeholder),
+                "line_content": line,
+                "context_before": [before],
+                "context_after": [
+                    '    """' if lang == "python" else "",
+                    "# Replace the example values above with real secrets from your vault",
+                ],
+                "file_path": random.choice(["README.md", "docs/setup.md",
+                                             "src/config.py", "lib/client.js"]),
+                "label": 0,
+                "secret_type": "ENTROPY_CANDIDATE",
+            }
+    # Fallback (should never hit if DOCSTRING_PLACEHOLDER_CONTEXTS is consistent)
+    return _neg_llm_placeholder()
+
+
 _NEGATIVE_GENERATORS = [
     _neg_lock_file_hash,
     _neg_css_hex_color,
@@ -894,6 +1023,8 @@ _NEGATIVE_GENERATORS = [
     _neg_logger_template,
     _neg_test_assertion_with_var_name,
     _neg_llm_placeholder,
+    _neg_runtime_token_generation,
+    _neg_documented_placeholder_in_docstring,
 ]
 
 _AUGMENT_NEGATIVE_GENERATORS = [
@@ -902,6 +1033,8 @@ _AUGMENT_NEGATIVE_GENERATORS = [
     _neg_logger_template,
     _neg_test_assertion_with_var_name,
     _neg_llm_placeholder,
+    _neg_runtime_token_generation,
+    _neg_documented_placeholder_in_docstring,
 ]
 
 
@@ -1239,6 +1372,147 @@ def _pos_cross_lang_duplicate() -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 3.6.3 — new positive generators
+# ---------------------------------------------------------------------------
+
+_COMMENT_STYLE_PREFIXES: List[str] = ["# ", "// ", "-- ", "<!-- ", "/* "]
+_COMMENT_STYLE_SUFFIXES: Dict[str, str] = {"<!-- ": " -->", "/* ": " */"}
+
+_COMMENTED_SECRET_VARS: List[Tuple[str, str]] = [
+    # (var_name, assignment_pattern)
+    ("DB_PASSWORD",         '{var} = "{secret}"'),
+    ("API_KEY",             '{var} = "{secret}"'),
+    ("SECRET_KEY",          '{var} = "{secret}"'),
+    ("STRIPE_API_KEY",      '{var} = "{secret}"'),
+    ("AWS_SECRET_ACCESS_KEY", '{var} = "{secret}"'),
+    ("database_password",   '{var} = "{secret}"'),
+    ("api_key",             "const {var} = '{secret}';"),
+    ("privateKey",          "const {var} = '{secret}';"),
+    ("connectionString",    'var {var} = "{secret}";'),
+    ("password",            'String {var} = "{secret}";'),
+    ("secret_key",          '{var} = "{secret}"'),
+    ("auth_token",          '{var} = "{secret}"'),
+]
+
+
+def _pos_commented_secret() -> Dict[str, Any]:
+    """Commented-out real secret — still a leak in git history."""
+    prefix = random.choice(_COMMENT_STYLE_PREFIXES)
+    suffix = _COMMENT_STYLE_SUFFIXES.get(prefix, "")
+    var, pattern = random.choice(_COMMENTED_SECRET_VARS)
+    secret = _rand_b64(random.randint(18, 32))
+    assignment = pattern.format(var=var, secret=secret)
+    line = f"{prefix}{assignment}{suffix}"
+    # token_start is the position of the secret value within the full commented line
+    token_pos = line.find(secret)
+    return {
+        "token": secret,
+        "token_start": token_pos if token_pos >= 0 else None,
+        "token_end": token_pos + len(secret) if token_pos >= 0 else None,
+        "line_content": line,
+        "context_before": [
+            random.choice([
+                "# Rotating key — keep old value for rollback",
+                "// Old production key — DO NOT USE",
+                "# Left here intentionally for reference",
+                "# TODO: remove this before merging",
+            ]),
+            "",
+        ],
+        "context_after": ["", ""],
+        "file_path": random.choice(["config.py", "src/auth.js", "lib/config.go",
+                                     "config/initializers/secrets.rb", "settings.py"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+        "in_comment": True,
+    }
+
+
+_DEVPROD_VARS: List[Tuple[str, str, str]] = [
+    # (var, test_prefix, prod_prefix)
+    ("STRIPE_API_KEY",    "sk_test_",  "sk_live_"),
+    ("API_KEY",           "dev_",      "prod_"),
+    ("SECRET_KEY",        "dev_",      "live_"),
+    ("AUTH_TOKEN",        "test_",     ""),
+    ("DATABASE_PASSWORD", "devpass_",  "prodpass_"),
+    ("WEBHOOK_SECRET",    "wh_test_",  "wh_live_"),
+]
+
+
+def _pos_devprod_swap() -> Dict[str, Any]:
+    """Active test/dev key on the line + prod key leaking in a trailing comment."""
+    var, test_pfx, prod_pfx = random.choice(_DEVPROD_VARS)
+    test_val = test_pfx + _rand_b64(random.randint(16, 28))
+    prod_val = prod_pfx + _rand_b64(random.randint(16, 28))
+    lang = random.choice(["python", "javascript", "env"])
+    if lang == "python":
+        line = f'{var} = "{test_val}"  # PROD: {prod_val}'
+    elif lang == "javascript":
+        line = f"const {var} = '{test_val}';  // PROD: {prod_val}"
+    else:
+        line = f'{var}={test_val}  # prod: {prod_val}'
+    token_pos = line.find(test_val)
+    return {
+        "token": test_val,
+        "token_start": token_pos if token_pos >= 0 else None,
+        "token_end": token_pos + len(test_val) if token_pos >= 0 else None,
+        "line_content": line,
+        "context_before": ["", random.choice(["# Configuration — update per environment", ""])],
+        "context_after": ["", ""],
+        "file_path": random.choice(["config.py", "config.js", ".env", "settings.py"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+_PYTHON_GETENV_FALLBACK_TEMPLATES: List[str] = [
+    '{var} = os.getenv("{ENV_VAR}", "{secret}")',
+    '{var} = os.environ.get("{ENV_VAR}", "{secret}")',
+    '{var} = getattr(settings, "{ENV_VAR}", "{secret}")',
+    '{var} = config("{ENV_VAR}", default="{secret}")',  # django-environ
+    'class Settings:\n    {var}: str = "{secret}"',    # pydantic-settings
+]
+
+_PYTHON_GETENV_VARS: List[Tuple[str, str]] = [
+    ("api_key",         "API_KEY"),
+    ("secret_key",      "SECRET_KEY"),
+    ("db_password",     "DB_PASSWORD"),
+    ("auth_token",      "AUTH_TOKEN"),
+    ("client_secret",   "CLIENT_SECRET"),
+    ("smtp_password",   "SMTP_PASSWORD"),
+    ("stripe_key",      "STRIPE_API_KEY"),
+    ("jwt_secret",      "JWT_SECRET"),
+]
+
+
+def _pos_python_getenv_fallback_explicit() -> Dict[str, Any]:
+    """Python-specific getenv-with-fallback patterns."""
+    var, env_var = random.choice(_PYTHON_GETENV_VARS)
+    secret = _rand_b64(random.randint(18, 32))
+    tmpl = random.choice(_PYTHON_GETENV_FALLBACK_TEMPLATES)
+    line = tmpl.format(var=var, ENV_VAR=env_var, secret=secret)
+    # For multi-line templates (pydantic), use only the first line containing the secret
+    line = next((ln for ln in line.splitlines() if secret in ln), line.splitlines()[0])
+    token_pos = line.find(secret)
+    return {
+        "token": secret,
+        "token_start": token_pos if token_pos >= 0 else None,
+        "token_end": token_pos + len(secret) if token_pos >= 0 else None,
+        "line_content": line,
+        "context_before": [
+            "import os",
+            random.choice(["from decouple import config", "from django.conf import settings",
+                           "from pydantic_settings import BaseSettings", ""]),
+        ],
+        "context_after": ["", ""],
+        "file_path": random.choice(["settings.py", "config.py", "src/config.py",
+                                     "core/settings.py", "app/config.py"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
 _POSITIVE_GENERATORS = [
     _pos_hardcoded_api_key,
     _pos_connection_string,
@@ -1250,6 +1524,9 @@ _POSITIVE_GENERATORS = [
     _pos_jsonish_duplicate,
     _pos_env_file_duplicate,
     _pos_cross_lang_duplicate,
+    _pos_commented_secret,
+    _pos_devprod_swap,
+    _pos_python_getenv_fallback_explicit,
 ]
 
 _AUGMENT_POSITIVE_GENERATORS = [
@@ -1260,6 +1537,9 @@ _AUGMENT_POSITIVE_GENERATORS = [
     _pos_env_file_duplicate,
     _pos_cross_lang_duplicate,
     _pos_env_fallback_secret,
+    _pos_commented_secret,
+    _pos_devprod_swap,
+    _pos_python_getenv_fallback_explicit,
 ]
 
 
