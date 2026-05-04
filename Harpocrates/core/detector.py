@@ -39,6 +39,12 @@ _URL_RE = re.compile(r"(?:https?://|data:)\S+")
 # lines in non-PEM contexts (raw AES-256 keys, JWT segments, etc.).
 _PEM_BODY_RE = re.compile(r"^[A-Za-z0-9+/]{64}$")
 
+# Comment detection — all common styles: Python/shell/Ruby/YAML (#),
+# JS/TS/Go/Java/C/Rust (// and /* */), HTML/XML (<!-- -->), SQL/Lua (--).
+# Single `*` catches continuation lines inside /* */ blocks.
+_COMMENT_PREFIXES = ("#", "//", "/*", "*", "<!--", "--")
+_COMMENT_STRIP_RE = re.compile(r"^(?:#+|//+|/\*+|\*+|<!--|--)\s*")
+
 # Phase 2b: sensitive-variable assignment bypass — forwards low-entropy literals
 # assigned to clearly credential-named variables directly to ML, skipping the
 # entropy gate. Only fires when regex phases found nothing on the line.
@@ -76,14 +82,20 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     findings: List[Finding] = []
     stripped = line.strip()
 
-    if not stripped or stripped.startswith(("#", "/*#")):
+    if not stripped:
         return findings
+
+    # Detect comment lines and strip the prefix so the payload can be scanned.
+    is_comment = stripped.startswith(_COMMENT_PREFIXES)
+    scan_target = _COMMENT_STRIP_RE.sub("", stripped) if is_comment else stripped
+
+    in_comment = True if is_comment else None
 
     # ------------------------------------------------------------------
     # Phase 1a: CRITICAL regex — deterministic, no ML needed.
     # ------------------------------------------------------------------
     for sig_name, pattern in CRITICAL_SIGNATURES.items():
-        for match in pattern.finditer(stripped):
+        for match in pattern.finditer(scan_target):
             token = match.group()
             findings.append(
                 Finding(
@@ -98,6 +110,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     token=token,
                     token_start=match.start(),
                     token_end=match.end(),
+                    in_comment=in_comment,
                 )
             )
 
@@ -105,7 +118,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     # Phase 1b: HIGH regex — also deterministic, also bypasses ML.
     # ------------------------------------------------------------------
     for sig_name, pattern in HIGH_SIGNATURES.items():
-        for match in pattern.finditer(stripped):
+        for match in pattern.finditer(scan_target):
             token = match.group()
             findings.append(
                 Finding(
@@ -120,6 +133,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     token=token,
                     token_start=match.start(),
                     token_end=match.end(),
+                    in_comment=in_comment,
                 )
             )
 
@@ -127,14 +141,20 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     # Phase 2: Entropy fallback — only when regex found nothing.
     # ------------------------------------------------------------------
     if not findings:
+        # Prose-comment guard: comments with no `=`, `:`, or quote characters
+        # cannot contain assignment-style secrets — skip entropy/ML to preserve
+        # the 2ms budget on heavily-commented files (legal headers, JSDoc, etc.).
+        if is_comment and not any(c in scan_target for c in "=:\"'"):
+            return findings
+
         # Tier 1: skip PEM/X.509 certificate body lines (pure base64, 60-76
         # chars). The BEGIN header was already caught by the regex tier above.
-        if _PEM_BODY_RE.match(stripped):
+        if _PEM_BODY_RE.match(scan_target):
             return findings
 
         # Tier 2: strip URL substrings before tokenizing so CDN/IDP/doc URLs
         # don't generate entropy candidates from their path components.
-        scan_text = _URL_RE.sub(" ", stripped)
+        scan_text = _URL_RE.sub(" ", scan_target)
 
         # TODO(v0.3): switch to finditer to capture offsets → TokenMatch for entropy candidates.
         # URL stripping does not preserve length so offsets would be scan_text-relative;
@@ -153,10 +173,18 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         severity=_entropy_severity(ent),
                         confidence=_calculate_entropy_confidence(ent),
                         token=token,
+                        in_comment=in_comment,
                     )
                 )
 
         found_tokens = {f.token for f in findings}
+        # NOTE(v0.3): token_start/token_end here are relative to scan_text
+        # (post-URL-strip, and for comment lines also post-prefix-strip). They
+        # are NOT relative to the original line. On comment lines the offset
+        # drift is: actual_start = token_start + len(comment_prefix_stripped).
+        # This is acceptable for v0.2.x — TokenMatch consumers in features.py
+        # still call line.find(token) and are not yet consuming these offsets.
+        # Fix alongside the v0.3 finditer migration.
         for match in _SENSITIVE_ASSIGNMENT_RE.finditer(scan_text):
             value = match.group(1)
             if value not in found_tokens:
@@ -174,6 +202,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         token=value,
                         token_start=match.start(1),
                         token_end=match.end(1),
+                        in_comment=in_comment,
                     )
                 )
 
@@ -291,6 +320,7 @@ def _apply_ml_verification(
                     token=finding.token,
                     token_start=finding.token_start,
                     token_end=finding.token_end,
+                    in_comment=finding.in_comment,
                 )
             )
     return verified
