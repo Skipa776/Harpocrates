@@ -49,6 +49,7 @@ class Finding:
     token: Optional[str] = None
     token_start: Optional[int] = None
     token_end: Optional[int] = None
+    in_comment: Optional[bool] = None
 
     @property
     def redacted_token(self) -> Optional[str]:
@@ -69,6 +70,9 @@ class Finding:
         result = asdict(self)
         result['evidence'] = self.evidence.value
         result['severity'] = self.severity.value
+        # token_start/token_end are internal scaffolding for TokenMatch; strip from output.
+        # in_comment is intentionally retained — callers and MCP consumers use it to
+        # distinguish active leaks from commented-out ones for prioritisation and display.
         result.pop('token_start', None)
         result.pop('token_end', None)
         return result

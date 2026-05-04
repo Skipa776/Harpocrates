@@ -57,14 +57,70 @@ def test_detect_text_empty_input() -> None:
     assert findings == []
 
 
-def test_detect_text_comments_skipped() -> None:
-    """Test that commented lines are skipped."""
-    text = "# ghp_" + "a" * 36 + "\n"  # Commented out token
+def test_detect_text_detects_secret_in_python_comment() -> None:
+    """Commented-out secrets are still leaks — they must be detected with in_comment=True."""
+    text = "# ghp_" + "a" * 36 + "\n"
 
     findings = detect_text(text)
 
-    # Should not detect commented tokens
-    assert not findings
+    assert findings, "commented-out GitHub PAT must be detected"
+    assert any(f.type == "GITHUB_PAT" for f in findings)
+    assert all(f.in_comment is True for f in findings)
+
+
+def test_detect_text_detects_secret_in_js_comment() -> None:
+    """// and /* */ style comments are scanned for secrets."""
+    token = "ghp_" + "b" * 36
+    assert detect_text(f"// old token: {token}\n"), "// comment must be scanned"
+    assert detect_text(f"/* {token} */\n"), "/* */ comment must be scanned"
+
+
+def test_detect_text_detects_aws_key_in_html_comment() -> None:
+    """HTML <!-- --> comments are scanned."""
+    text = "<!-- AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE -->\n"
+    findings = detect_text(text)
+    assert findings
+    assert all(f.in_comment is True for f in findings)
+
+
+def test_detect_text_detects_aws_key_in_sql_comment() -> None:
+    """SQL -- comments are scanned."""
+    text = "-- AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"
+    findings = detect_text(text)
+    assert findings
+    assert all(f.in_comment is True for f in findings)
+
+
+def test_detect_text_prose_comment_skipped() -> None:
+    """Prose comments with no = : or quotes produce no findings (budget guard)."""
+    text = "# This is a description of the authentication module\n"
+    assert detect_text(text) == []
+
+
+def test_detect_text_non_comment_in_comment_is_none() -> None:
+    """Findings from non-comment lines must have in_comment=None, not False."""
+    token = "ghp_" + "c" * 36
+    findings = detect_text(f"token = {token}\n")
+    assert findings
+    assert all(f.in_comment is None for f in findings)
+
+
+def test_detect_text_entropy_candidate_in_comment_has_in_comment_flag() -> None:
+    """High-entropy token in a comment must produce ENTROPY_CANDIDATE with in_comment=True.
+
+    The line contains '=' so it passes the prose-comment guard. The value is
+    a 30-char mixed-case alphanumeric string (entropy ~4.5 bits) that triggers
+    the entropy phase. This confirms in_comment propagates to the entropy path,
+    not only the regex path.
+    """
+    # Mixed-case alphanumeric, 30 chars — entropy well above 4.0 bits.
+    text = "# secret_key = aB3dEfGhIjKlMnOpQrStUvWxYz012\n"
+
+    findings = detect_text(text)
+
+    entropy_findings = [f for f in findings if f.evidence == EvidenceType.ENTROPY]
+    assert entropy_findings, "high-entropy token in comment must produce ENTROPY_CANDIDATE"
+    assert all(f.in_comment is True for f in entropy_findings)
 
 
 def test_detect_file_smoke(tmp_path: Path) -> None:
