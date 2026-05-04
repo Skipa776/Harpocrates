@@ -1921,12 +1921,17 @@ def extract_features_from_record(record: dict) -> FeatureVector:
         estimated_line_number = 50
         estimated_total_lines = 100
 
+    token_start = record.get("token_start")
+    token_end = record.get("token_end")
+
     # Create a minimal Finding object
     finding = Finding(
         type=record.get("secret_type", "ENTROPY_CANDIDATE"),
         snippet=line_content,
         evidence=EvidenceType.ENTROPY,
         token=token,
+        token_start=token_start,
+        token_end=token_end,
     )
 
     # Create CodeContext from record with properly set fields
@@ -1940,6 +1945,11 @@ def extract_features_from_record(record: dict) -> FeatureVector:
         line_number=estimated_line_number,
         total_lines=estimated_total_lines,
     )
+    if token_start is not None and token_end is not None:
+        from Harpocrates.ml.tokens import TokenMatch
+        context.token_match = TokenMatch(
+            token=token, start=token_start, end=token_end, kind="entropy"
+        )
 
     return extract_features(finding, context)
 
