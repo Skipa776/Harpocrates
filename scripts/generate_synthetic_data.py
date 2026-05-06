@@ -1661,12 +1661,18 @@ async def generate_llm_samples_async(
         from tqdm import tqdm as _tqdm
         def _make_pbar(total: int, desc: str): return _tqdm(total=total, desc=desc)
     except ImportError:
-        class _make_pbar:  # type: ignore[no-redef]
+        class _make_pbar:  # type: ignore[no-redef]  # noqa: N801
             def __init__(self, total: int, desc: str) -> None:
-                self._n = 0; self._total = total; print(f"{desc} (0/{total})", flush=True)
+                self._n = 0
+                self._total = total
+                print(f"{desc} (0/{total})", flush=True)
+
             def update(self, n: int = 1) -> None:
-                self._n += n; print(f"  {self._n}/{self._total}", flush=True)
-            def close(self) -> None: pass
+                self._n += n
+                print(f"  {self._n}/{self._total}", flush=True)
+
+            def close(self) -> None:
+                pass
 
     semaphore = asyncio.Semaphore(max_concurrent)
     samples: List[Dict[str, Any]] = []
