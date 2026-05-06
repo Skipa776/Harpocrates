@@ -1658,10 +1658,15 @@ async def generate_llm_samples_async(
     import aiohttp
 
     try:
-        from tqdm import tqdm
-        has_tqdm = True
+        from tqdm import tqdm as _tqdm
+        def _make_pbar(total: int, desc: str): return _tqdm(total=total, desc=desc)
     except ImportError:
-        has_tqdm = False
+        class _make_pbar:  # type: ignore[no-redef]
+            def __init__(self, total: int, desc: str) -> None:
+                self._n = 0; self._total = total; print(f"{desc} (0/{total})", flush=True)
+            def update(self, n: int = 1) -> None:
+                self._n += n; print(f"  {self._n}/{self._total}", flush=True)
+            def close(self) -> None: pass
 
     semaphore = asyncio.Semaphore(max_concurrent)
     samples: List[Dict[str, Any]] = []
@@ -1672,8 +1677,7 @@ async def generate_llm_samples_async(
     system_msg = _SYSTEM_MESSAGE if label == 1 else _SYSTEM_MESSAGE_NEGATIVE
 
     label_name = "pos" if label == 1 else "neg"
-    pbar = tqdm(total=count, desc=f"{progress_prefix}LLM ({label_name})",
-                disable=not has_tqdm)
+    pbar = _make_pbar(total=count, desc=f"{progress_prefix}LLM ({label_name})")
 
     async with aiohttp.ClientSession() as session:
         batch_size = max_concurrent * 2
