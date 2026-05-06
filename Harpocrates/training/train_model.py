@@ -291,19 +291,50 @@ def calibrate_model(
     The calibration set must be disjoint from the validation set used for
     early stopping. After calibration, P=0.85 means "85% of tokens with
     this score are actually secrets."
+
+    Uses direct scipy minimisation instead of sklearn's CalibratedClassifierCV
+    (cv='prefit' was removed in sklearn 1.4+). The fitted (a, b) parameters
+    follow the same convention as onnx_verifier._apply_platt:
+        p = 1 / (1 + exp(a * raw_prob + b))
     """
-    from sklearn.calibration import CalibratedClassifierCV
+    from scipy.optimize import minimize
     from sklearn.metrics import brier_score_loss
 
-    calibrator = CalibratedClassifierCV(model, method="sigmoid", cv="prefit")
-    calibrator.fit(X_cal, y_cal)
+    raw_proba = model.predict_proba(X_cal)[:, 1]
+
+    def _nll(params: np.ndarray) -> float:
+        a, b = params
+        p = 1.0 / (1.0 + np.exp(np.clip(a * raw_proba + b, -500, 500)))
+        p = np.clip(p, 1e-12, 1.0 - 1e-12)
+        return -float(np.mean(y_cal * np.log(p) + (1 - y_cal) * np.log(1 - p)))
+
+    res = minimize(_nll, [-1.0, 0.0], method="L-BFGS-B")
+    platt_a, platt_b = float(res.x[0]), float(res.x[1])
+
+    class _PlattCalibrator:
+        """Lightweight Platt wrapper exposing the sklearn CalibratedClassifierCV interface."""
+
+        def __init__(self, base: Any, a: float, b: float) -> None:
+            self._base = base
+            self._a = a
+            self._b = b
+            _cal = type("_Cal", (), {"a_": a, "b_": b})()
+            _cc = type("_CC", (), {"calibrators": [_cal]})()
+            self.calibrated_classifiers_ = [_cc]
+
+        def predict_proba(self, X: np.ndarray) -> np.ndarray:
+            raw = self._base.predict_proba(X)[:, 1]
+            p = 1.0 / (1.0 + np.exp(np.clip(self._a * raw + self._b, -500, 500)))
+            return np.column_stack([1.0 - p, p])
+
+    calibrator = _PlattCalibrator(model, platt_a, platt_b)
 
     if verbose:
-        raw_proba = model.predict_proba(X_cal)[:, 1]
         cal_proba = calibrator.predict_proba(X_cal)[:, 1]
         raw_brier = brier_score_loss(y_cal, raw_proba)
         cal_brier = brier_score_loss(y_cal, cal_proba)
         print("\n=== PLATT SCALING ===")
+        print(f"Platt a={platt_a:.4f}  b={platt_b:.4f}")
         print(f"Brier score (raw):        {raw_brier:.4f}")
         print(f"Brier score (calibrated): {cal_brier:.4f}")
         if cal_brier > 0.1:
@@ -487,7 +518,8 @@ def save_model(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     model_path = output_dir / "xgboost_model.json"
-    model.save_model(str(model_path))
+    # Use get_booster() to avoid XGBoost 3.x sklearn _estimator_type check.
+    model.get_booster().save_model(str(model_path))
 
     config_path = output_dir / "model_config.json"
     with open(config_path, "w") as f:
