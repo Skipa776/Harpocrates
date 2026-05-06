@@ -329,8 +329,8 @@ def scan(
 @app.command()
 def version() -> None:
     """Display version information."""
-    from Harpocrates import __version__
-    console.print(f"Harpocrates version {__version__}")
+    from importlib.metadata import version as _version
+    console.print(f"Harpocrates version {_version('harpocrates')}")
 
 
 @app.command()
