@@ -3,8 +3,8 @@
 
 Reads each record, calls extract_features_from_record (which now consumes
 token_start/token_end and attaches TokenMatch to CodeContext), and writes
-the updated record with a fresh features_65 array.  Idempotent — existing
-features_65 values are replaced, not appended.
+the updated record with a fresh features_67 array.  Idempotent — existing
+features_67 values are replaced, not appended.
 
 Usage:
     python scripts/regenerate_features.py \
@@ -39,10 +39,10 @@ def _process(input_paths: list[Path], output_path: Path) -> None:
                     record = json.loads(line)
                     try:
                         fv = extract_features_from_record(record)
-                        record["features_65"] = fv.to_array()
+                        record["features_67"] = fv.to_array()
                         ok += 1
                     except Exception as e:
-                        record["features_65"] = None
+                        record["features_67"] = None
                         failed += 1
                         if failed <= 5:
                             print(f"  [WARN] feature extraction failed: {e}",

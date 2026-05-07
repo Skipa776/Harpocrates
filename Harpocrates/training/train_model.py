@@ -1,7 +1,7 @@
 """
 Single-stage XGBoost training for Harpocrates ML.
 
-Trains a single XGBoost model on all 65 features with Platt scaling
+Trains a single XGBoost model on all 67 features with Platt scaling
 for calibrated probabilities and dual-threshold decision logic.
 
 Usage (auto-split 65/10/10/15, with OOD golden eval):
@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
-N_FEATURES = 65
+N_FEATURES = 67
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ def load_records(
 def extract_features_from_records(
     records: List[dict],
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Extract 65-dim feature vectors and labels from in-memory records."""
+    """Extract 67-dim feature vectors and labels from in-memory records."""
     from Harpocrates.ml.features import extract_features_from_record
 
     features: List[List[float]] = []
@@ -222,7 +222,7 @@ def train_xgboost(
     seed: int = 42,
     verbose: bool = True,
 ) -> Tuple[Any, Dict[str, float]]:
-    """Train XGBoost on all 65 features.
+    """Train XGBoost on all 67 features.
 
     No scale_pos_weight — class balance is enforced in data generation.
     Returns (model, metrics_dict).
@@ -234,7 +234,7 @@ def train_xgboost(
     n_negative = len(y_train) - n_positive
 
     if verbose:
-        print("\n=== TRAINING: XGBoost on 65 features ===")
+        print("\n=== TRAINING: XGBoost on 67 features ===")
         print(f"Training samples: {len(y_train)}")
         print(f"Class balance: {n_positive} positive, {n_negative} negative")
         print(f"Positive ratio: {n_positive / len(y_train):.1%}")
@@ -242,14 +242,14 @@ def train_xgboost(
     params = {
         "objective": "binary:logistic",
         "eval_metric": ["logloss", "aucpr"],
-        "max_depth": 6,
+        "max_depth": 5,
         "learning_rate": 0.05,
-        "n_estimators": 500,
+        "n_estimators": 300,
         "min_child_weight": 5,
         "subsample": 0.8,
         "colsample_bytree": 0.7,
-        "reg_alpha": 0.1,
-        "reg_lambda": 1.0,
+        "reg_alpha": 0.5,
+        "reg_lambda": 3.0,
         "gamma": 0.1,
         "random_state": seed,
         "n_jobs": -1,

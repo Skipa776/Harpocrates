@@ -42,7 +42,7 @@ class TestKnownSecrets:
         features = extract_features(finding, context)
 
         # Should have secret-indicating features
-        assert features.var_contains_secret is True, "Should detect 'api_key' as secret variable"
+        assert features.var_ngram_secret_score > 0, "Should detect 'api_key' as secret variable via N-gram"
         assert features.file_is_config is True, "Should detect config file"
         assert features.regex_match_type > 0, "Should have regex match"
 
@@ -88,7 +88,7 @@ class TestKnownSecrets:
         # .env files are detected as config files (Path(".env").suffix returns "")
         assert features.file_is_config is True, ".env should be config file"
         assert features.regex_match_type > 0, "Should have regex match"
-        assert features.var_contains_secret is True, "GITHUB_TOKEN contains 'TOKEN'"
+        assert features.var_ngram_secret_score > 0, "GITHUB_TOKEN should score via N-gram"
 
     def test_stripe_live_key(self):
         """Stripe live key should look like a secret."""
@@ -107,7 +107,7 @@ class TestKnownSecrets:
 
         features = extract_features(finding, context)
 
-        assert features.var_contains_secret is True, "api_key should be detected"
+        assert features.var_ngram_secret_score > 0, "api_key should score via N-gram"
         assert features.regex_match_type > 0, "Should have regex match"
 
     def test_openai_api_key(self):
@@ -127,7 +127,7 @@ class TestKnownSecrets:
 
         features = extract_features(finding, context)
 
-        assert features.var_contains_secret is True
+        assert features.var_ngram_secret_score > 0
         assert features.file_is_config is True
 
     def test_private_key_pem(self):
@@ -374,8 +374,8 @@ class TestContextDifferentiation:
         safe_features = extract_features(safe_finding, safe_context)
 
         # Variable name features should differ
-        assert secret_features.var_contains_secret is True
-        assert safe_features.var_contains_secret is False
+        assert secret_features.var_ngram_secret_score > 0
+        assert safe_features.var_ngram_safe_score >= safe_features.var_ngram_secret_score
         assert safe_features.var_contains_safe is True
 
     def test_same_token_different_file_types(self):
@@ -468,7 +468,7 @@ class TestEdgeCases:
 
         features = extract_features(finding, context)
         assert features.token_length == 0
-        assert len(features.to_array()) == 65
+        assert len(features.to_array()) == 67
 
     def test_very_long_token(self):
         """Very long token should not crash."""
@@ -483,7 +483,7 @@ class TestEdgeCases:
 
         features = extract_features(finding, context)
         assert features.token_length == 10000
-        assert len(features.to_array()) == 65
+        assert len(features.to_array()) == 67
 
     def test_special_characters_in_token(self):
         """Token with special characters should not crash."""
@@ -497,7 +497,7 @@ class TestEdgeCases:
         context = CodeContext(line_content=f'weird = "{token}"')
 
         features = extract_features(finding, context)
-        assert len(features.to_array()) == 65
+        assert len(features.to_array()) == 67
         assert features.special_char_ratio > 0
 
     def test_binary_like_content(self):
@@ -512,4 +512,4 @@ class TestEdgeCases:
         context = CodeContext(line_content=f"binary = {repr(token)}")
 
         features = extract_features(finding, context)
-        assert len(features.to_array()) == 65
+        assert len(features.to_array()) == 67

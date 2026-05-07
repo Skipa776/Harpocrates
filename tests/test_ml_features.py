@@ -133,18 +133,24 @@ class TestFeatureVector:
     """Tests for complete feature vector extraction."""
 
     def test_feature_vector_length(self):
-        """Test that feature vector has 65 features (63 original + 2 env-loading features)."""
+        """Test that feature vector has 67 features (Phase 7.0 vector)."""
         fv = FeatureVector()
         array = fv.to_array()
-        assert len(array) == 65
+        assert len(array) == 67
 
     def test_feature_names(self):
         """Test that feature names are defined."""
         names = FeatureVector.get_feature_names()
-        assert len(names) == 65
+        assert len(names) == 67
         assert "token_length" in names
-        assert "var_contains_secret" in names
+        assert "var_ngram_secret_score" in names
         assert "file_is_test" in names
+        # Phase 7.0: label-leak features removed
+        assert "var_contains_secret" not in names
+        assert "line_position_ratio" not in names
+        assert "is_known_hash_length" not in names
+        assert "normalized_entropy" not in names
+        assert "cryptographic_score" not in names
         # These were removed to prevent shortcut learning
         assert "has_known_prefix" not in names
         assert "prefix_type" not in names
@@ -153,14 +159,16 @@ class TestFeatureVector:
         assert "token_structure_score" in names
         assert "has_version_pattern" in names
         assert "semantic_context_score" in names
-        assert "line_position_ratio" in names
         assert "surrounding_secret_density" in names
-        # NEW: Discriminative features for precision boost
+        # Discriminative features for precision boost
         assert "is_uuid_v4" in names
-        assert "is_known_hash_length" in names
         assert "jwt_structure_valid" in names
         assert "entropy_charset_mismatch" in names
         assert "has_hash_prefix" in names
+        # Phase 7.0 value-shape features
+        assert "value_starts_with_slash" in names
+        assert "value_is_lowercase_word" in names
+        assert "is_hex_with_no_alpha_mix" in names
 
     def test_extract_features_aws_key(self):
         """Test feature extraction for AWS key."""
@@ -181,7 +189,7 @@ class TestFeatureVector:
 
         # has_known_prefix and prefix_type removed - check other features
         assert features.token_length == 20
-        assert features.var_contains_secret is True  # "access_key" matches secret pattern
+        assert features.var_ngram_secret_score > 0  # "access_key" scores via N-gram
 
     def test_extract_features_git_sha(self):
         """Test feature extraction for Git SHA (false positive)."""
@@ -244,8 +252,8 @@ class TestFeatureDifferentiation:
         sha_features = extract_features(sha_finding, sha_context)
 
         # Key differentiating features - variable name analysis
-        assert api_features.var_contains_secret is True
-        assert sha_features.var_contains_secret is False
+        assert api_features.var_ngram_secret_score > 0
+        assert sha_features.var_ngram_safe_score >= sha_features.var_ngram_secret_score
 
         assert api_features.var_contains_safe is False
         assert sha_features.var_contains_safe is True
