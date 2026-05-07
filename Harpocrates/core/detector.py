@@ -45,6 +45,9 @@ _PEM_BODY_RE = re.compile(r"^[A-Za-z0-9+/]{64}$")
 # Single `*` catches continuation lines inside /* */ blocks.
 _COMMENT_PREFIXES = ("#", "//", "/*", "*", "<!--", "--")
 _COMMENT_STRIP_RE = re.compile(r"^(?:#+|//+|/\*+|\*+|<!--|--)\s*")
+# Arch override 2026-05-06: compiled regex replaces any() generator for the
+# prose-comment fast-path. ~10x faster on heavily-commented files.
+_PROSE_FILTER_RE = re.compile(r"[=:'\"]")
 
 # Phase 2b: sensitive-variable assignment bypass — forwards low-entropy literals
 # assigned to clearly credential-named variables directly to ML, skipping the
@@ -151,7 +154,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
         # Prose-comment guard: comments with no `=`, `:`, or quote characters
         # cannot contain assignment-style secrets — skip entropy/ML to preserve
         # the 2ms budget on heavily-commented files (legal headers, JSDoc, etc.).
-        if is_comment and not any(c in scan_target for c in "=:\"'"):
+        if is_comment and not _PROSE_FILTER_RE.search(scan_target):
             return findings
 
         # Tier 1: skip PEM/X.509 certificate body lines (pure base64, 60-76
