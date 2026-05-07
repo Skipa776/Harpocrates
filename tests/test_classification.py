@@ -35,6 +35,17 @@ def test_signature_mapping_all_known_signatures() -> None:
         assert name in _SIGNATURE_TO_CATEGORY, f"{name} missing from _SIGNATURE_TO_CATEGORY"
 
 
+def test_signature_to_category_has_no_orphaned_entries() -> None:
+    """Every key in _SIGNATURE_TO_CATEGORY must have a corresponding regex."""
+    from Harpocrates.core.classification import _SIGNATURE_TO_CATEGORY
+    from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNATURES
+    all_sig_names = set(CRITICAL_SIGNATURES) | set(HIGH_SIGNATURES)
+    for name in _SIGNATURE_TO_CATEGORY:
+        assert name in all_sig_names, (
+            f"_SIGNATURE_TO_CATEGORY has orphaned key '{name}' with no corresponding regex"
+        )
+
+
 def test_unknown_signature_falls_through_to_lexicon() -> None:
     """Unrecognised signature_name must not crash — fall through to lower layers."""
     inf = infer_category(signature_name="UNKNOWN_SIG", var_name="database_password",
@@ -208,6 +219,66 @@ def test_finding_category_in_json_output() -> None:
     assert d["category"] == "github_token"
     assert "layer=signature" in d["category_reason"]
     assert "token" not in d  # token is still redacted by default
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.2: suffix-style lexicon expansion
+# ---------------------------------------------------------------------------
+
+def test_apim_client_key_classifies_as_api_token() -> None:
+    """APIM_CLIENT_KEY must match suffix-style _API|CLIENT_KEY pattern → API_TOKEN."""
+    inf = infer_category(signature_name=None, var_name="APIM_CLIENT_KEY",
+                         token="eDRlUVQ" + "x" * 20)
+    assert inf.category == ViolationCategory.API_TOKEN
+    assert inf.confidence >= 0.75
+
+
+def test_apim_secret_key_classifies_as_api_token() -> None:
+    """APIM_SECRET_KEY must match suffix-style _SECRET_KEY pattern → API_TOKEN 0.80."""
+    inf = infer_category(signature_name=None, var_name="APIM_SECRET_KEY",
+                         token="40z_9Yw" + "x" * 20)
+    assert inf.category == ViolationCategory.API_TOKEN
+    assert inf.confidence >= 0.80
+
+
+def test_bare_key_suffix_is_generic_secret_low_confidence() -> None:
+    """primary_key, cache_key etc. → GENERIC_SECRET 0.65 (INFO band — not MEDIUM)."""
+    for var_name in ("primary_key", "cache_key", "partition_key", "foreign_key"):
+        inf = infer_category(signature_name=None, var_name=var_name, token="x" * 20)
+        assert inf.category == ViolationCategory.GENERIC_SECRET, (
+            f"{var_name} should be GENERIC_SECRET, got {inf.category}"
+        )
+        assert inf.confidence <= 0.65, f"{var_name} confidence {inf.confidence} exceeds 0.65"
+
+
+def test_password_from_early_lexicon_entry() -> None:
+    """pass(?:word|wd|w)? (entry 10, confidence 0.90) catches password vars.
+    The suffix-style entries intentionally do NOT add a redundant _password pattern
+    since the early entry fires first via re.search substring matching."""
+    inf = infer_category(signature_name=None, var_name="my_password", token="x" * 20)
+    assert inf.category == ViolationCategory.PASSWORD
+    assert inf.confidence >= 0.90
+
+
+def test_openai_api_key_var_name_unchanged() -> None:
+    """Existing api_?key pattern still fires for OPENAI_API_KEY var names."""
+    inf = infer_category(signature_name=None, var_name="OPENAI_API_KEY", token="x" * 20)
+    assert inf.category == ViolationCategory.API_TOKEN
+    assert inf.confidence >= 0.85
+
+
+def test_db_password_unchanged_after_lexicon_expansion() -> None:
+    """Regression: DB_PASSWORD still resolves to PASSWORD at ≥0.90 via early entry."""
+    inf = infer_category(signature_name=None, var_name="DB_PASSWORD", token="x" * 20)
+    assert inf.category == ViolationCategory.PASSWORD
+    assert inf.confidence >= 0.90
+
+
+def test_client_secret_unchanged_after_expansion() -> None:
+    """Regression: client_secret still resolves to OAUTH_SECRET (more specific wins)."""
+    inf = infer_category(signature_name=None, var_name="client_secret", token="x" * 20)
+    assert inf.category == ViolationCategory.OAUTH_SECRET
+    assert inf.confidence >= 0.85
 
 
 def test_finding_str_includes_category() -> None:

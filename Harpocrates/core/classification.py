@@ -143,7 +143,25 @@ _VAR_NAME_LEXICON: Tuple[Tuple[re.Pattern, ViolationCategory, float], ...] = (
      ViolationCategory.API_TOKEN, 0.85),
     (re.compile(r"(?i)auth(?:_(?:key|token|secret))?"),
      ViolationCategory.API_TOKEN, 0.70),
-    (re.compile(r"(?i)secret(?:_key)?"),
+    # Suffix-style identifiers — catches *_KEY, *_SECRET, *_TOKEN patterns
+    # where the prefix doesn't match a more-specific category above.
+    # All use `$` (end-of-string only) to avoid matching key_id, key_type,
+    # token_endpoint etc. that share the word but aren't credentials.
+    # Compound suffixes (_API_KEY, _SECRET_KEY) MUST come before bare _KEY.
+    # Note: _password and _private_key are intentionally absent — the earlier
+    # `pass(?:word|wd|w)?` and `(?:private|...)_?key` entries catch those first.
+    (re.compile(r"(?i)(?:^|_)(?:api|client|access|refresh|bearer)_(?:secret_)?key$"),
+     ViolationCategory.API_TOKEN, 0.80),
+    (re.compile(r"(?i)(?:^|_)secret(?:_key)?$"),
+     ViolationCategory.API_TOKEN, 0.80),
+    (re.compile(r"(?i)(?:^|_)token$"),
+     ViolationCategory.API_TOKEN, 0.75),
+    (re.compile(r"(?i)(?:^|_)credentials?$"),
+     ViolationCategory.API_TOKEN, 0.75),
+    # Bare _KEY suffix — GENERIC_SECRET at 0.65 (INFO band). Django/SQLAlchemy
+    # primary_key, cache_key, partition_key, foreign_key are extremely common and
+    # not credentials. Using `$` anchor prevents matching key_id, key_type, etc.
+    (re.compile(r"(?i)(?:^|_)key$"),
      ViolationCategory.GENERIC_SECRET, 0.65),
 )
 
