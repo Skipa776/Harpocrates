@@ -1001,6 +1001,282 @@ def _neg_documented_placeholder_in_docstring() -> Dict[str, Any]:
     return _neg_llm_placeholder()
 
 
+# ---------------------------------------------------------------------------
+# Phase 7.1 — New negative generators for v0.3.0 FP classes
+# ---------------------------------------------------------------------------
+
+_FILE_PATH_VARS = [
+    "key_path", "cert_file", "private_key_path", "ca_cert", "tls_cert",
+    "ssl_cert", "keystore_path", "truststore_path", "pem_file", "key_file",
+    "cert_path", "certificate_path", "identity_file", "credential_file",
+]
+
+_FILE_PATH_VALUES = [
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/ssl/keys/server.key",
+    "/var/secrets/sso.key",
+    "/home/user/.ssh/id_rsa",
+    "/run/secrets/tls.key",
+    "/etc/kubernetes/pki/apiserver.key",
+    "C:\\certs\\server.crt",
+    "C:\\Program Files\\app\\keys\\signing.pem",
+    "~/.config/gcloud/application_default_credentials.json",
+    "./config/keys/service_account.json",
+    "../certs/client.p12",
+    "/opt/app/keystore.jks",
+]
+
+
+def _neg_file_path_value() -> Dict[str, Any]:
+    """Negative: credential-named variable holding a filesystem path, not a secret."""
+    var = random.choice(_FILE_PATH_VARS)
+    value = random.choice(_FILE_PATH_VALUES)
+    lang_opts = [
+        (f'{var} = "{value}"', "config.py"),
+        (f'const {var} = "{value}";', "src/config.js"),
+        (f'{var}: str = "{value}"', "config.py"),
+        (f'{var} = os.environ.get("{var.upper()}", "{value}")', "settings.py"),
+        (f'  {var}: "{value}"', "values.yaml"),
+        (f'  {var.upper()}: {value}', "docker-compose.yml"),
+    ]
+    line, file_path = random.choice(lang_opts)
+    token = value
+    pos = line.find(token)
+    return {
+        "token": token,
+        "token_start": pos,
+        "token_end": pos + len(token),
+        "line_content": line,
+        "context_before": [
+            random.choice(["# TLS configuration", "# Certificate paths", "# PKI settings"]),
+            "",
+        ],
+        "context_after": [
+            random.choice([
+                f"ssl_context.load_cert_chain({var})",
+                f"tls_config = TLSConfig(cert={var})",
+                f"client = Client(cert_file={var})",
+            ]),
+        ],
+        "file_path": file_path,
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+_ENUM_VARS = [
+    "STATUS", "AUTHENTICATED", "ROLE", "STATE", "MODE", "TYPE",
+    "PERMISSION", "AUTH_STATUS", "ACCESS_LEVEL", "USER_STATUS",
+    "CONN_STATE", "SESSION_STATE",
+]
+
+_ENUM_VALUES_PAIRS: List[tuple] = [
+    ("AUTHENTICATED", "authenticated"),
+    ("STATUS_ANONYMOUS", "anonymous"),
+    ("ROLE_ADMIN", "admin"),
+    ("STATUS_ACTIVE", "active"),
+    ("MODE_READ_ONLY", "readonly"),
+    ("STATE_PENDING", "pending"),
+    ("PERMISSION_DENIED", "denied"),
+    ("ACCESS_LEVEL_GUEST", "guest"),
+    ("USER_STATUS_VERIFIED", "verified"),
+    ("CONN_STATE_IDLE", "idle"),
+    ("SESSION_STATE_EXPIRED", "expired"),
+    ("AUTHENTICATED", "unauthenticated"),
+]
+
+
+def _neg_enum_constant_lowercase() -> Dict[str, Any]:
+    """Negative: uppercase variable holding a lowercase enum/identifier, not a secret."""
+    var, value = random.choice(_ENUM_VALUES_PAIRS)
+    lang_opts = [
+        (f'{var} = "{value}"', "auth/constants.py"),
+        (f'const {var} = "{value}";', "src/auth/constants.js"),
+        (f'  {var}: {value}', "config/states.yaml"),
+        (f'{var}: str = "{value}"', "models/auth.py"),
+        (f'public static final String {var} = "{value}";', "Auth.java"),
+        (f'const {var} string = "{value}"', "auth/constants.go"),
+    ]
+    line, file_path = random.choice(lang_opts)
+    pos = line.find(value)
+    return {
+        "token": value,
+        "token_start": pos,
+        "token_end": pos + len(value),
+        "line_content": line,
+        "context_before": [
+            random.choice([
+                "# Authentication state constants",
+                "# User status enumeration",
+                "# Connection state constants",
+            ]),
+            "",
+        ],
+        "context_after": [
+            random.choice([
+                f"if user.status == {var}:",
+                f"assert state == {var}, 'Invalid state'",
+                f"return {var}",
+            ]),
+        ],
+        "file_path": file_path,
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+_HOST_PORT_LINES: List[tuple] = [
+    ("host", "0.0.0.0", "server.py"),
+    ("host", "localhost", "server.py"),
+    ("host", "127.0.0.1", "config.py"),
+    ("bind", ":8443", "main.go"),
+    ("listen_address", "0.0.0.0:8080", "config.yaml"),
+    ("host", "10.0.0.1", "docker-compose.yml"),
+    ("host", "192.168.1.100", "config.yml"),
+    ("database_host", "db.internal", "settings.py"),
+    ("redis_host", "cache.internal", "config.js"),
+    ("smtp_host", "mail.internal", "mailer.py"),
+    ("port", "8080", "server.py"),
+    ("PORT", "3000", "server.js"),
+    ("DB_PORT", "5432", "config.env"),
+]
+
+
+def _neg_host_port_config() -> Dict[str, Any]:
+    """Negative: server binding / host configuration, not a secret."""
+    var, value, file_path = random.choice(_HOST_PORT_LINES)
+    lang_opts = [
+        f'{var} = "{value}"',
+        f'const {var} = "{value}";',
+        f'  {var}: "{value}"',
+        f'  {var.upper()}={value}',
+        f'{var}: str = "{value}"',
+    ]
+    line = random.choice(lang_opts)
+    pos = line.find(value)
+    return {
+        "token": value,
+        "token_start": pos,
+        "token_end": pos + len(value),
+        "line_content": line,
+        "context_before": [
+            random.choice(["# Server configuration", "# Network settings", "# Service config"]),
+            "",
+        ],
+        "context_after": [
+            random.choice([
+                f"app.run(host={var}, debug=False)",
+                f"server.listen({var})",
+                f"conn = connect(host={var})",
+            ]),
+        ],
+        "file_path": file_path,
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+_TEMPLATE_PLACEHOLDER_PAIRS: List[tuple] = [
+    ("hostName", "__EKSHOSTNAME__", "k8s/configmap.yaml"),
+    ("apiKey", "${API_KEY}", "helm/values.yaml"),
+    ("secret", "{{ .Values.secret }}", "helm/templates/secret.yaml"),
+    ("password", "<<REPLACE_ME>>", "config/settings.yaml"),
+    ("token", "{{TOKEN}}", "config/app.yaml"),
+    ("host", "${SERVICE_HOST}", "k8s/deployment.yaml"),
+    ("apiKey", "$(API_KEY)", "Makefile"),
+    ("password", "__DB_PASSWORD__", "config.xml"),
+    ("secret", "${SECRET_KEY}", "docker-compose.yml"),
+    ("CLIENT_SECRET", "<<CLIENT_SECRET_HERE>>", ".env.template"),
+    ("STRIPE_KEY", "${STRIPE_KEY}", "config/.env.example"),
+]
+
+
+def _neg_template_placeholder() -> Dict[str, Any]:
+    """Negative: Helm/Kustomize/Mustache/double-bracket template placeholder."""
+    var, value, file_path = random.choice(_TEMPLATE_PLACEHOLDER_PAIRS)
+    lang_opts = [
+        f'{var}: "{value}"',
+        f'  {var}: {value}',
+        f'{var.upper()}={value}',
+        f'  {var}: "{value}"',
+        f'    {var}: {value}',
+    ]
+    line = random.choice(lang_opts)
+    pos = line.find(value)
+    return {
+        "token": value,
+        "token_start": pos,
+        "token_end": pos + len(value),
+        "line_content": line,
+        "context_before": [
+            random.choice([
+                "# Template values — replaced at deploy time",
+                "# Override these in your values file",
+                "# See helm/values-prod.yaml for real values",
+            ]),
+            "",
+        ],
+        "context_after": [
+            random.choice([
+                "",
+                "# DO NOT hardcode real values here",
+                "# These are substituted by the CI/CD pipeline",
+            ]),
+        ],
+        "file_path": file_path,
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+_FILE_EXT_PAIRS: List[tuple] = [
+    ("truststore", "truststore.jks", "config.py"),
+    ("keystore_path", "keystore.p12", "server.java"),
+    ("cert_chain", "chain.pem", "nginx.conf"),
+    ("ssl_certificate", "server.crt", "apache.conf"),
+    ("identity_file", "id_rsa.pem", "fabfile.py"),
+    ("client_cert", "client.der", "mtls_config.py"),
+    ("auth_config", "credentials.json", "gcloud.py"),
+    ("tls_bundle", "fullchain.pem", "traefik.toml"),
+    ("cert_store", "certs.p12", "ssl_config.rb"),
+    ("config_file", "app-config.yaml", "main.go"),
+]
+
+
+def _neg_file_extension_value() -> Dict[str, Any]:
+    """Negative: variable holding a filename with a security-related extension, not a secret."""
+    var, value, file_path = random.choice(_FILE_EXT_PAIRS)
+    lang_opts = [
+        f'{var} = "{value}"',
+        f'  {var}: "{value}"',
+        f'const {var} = "{value}";',
+        f'{var}: str = "{value}"',
+        f'{var.upper()} = "{value}"',
+    ]
+    line = random.choice(lang_opts)
+    pos = line.find(value)
+    return {
+        "token": value,
+        "token_start": pos,
+        "token_end": pos + len(value),
+        "line_content": line,
+        "context_before": [
+            random.choice(["# Certificate configuration", "# PKI file paths", "# TLS assets"]),
+            "",
+        ],
+        "context_after": [
+            random.choice([
+                f"ssl_ctx = SSLContext({var})",
+                f"keystore = KeyStore.getInstance({var})",
+                f"config = load_config({var})",
+            ]),
+        ],
+        "file_path": file_path,
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
 _NEGATIVE_GENERATORS = [
     _neg_lock_file_hash,
     _neg_css_hex_color,
@@ -1025,6 +1301,12 @@ _NEGATIVE_GENERATORS = [
     _neg_llm_placeholder,
     _neg_runtime_token_generation,
     _neg_documented_placeholder_in_docstring,
+    # Phase 7.1 additions
+    _neg_file_path_value,
+    _neg_enum_constant_lowercase,
+    _neg_host_port_config,
+    _neg_template_placeholder,
+    _neg_file_extension_value,
 ]
 
 _AUGMENT_NEGATIVE_GENERATORS = [
@@ -1035,6 +1317,12 @@ _AUGMENT_NEGATIVE_GENERATORS = [
     _neg_llm_placeholder,
     _neg_runtime_token_generation,
     _neg_documented_placeholder_in_docstring,
+    # Phase 7.1 additions
+    _neg_file_path_value,
+    _neg_enum_constant_lowercase,
+    _neg_host_port_config,
+    _neg_template_placeholder,
+    _neg_file_extension_value,
 ]
 
 
@@ -1513,6 +1801,128 @@ def _pos_python_getenv_fallback_explicit() -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 7.2 — New positive generators for v0.4 coverage gaps
+# ---------------------------------------------------------------------------
+
+_APIM_STYLE_VARS = [
+    "APIM_CLIENT_KEY", "APIM_SECRET_KEY", "APIM_API_KEY", "APIM_AUTH_TOKEN",
+    "MGMT_API_KEY", "MGMT_CLIENT_SECRET", "MGMT_ACCESS_KEY",
+    "INTERNAL_API_KEY", "INTERNAL_SECRET_KEY", "INTERNAL_CLIENT_KEY",
+    "SVC_API_KEY", "SVC_SECRET_KEY", "SVC_ACCESS_TOKEN",
+    "VENDOR_API_KEY", "VENDOR_SECRET", "VENDOR_CLIENT_KEY",
+    "PARTNER_API_KEY", "PARTNER_SECRET_KEY",
+]
+
+
+def _pos_apim_style_var_names() -> Dict[str, Any]:
+    """Positive: APIM/MGMT/SVC prefix-suffix var names holding real secrets.
+
+    Exercises the Phase 6.2 suffix-style lexicon ((?:^|_)(?:api|client|...)_key$)
+    and var_ngram_secret_score for prefix-style identifiers not covered by earlier generators.
+    """
+    var = random.choice(_APIM_STYLE_VARS)
+    prefix = random.choice(["", "sk-", "ey", "token_", "key_"])
+    body = _rand_b64(random.randint(24, 40))
+    token = f"{prefix}{body}"
+    lang_opts = [
+        (f'{var} = "{token}"', "config.py"),
+        (f'{var}: str = "{token}"', "settings.py"),
+        (f'  {var}: "{token}"', "config.yaml"),
+        (f'const {var} = "{token}";', "config.js"),
+        (f'{var} = os.environ.get("{var}", "{token}")', "settings.py"),
+        (f'export {var}={token}', ".env"),
+    ]
+    line, file_path = random.choice(lang_opts)
+    pos = line.find(token)
+    return {
+        "token": token,
+        "token_start": pos,
+        "token_end": pos + len(token),
+        "line_content": line,
+        "context_before": [
+            random.choice([
+                "# API Management credentials",
+                "# Management plane authentication",
+                "# Internal service credentials",
+            ]),
+            "",
+        ],
+        "context_after": [
+            random.choice([
+                f"client = APIManagementClient(key={var})",
+                f"headers = {{'X-API-Key': {var}}}",
+                f"auth = BearerAuth({var})",
+            ]),
+        ],
+        "file_path": file_path,
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+# Adversarial positives: real secrets whose values share value-shape signals
+# with negatives (slash, lowercase, dotted, template-like prefix).
+# Forces value-shape features to stay probabilistic signals rather than
+# becoming 1-bit shortcuts (prevents overfitting on new features).
+_ADVERSARIAL_SLASH_TOKENS = [
+    lambda: f"s3://buckets/{_rand_b64(8)}/{_rand_b64(16)}",
+    lambda: f"gs://data/{_rand_b64(12)}-prod",
+    lambda: f"Bearer eyJ{_rand_b64(40)}",
+    lambda: f"postgres://admin:{_rand_b64(16)}@host/db",
+]
+_ADVERSARIAL_LOWERCASE_TOKENS = [
+    lambda: "hunter" + _rand_b64(8).lower()[:6] + "2x",
+    lambda: "pass" + _rand_b64(12).lower()[:8],
+    lambda: "secret" + _rand_b64(6).lower()[:4],
+]
+_ADVERSARIAL_DOTTED_TOKENS = [
+    lambda: f"10.{random.randint(0,255)}.{random.randint(0,255)}.{_rand_b64(8)}",
+    lambda: f"192.168.1.{_rand_b64(10)}extra",
+]
+
+_ADVERSARIAL_POS_VARS = [
+    "api_key", "secret_key", "access_token", "auth_secret",
+    "db_password", "oauth_secret", "signing_key",
+]
+
+
+def _pos_value_shape_adversarial() -> Dict[str, Any]:
+    """Positive: real secret whose value shares shape with a negative-class FP.
+
+    Prevents value-shape features from becoming trivial 1-bit classifiers.
+    The value has a slash, URL scheme, lowercase word, or dotted-quad prefix,
+    but the full token is still a high-entropy secret (not a plain path/enum/host).
+    """
+    var = random.choice(_ADVERSARIAL_POS_VARS)
+    token_factory = random.choice(
+        _ADVERSARIAL_SLASH_TOKENS + _ADVERSARIAL_LOWERCASE_TOKENS + _ADVERSARIAL_DOTTED_TOKENS
+    )
+    token = token_factory()
+    line = f'{var} = "{token}"'
+    pos = line.find(token)
+    return {
+        "token": token,
+        "token_start": pos,
+        "token_end": pos + len(token),
+        "line_content": line,
+        "context_before": [
+            random.choice(["import os", "from config import settings"]),
+            random.choice(["# Credentials", "# Auth config", ""]),
+        ],
+        "context_after": [
+            random.choice([
+                f"client = Client({var})",
+                f"headers = {{'Authorization': {var}}}",
+                f"conn = connect({var})",
+            ]),
+        ],
+        "file_path": random.choice(["config.py", "settings.py", ".env", "config.yaml"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
 _POSITIVE_GENERATORS = [
     _pos_hardcoded_api_key,
     _pos_connection_string,
@@ -1527,6 +1937,9 @@ _POSITIVE_GENERATORS = [
     _pos_commented_secret,
     _pos_devprod_swap,
     _pos_python_getenv_fallback_explicit,
+    # Phase 7.2 additions
+    _pos_apim_style_var_names,
+    _pos_value_shape_adversarial,
 ]
 
 _AUGMENT_POSITIVE_GENERATORS = [
@@ -1540,6 +1953,9 @@ _AUGMENT_POSITIVE_GENERATORS = [
     _pos_commented_secret,
     _pos_devprod_swap,
     _pos_python_getenv_fallback_explicit,
+    # Phase 7.2 additions
+    _pos_apim_style_var_names,
+    _pos_value_shape_adversarial,
 ]
 
 
