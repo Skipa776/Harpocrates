@@ -22,6 +22,7 @@ from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNA
 from Harpocrates.utils.file_utils import iter_text_lines
 
 if TYPE_CHECKING:
+    from Harpocrates.core.classification import CategoryInference
     from Harpocrates.ml.verifier import Verifier
 
 # Tier 2: tightened token alphabet — drops '.' so dotted identifiers and URLs
@@ -68,11 +69,58 @@ def _calculate_entropy_confidence(entropy_val: Optional[float]) -> float:
     return 0.6
 
 
-def _entropy_severity(entropy_val: Optional[float]) -> Severity:
-    # Tier 1: entropy-only findings default to INFO so they don't trip the
-    # default --fail-on=medium gate. ML-verified (evidence=hybrid) findings
-    # keep this severity; users can opt in with --fail-on=info.
-    _ = entropy_val
+def _severity_from_entropy(inference: "CategoryInference") -> Severity:
+    """Severity for pre-ML entropy/ML_CANDIDATE findings (no ML involved yet).
+
+    HIGH is intentionally unreachable here — that requires ML confirmation via
+    _severity_from_classification(..., ml_confidence=...) in _apply_ml_verification.
+    Use this in _scan_line; use _severity_from_classification only after ML.
+    """
+    return Severity.MEDIUM if inference.confidence >= 0.70 else Severity.INFO
+
+
+def _severity_from_classification(
+    inference: "CategoryInference",
+    ml_confidence: Optional[float] = None,
+) -> Severity:
+    """
+    Map (category, classification confidence, optional ML confidence) → Severity.
+
+    Banding:
+      INFO   — no/weak signal (cat_conf < 0.5, or GENERIC_SECRET with cat_conf < 0.7)
+      MEDIUM — moderate signal (specific category cat_conf in [0.70, 0.85), or
+               GENERIC_SECRET with cat_conf >= 0.70)
+      HIGH   — strong signal (specific category cat_conf >= 0.85, or ml_confidence
+               >= 0.85 with any non-generic category)
+
+    CRITICAL is intentionally NOT reachable here. Regex tier owns CRITICAL
+    (deterministic format + 0.99 confidence). Heuristic+ML cannot make that
+    claim; HIGH is the ceiling for entropy/ML paths.
+    """
+    from Harpocrates.core.classification import ViolationCategory
+
+    cat = inference.category
+    cat_conf = inference.confidence
+
+    if cat_conf < 0.5:
+        return Severity.INFO
+
+    if cat != ViolationCategory.GENERIC_SECRET and cat_conf >= 0.85:
+        return Severity.HIGH
+
+    if (
+        ml_confidence is not None
+        and ml_confidence >= 0.85
+        and cat != ViolationCategory.GENERIC_SECRET
+    ):
+        return Severity.HIGH
+
+    if cat != ViolationCategory.GENERIC_SECRET and cat_conf >= 0.70:
+        return Severity.MEDIUM
+
+    if cat == ViolationCategory.GENERIC_SECRET and cat_conf >= 0.70:
+        return Severity.MEDIUM
+
     return Severity.INFO
 
 
@@ -182,7 +230,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         snippet=stripped[:200],
                         entropy=ent,
                         evidence=EvidenceType.ENTROPY,
-                        severity=_entropy_severity(ent),
+                        severity=_severity_from_entropy(_inf),
                         confidence=_calculate_entropy_confidence(ent),
                         token=token,
                         in_comment=in_comment,
@@ -215,7 +263,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         snippet=stripped[:200],
                         entropy=ent,
                         evidence=EvidenceType.ML,
-                        severity=_entropy_severity(ent),
+                        severity=_severity_from_entropy(_inf),
                         confidence=0.5,
                         token=value,
                         token_start=match.start(1),
@@ -300,6 +348,38 @@ def detect_file(
 # ---------------------------------------------------------------------------
 
 
+def _inference_from_finding(finding: Finding) -> "CategoryInference":
+    """Reconstruct a CategoryInference from an existing finding's category fields.
+
+    Used in _apply_ml_verification to recompute severity with ml_confidence
+    without storing CategoryInference objects in a side-channel dict.
+
+    The original CategoryInference.confidence is not stored on Finding, so this
+    uses a fixed default: 0.75 for specific categories (MEDIUM band, eligible for
+    HIGH promotion when ml_confidence >= 0.85) and 0.30 for GENERIC_SECRET (INFO
+    floor — GENERIC_SECRET is never promoted to HIGH regardless of ML confidence).
+    This is a known approximation: a finding originally at cat_conf=0.55 (INFO)
+    is promoted to MEDIUM/HIGH post-ML via the 0.75 reconstruction default. That
+    behaviour is intentional — ML confirmation should elevate credible signals.
+    """
+    from Harpocrates.core.classification import CategoryInference, ViolationCategory
+
+    if finding.category:
+        try:
+            cat = ViolationCategory(finding.category)
+        except ValueError:
+            cat = ViolationCategory.GENERIC_SECRET
+        # Derive confidence from category tier: specific non-generic categories
+        # default to 0.75 (MEDIUM band), generic to 0.30.
+        cat_conf = 0.30 if cat == ViolationCategory.GENERIC_SECRET else 0.75
+    else:
+        cat = ViolationCategory.GENERIC_SECRET
+        cat_conf = 0.30
+
+    reason = finding.category_reason or "layer=fallback matched=reconstructed confidence=0.00"
+    return CategoryInference(category=cat, reason=reason, confidence=cat_conf)
+
+
 def _apply_ml_verification(
     findings: List[Finding],
     full_content: str,
@@ -327,6 +407,10 @@ def _apply_ml_verification(
             )
         result = verifier.verify(finding, context)
         if result.is_secret and result.combined_confidence >= ml_threshold:
+            inference = _inference_from_finding(finding)
+            new_severity = _severity_from_classification(
+                inference, ml_confidence=result.combined_confidence
+            )
             verified.append(
                 Finding(
                     type=finding.type,
@@ -335,7 +419,7 @@ def _apply_ml_verification(
                     snippet=finding.snippet,
                     entropy=finding.entropy,
                     evidence=EvidenceType.HYBRID,
-                    severity=finding.severity,
+                    severity=new_severity,
                     confidence=result.combined_confidence,
                     token=finding.token,
                     token_start=finding.token_start,
