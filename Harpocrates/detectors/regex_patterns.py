@@ -86,6 +86,17 @@ HIGH_SIGNATURES: Dict[str, Pattern] = {
     "HASHICORP_VAULT_TOKEN": re.compile(
         r"\bhvs\.[a-zA-Z0-9\-_]{90,}\b"
     ),
+    # OpenAI legacy/short key — catches pre-2024 keys, test keys, and fine-tune
+    # keys that contain hyphens in the body (e.g. sk-RQMJj8ELDjv7TRc-dS9sSw).
+    # Severity: HIGH (not CRITICAL) because the broader pattern has higher FP risk.
+    # The strict 48-char pure-alphanum form and sk-proj- form remain in CRITICAL.
+    # Stripe sk_live_/sk_test_ use underscores not hyphens — no collision.
+    # Negative lookaheads exclude forms already owned by CRITICAL_SIGNATURES:
+    #   (?!proj-)          — sk-proj- form already covered by CRITICAL
+    #   (?![a-zA-Z0-9]{48}\b) — exact 48-char pure-alphanum sk- already CRITICAL
+    "OPENAI_API_KEY_LEGACY": re.compile(
+        r"\bsk-(?!proj-)(?![a-zA-Z0-9]{48}\b)[A-Za-z0-9_-]{16,}\b"
+    ),
 }
 
 # Merged view preserved for any external callers that import SIGNATURES directly.

@@ -149,6 +149,70 @@ def test_hashicorp_vault_token() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Phase 6.4: OpenAI legacy key
+# ---------------------------------------------------------------------------
+
+
+def test_openai_legacy_key_matches_short_form() -> None:
+    """sk-RQMJj8ELDjv7TRc-dS9sSw style keys with hyphens in the body."""
+    pattern = HIGH_SIGNATURES["OPENAI_API_KEY_LEGACY"]
+    assert pattern.search("sk-RQMJj8ELDjv7TRc-dS9sSw")
+    assert pattern.search("sk-" + "a" * 16)              # minimum 16 chars
+    assert pattern.search("sk-" + "a-b_C" * 5)           # hyphens and underscores
+
+
+def test_openai_legacy_key_requires_minimum_length() -> None:
+    pattern = HIGH_SIGNATURES["OPENAI_API_KEY_LEGACY"]
+    assert not pattern.search("sk-abc")                   # too short (< 16 chars)
+    assert not pattern.search("sk-" + "a" * 15)          # exactly 15: no match
+
+
+def test_openai_legacy_key_does_not_match_stripe() -> None:
+    """Stripe sk_live_/sk_test_ use underscores — no collision with sk-."""
+    pattern = HIGH_SIGNATURES["OPENAI_API_KEY_LEGACY"]
+    assert not pattern.search("sk_live_" + "x" * 24)
+    assert not pattern.search("sk_test_" + "x" * 24)
+
+
+def test_openai_strict_still_matches_48_char_form() -> None:
+    """CRITICAL pattern (48-char sk-) still fires on fully valid keys."""
+    pattern = CRITICAL_SIGNATURES["OPENAI_API_KEY"]
+    assert pattern.search("sk-" + "x" * 48)
+
+
+def test_openai_legacy_does_not_double_fire_on_48_char_key() -> None:
+    """CRITICAL already owns sk-[a-zA-Z0-9]{48} — LEGACY must not also match."""
+    pattern = HIGH_SIGNATURES["OPENAI_API_KEY_LEGACY"]
+    assert not pattern.search("sk-" + "x" * 48)
+
+
+def test_openai_legacy_does_not_fire_on_proj_key() -> None:
+    """CRITICAL already owns sk-proj-... — LEGACY must not also match."""
+    pattern = HIGH_SIGNATURES["OPENAI_API_KEY_LEGACY"]
+    assert not pattern.search("sk-proj-" + "a" * 20 + "T3" + "b" * 20)
+
+
+def test_openai_legacy_fires_on_47_char_key() -> None:
+    """47-char pure-alphanum key is NOT owned by CRITICAL — LEGACY should catch it."""
+    pattern = HIGH_SIGNATURES["OPENAI_API_KEY_LEGACY"]
+    assert pattern.search("sk-" + "x" * 47)
+
+
+def test_openai_legacy_detected_at_high_severity() -> None:
+    """End-to-end: short OpenAI key → HIGH (not CRITICAL)."""
+    from Harpocrates.core.detector import detect_text
+    from Harpocrates.core.result import EvidenceType, Severity
+
+    key = "sk-RQMJj8ELDjv7TRc-dS9sSw"
+    findings = detect_text(f'OPENAI_API_KEY="{key}"\n')
+    legacy = [f for f in findings if f.type == "OPENAI_API_KEY_LEGACY"]
+    assert legacy, "Expected OPENAI_API_KEY_LEGACY finding"
+    assert all(f.evidence == EvidenceType.REGEX for f in legacy)
+    assert all(f.severity == Severity.HIGH for f in legacy)
+    assert all(f.category == "openai_key" for f in legacy)
+
+
 def test_all_signatures_are_compiled() -> None:
     for name, pattern in SIGNATURES.items():
         assert isinstance(pattern, re.Pattern), f"{name} is not a compiled pattern"
