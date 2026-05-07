@@ -107,6 +107,7 @@ _SIGNATURE_TO_CATEGORY: dict[str, ViolationCategory] = {
     "TWILIO_API_KEY":    ViolationCategory.TWILIO_KEY,
     "DATABRICKS_TOKEN":  ViolationCategory.DATABRICKS_TOKEN,
     "HASHICORP_VAULT_TOKEN": ViolationCategory.VAULT_TOKEN,
+    "OPENAI_API_KEY_LEGACY": ViolationCategory.OPENAI_KEY,
 }
 
 # ---------------------------------------------------------------------------
