@@ -21,11 +21,11 @@ from Harpocrates.training.generators.generate_data import generate_training_data
 class TestFeatureExtraction:
     """Tests for feature extraction pipeline."""
 
-    def test_feature_vector_has_63_features(self):
-        """Verify feature vector produces exactly 63 features (58 original + 5 hex disambiguation)."""
+    def test_feature_vector_has_67_features(self):
+        """Verify feature vector produces exactly 67 features (Phase 7.0 vector)."""
         fv = FeatureVector()
         array = fv.to_array()
-        assert len(array) == 65, f"Expected 65 features, got {len(array)}"
+        assert len(array) == 67, f"Expected 67 features, got {len(array)}"
 
     def test_feature_names_match_array_length(self):
         """Verify feature names match array length."""
@@ -52,9 +52,9 @@ class TestFeatureExtraction:
         features = extract_features(finding, context)
         array = features.to_array()
 
-        assert len(array) == 65
+        assert len(array) == 67
         assert features.token_length == 20
-        assert features.var_contains_secret is True  # "api_key" matches
+        assert features.var_ngram_secret_score > 0  # "api_key" matches via N-gram
 
     def test_new_features_are_extracted(self):
         """Verify the 5 new features are properly extracted."""
@@ -79,7 +79,7 @@ class TestFeatureExtraction:
         assert hasattr(features, "token_structure_score")
         assert hasattr(features, "has_version_pattern")
         assert hasattr(features, "semantic_context_score")
-        assert hasattr(features, "line_position_ratio")
+        assert hasattr(features, "value_starts_with_slash")
         assert hasattr(features, "surrounding_secret_density")
 
         # Version pattern should be detected
@@ -208,7 +208,7 @@ class TestVerifierNoCrash:
 
             # Just verify no exception is raised during feature extraction
             features = extract_features(finding, context)
-            assert len(features.to_array()) == 65
+            assert len(features.to_array()) == 67
 
     def test_feature_extraction_with_empty_context(self):
         """Test feature extraction with minimal context."""
@@ -226,7 +226,7 @@ class TestVerifierNoCrash:
 
         # Should not raise
         features = extract_features(finding, context)
-        assert len(features.to_array()) == 65
+        assert len(features.to_array()) == 67
 
     def test_feature_extraction_with_unicode(self):
         """Test feature extraction with unicode content."""
@@ -245,7 +245,7 @@ class TestVerifierNoCrash:
 
         # Should not raise
         features = extract_features(finding, context)
-        assert len(features.to_array()) == 65
+        assert len(features.to_array()) == 67
 
 
 class TestCrossValidation:

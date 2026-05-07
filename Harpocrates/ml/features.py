@@ -1,24 +1,28 @@
 """
 Feature engineering for ML-based secrets verification.
 
-Extracts 65 features from tokens and their context to enable
+Extracts 67 features from tokens and their context to enable
 context-aware classification of potential secrets.
 
-Features are organized into three categories:
-- Token features (23): Properties of the token itself including advanced
+Features are organized into seven categories:
+- Token features (20): Properties of the token itself including advanced
   entropy analysis, vendor prefix detection, and discriminative features
-  (is_uuid_v4, is_known_hash_length, jwt_structure_valid, entropy_charset_mismatch, has_hash_prefix)
-- Variable name features (10): Properties of the variable/key name including
+  (is_uuid_v4, jwt_structure_valid, entropy_charset_mismatch, has_hash_prefix)
+- Variable name features (9): Properties of the variable/key name including
   N-gram scoring for secret and safe patterns
-- Context features (18): Properties of surrounding code including semantic
+- Context features (17): Properties of surrounding code including semantic
   analysis and secret density
+- Stage B precision features (7): Targeted FP reduction features
+- Stage B generalization features (5): Hex disambiguation features
+- Env-loading awareness features (2): Env-loader and fallback detection
+- Phase 7.0 value-shape features (7): Value-shape FP suppression features
 """
 from __future__ import annotations
 
 import re
 import string
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from Harpocrates.detectors.entropy_detector import shannon_entropy
 from Harpocrates.ml.context import (
@@ -80,13 +84,6 @@ UUID_V4_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-# Known hash length patterns
-KNOWN_HASH_LENGTHS = {32: "md5", 40: "sha1", 64: "sha256", 128: "sha512"}
-
-# Maximum possible entropy per character class
-MAX_ENTROPY_ALPHANUMERIC = 5.954  # log2(62) for a-zA-Z0-9
-MAX_ENTROPY_BASE64 = 6.0  # log2(64)
-MAX_ENTROPY_HEX = 4.0  # log2(16)
 
 # v0.2.0: AI-generated placeholder detection (design doc §2 "AI Leftover" Paradigm).
 # Word-boundary anchors are intentionally omitted for underscore-joined patterns like
@@ -138,26 +135,112 @@ SAFE_NGRAMS: Dict[str, float] = {
 }
 
 
+FEATURE_NAMES: Tuple[str, ...] = (
+    # Token features (20 — dropped normalized_entropy, cryptographic_score, is_known_hash_length)
+    "token_length",
+    "token_entropy",
+    "char_class_count",
+    "digit_ratio",
+    "uppercase_ratio",
+    "special_char_ratio",
+    "is_base64_like",
+    "has_padding",
+    "regex_match_type",
+    "token_structure_score",
+    "has_version_pattern",
+    "vendor_prefix_boost",
+    "token_span_offset",
+    "token_in_multiline_block",
+    "embedded_token_flag",
+    "token_quote_type",
+    "is_uuid_v4",
+    "jwt_structure_valid",
+    "entropy_charset_mismatch",
+    "has_hash_prefix",
+    # Variable name features (9 — dropped var_contains_secret)
+    "var_name_extracted",
+    "var_contains_safe",
+    "var_name_length",
+    "var_is_uppercase",
+    "var_is_camelcase",
+    "assignment_type",
+    "in_string_literal",
+    "var_ngram_secret_score",
+    "var_ngram_safe_score",
+    # Context features (17 — dropped line_position_ratio)
+    "line_is_comment",
+    "context_mentions_test",
+    "context_mentions_git",
+    "context_mentions_hash",
+    "context_has_import",
+    "context_has_function_def",
+    "file_is_test",
+    "file_is_config",
+    "file_extension_risk",
+    "surrounding_entropy_avg",
+    "semantic_context_score",
+    "surrounding_secret_density",
+    "surrounding_token_count",
+    "key_value_distance",
+    "json_path_hint",
+    "adjacency_ngram_score",
+    "cross_line_entropy",
+    # Stage B precision improvement features (7)
+    "is_hex_len_40",
+    "is_hex_len_64",
+    "is_test_token",
+    "contains_example_keyword",
+    "file_is_git_related",
+    "file_is_build",
+    "file_is_example",
+    # Stage B generalization improvement features (5)
+    "hex_context_git_keywords",
+    "hex_context_crypto_keywords",
+    "hex_adjacent_assignment_pattern",
+    "hex_in_url_or_dsn",
+    "hex_file_suggests_secret",
+    # Env-loading awareness features (2)
+    "env_loader_in_context",
+    "is_env_fallback_value",
+    # Phase 7.0 value-shape features (7)
+    "value_starts_with_slash",
+    "value_contains_path_separator",
+    "value_ends_with_known_ext",
+    "value_is_lowercase_word",
+    "value_is_dotted_quad_or_host",
+    "value_is_template_syntax",
+    "is_hex_with_no_alpha_mix",
+)
+
+
 @dataclass
 class FeatureVector:
     """
-    63 extracted features for ML classification.
+    67 extracted features for ML classification.
 
-    Organized into five categories:
-    - Token features (23): Properties of the token itself
-    - Variable name features (10): Properties of the variable/key name
-    - Context features (18): Properties of surrounding code
+    Organized into seven categories:
+    - Token features (20): Properties of the token itself
+    - Variable name features (9): Properties of the variable/key name
+    - Context features (17): Properties of surrounding code
     - Stage B precision features (7): Targeted FP reduction features
     - Stage B generalization features (5): Hex disambiguation features
+    - Env-loading awareness features (2): Env-loader and fallback detection
+    - Phase 7.0 value-shape features (7): Value-shape FP suppression
 
     NOTE: The following features were REMOVED to prevent shortcut learning:
     - has_known_prefix: Directly encodes token type based on prefix
     - prefix_type: Maps prefixes to secret categories
     - is_hex_like: Strongly correlated with non-secrets (git SHAs)
 
+    Phase 7.0 drops (collinear / label-leak / skewed):
+    - normalized_entropy: collinear with token_entropy
+    - cryptographic_score: collinear
+    - is_known_hash_length: inverted signal
+    - var_contains_secret: label-leak (25.4% importance mirrors heuristic)
+    - line_position_ratio: train/serve skew (always ~0.5 in synthetic data)
+
     DISCRIMINATIVE FEATURES (for precision boost):
     - is_uuid_v4: Detects UUID v4 format (strong non-secret indicator)
-    - is_known_hash_length: Token length matches MD5/SHA1/SHA256/SHA512
     - jwt_structure_valid: JWT has valid base64-encoded JSON header
     - entropy_charset_mismatch: High entropy but low charset diversity (suspicious)
     - has_hash_prefix: Starts with hash algorithm prefix (sha256:, md5:)
@@ -178,10 +261,19 @@ class FeatureVector:
     - hex_in_url_or_dsn: Token is embedded in URL/DSN
     - hex_file_suggests_secret: File path suggests secrets (secrets/, .env)
 
+    PHASE 7.0 VALUE-SHAPE FEATURES (FP suppression):
+    - value_starts_with_slash: "/" or "~" or "./" prefix → file path
+    - value_contains_path_separator: "/" or "\\" in value (non-URL) → path
+    - value_ends_with_known_ext: .pem/.key/.crt/.jks/.p12/.json/.yaml/.txt
+    - value_is_lowercase_word: re.fullmatch([a-z]+) → enum/literal
+    - value_is_dotted_quad_or_host: 0.0.0.0, 127.0.0.1, localhost, ::1
+    - value_is_template_syntax: ${...}, {{...}}, __X__, <<...>>, or AI placeholder (YOUR_KEY, CHANGEME)
+    - is_hex_with_no_alpha_mix: all hex but no uppercase letter → hash
+
     The model should learn from CONTEXT, not token format.
     """
 
-    # Token features (23) - includes advanced entropy analysis + position/structure
+    # Token features (20) - dropped normalized_entropy, cryptographic_score, is_known_hash_length
     token_length: int = 0
     token_entropy: float = 0.0
     char_class_count: int = 0  # Number of character classes present
@@ -193,25 +285,20 @@ class FeatureVector:
     regex_match_type: int = 0  # 0 = entropy, 1+ = regex pattern
     token_structure_score: float = 0.0  # 0=random, 1=structured (words, separators)
     has_version_pattern: bool = False  # Contains v1.2.3, 1.0.0 patterns
-    # Advanced entropy features
-    normalized_entropy: float = 0.0  # entropy / max_possible (0-1 scale)
-    cryptographic_score: float = 0.0  # 0=structured, 1=cryptographically random
     vendor_prefix_boost: float = 0.0  # Boost for known vendor prefixes (AKIA, ghp_, etc.)
     # Position and structural features
     token_span_offset: float = 0.0  # Position within line (0=start, 1=end)
     token_in_multiline_block: bool = False  # Part of PEM/SSH block
     embedded_token_flag: bool = False  # Extracted from URL/DSN
     token_quote_type: int = 0  # 0=none, 1=single, 2=double, 3=backtick
-    # NEW: Discriminative features for precision boost
+    # Discriminative features for precision boost
     is_uuid_v4: bool = False  # Matches UUID v4 format (strong non-secret signal)
-    is_known_hash_length: bool = False  # Length matches MD5/SHA1/SHA256/SHA512
     jwt_structure_valid: bool = False  # JWT has valid JSON header
     entropy_charset_mismatch: float = 0.0  # High entropy but low charset diversity
     has_hash_prefix: bool = False  # Starts with sha256:, md5:, etc.
 
-    # Variable name features (10) - includes N-gram scoring
+    # Variable name features (9) - dropped var_contains_secret
     var_name_extracted: bool = False
-    var_contains_secret: bool = False
     var_contains_safe: bool = False
     var_name_length: int = 0
     var_is_uppercase: bool = False  # CONSTANT_STYLE
@@ -222,7 +309,7 @@ class FeatureVector:
     var_ngram_secret_score: float = 0.0  # Weighted sum of secret N-gram matches
     var_ngram_safe_score: float = 0.0  # Weighted sum of safe N-gram matches
 
-    # Context features (18)
+    # Context features (17) - dropped line_position_ratio
     line_is_comment: bool = False
     context_mentions_test: bool = False
     context_mentions_git: bool = False
@@ -234,9 +321,8 @@ class FeatureVector:
     file_extension_risk: int = 0  # 0=low, 1=medium, 2=high
     surrounding_entropy_avg: float = 0.0
     semantic_context_score: float = 0.0  # -1=safe, 0=neutral, 1=risky
-    line_position_ratio: float = 0.0  # 0=top, 1=bottom (secrets often at top)
     surrounding_secret_density: float = 0.0  # Ratio of nearby secret-like tokens
-    # NEW: Advanced context features
+    # Advanced context features
     surrounding_token_count: int = 0  # Count of high-entropy tokens on same line
     key_value_distance: int = -1  # Distance between var name and token (-1 if no var)
     json_path_hint: int = 0  # Depth in JSON/YAML structure (0=root)
@@ -260,14 +346,23 @@ class FeatureVector:
     hex_in_url_or_dsn: bool = False  # Token is embedded in URL/DSN
     hex_file_suggests_secret: bool = False  # Path suggests secrets (secrets/, .env, credentials/)
 
-    # Env-loading awareness features (v0.2.0 — 63 → 65)
+    # Env-loading awareness features (2)
     env_loader_in_context: bool = False  # Context contains env-loading pattern
     is_env_fallback_value: bool = False  # Token is the fallback/default arg in env-loader call
 
+    # Phase 7.0: value-shape features for FP suppression (67-feature vector)
+    value_starts_with_slash: bool = False        # "/" or "~" or "./" prefix → file path
+    value_contains_path_separator: bool = False  # "/" or "\" in value (non-URL) → path
+    value_ends_with_known_ext: bool = False      # .pem/.key/.crt/.jks/.p12/.json/.yaml/.txt
+    value_is_lowercase_word: bool = False        # re.fullmatch([a-z]+) → enum/literal
+    value_is_dotted_quad_or_host: bool = False   # 0.0.0.0, 127.0.0.1, localhost, ::1
+    value_is_template_syntax: bool = False       # ${...}, {{...}}, __X__, <<...>>, or AI placeholder (YOUR_KEY, CHANGEME)
+    is_hex_with_no_alpha_mix: bool = False       # all hex but no uppercase letter → hash
+
     def to_array(self) -> List[float]:
-        """Convert to numpy-compatible array of 65 floats."""
+        """Convert to numpy-compatible array of 67 floats."""
         return [
-            # Token features (23)
+            # Token features (20)
             float(self.token_length),
             self.token_entropy,
             float(self.char_class_count),
@@ -279,23 +374,19 @@ class FeatureVector:
             float(self.regex_match_type),
             self.token_structure_score,
             float(self.has_version_pattern),
-            self.normalized_entropy,
-            self.cryptographic_score,
             self.vendor_prefix_boost,
             # Token position/structure features
             self.token_span_offset,
             float(self.token_in_multiline_block),
             float(self.embedded_token_flag),
             float(self.token_quote_type),
-            # NEW: Discriminative features for precision boost
+            # Discriminative features for precision boost
             float(self.is_uuid_v4),
-            float(self.is_known_hash_length),
             float(self.jwt_structure_valid),
             self.entropy_charset_mismatch,
             float(self.has_hash_prefix),
-            # Variable name features (10)
+            # Variable name features (9)
             float(self.var_name_extracted),
-            float(self.var_contains_secret),
             float(self.var_contains_safe),
             float(self.var_name_length),
             float(self.var_is_uppercase),
@@ -304,7 +395,7 @@ class FeatureVector:
             float(self.in_string_literal),
             self.var_ngram_secret_score,
             self.var_ngram_safe_score,
-            # Context features (18)
+            # Context features (17)
             float(self.line_is_comment),
             float(self.context_mentions_test),
             float(self.context_mentions_git),
@@ -316,7 +407,6 @@ class FeatureVector:
             float(self.file_extension_risk),
             self.surrounding_entropy_avg,
             self.semantic_context_score,
-            self.line_position_ratio,
             self.surrounding_secret_density,
             # Advanced context features
             float(self.surrounding_token_count),
@@ -341,85 +431,20 @@ class FeatureVector:
             # Env-loading awareness features (2)
             float(self.env_loader_in_context),
             float(self.is_env_fallback_value),
+            # Phase 7.0 value-shape features (7)
+            float(self.value_starts_with_slash),
+            float(self.value_contains_path_separator),
+            float(self.value_ends_with_known_ext),
+            float(self.value_is_lowercase_word),
+            float(self.value_is_dotted_quad_or_host),
+            float(self.value_is_template_syntax),
+            float(self.is_hex_with_no_alpha_mix),
         ]
 
     @staticmethod
     def get_feature_names() -> List[str]:
-        """Get ordered list of 65 feature names."""
-        return [
-            # Token features (23)
-            "token_length",
-            "token_entropy",
-            "char_class_count",
-            "digit_ratio",
-            "uppercase_ratio",
-            "special_char_ratio",
-            "is_base64_like",
-            "has_padding",
-            "regex_match_type",
-            "token_structure_score",
-            "has_version_pattern",
-            "normalized_entropy",
-            "cryptographic_score",
-            "vendor_prefix_boost",
-            "token_span_offset",
-            "token_in_multiline_block",
-            "embedded_token_flag",
-            "token_quote_type",
-            # NEW: Discriminative features
-            "is_uuid_v4",
-            "is_known_hash_length",
-            "jwt_structure_valid",
-            "entropy_charset_mismatch",
-            "has_hash_prefix",
-            # Variable name features (10)
-            "var_name_extracted",
-            "var_contains_secret",
-            "var_contains_safe",
-            "var_name_length",
-            "var_is_uppercase",
-            "var_is_camelcase",
-            "assignment_type",
-            "in_string_literal",
-            "var_ngram_secret_score",
-            "var_ngram_safe_score",
-            # Context features (18)
-            "line_is_comment",
-            "context_mentions_test",
-            "context_mentions_git",
-            "context_mentions_hash",
-            "context_has_import",
-            "context_has_function_def",
-            "file_is_test",
-            "file_is_config",
-            "file_extension_risk",
-            "surrounding_entropy_avg",
-            "semantic_context_score",
-            "line_position_ratio",
-            "surrounding_secret_density",
-            "surrounding_token_count",
-            "key_value_distance",
-            "json_path_hint",
-            "adjacency_ngram_score",
-            "cross_line_entropy",
-            # Stage B precision improvement features (7)
-            "is_hex_len_40",
-            "is_hex_len_64",
-            "is_test_token",
-            "contains_example_keyword",
-            "file_is_git_related",
-            "file_is_build",
-            "file_is_example",
-            # Stage B generalization improvement features (5)
-            "hex_context_git_keywords",
-            "hex_context_crypto_keywords",
-            "hex_adjacent_assignment_pattern",
-            "hex_in_url_or_dsn",
-            "hex_file_suggests_secret",
-            # Env-loading awareness features (2)
-            "env_loader_in_context",
-            "is_env_fallback_value",
-        ]
+        """Get ordered list of 67 feature names."""
+        return list(FEATURE_NAMES)
 
 def _get_char_class_count(token: str) -> int:
     """Count distinct character classes in token."""
@@ -525,92 +550,6 @@ def _has_version_pattern(token: str) -> bool:
     return any(p.search(token) for p in version_patterns)
 
 
-def _calculate_normalized_entropy(token: str) -> float:
-    """
-    Calculate entropy normalized by the maximum possible entropy for the character set.
-
-    Returns:
-        0.0-1.0: Normalized entropy (1.0 = maximum randomness for char set)
-    """
-    if not token or len(token) < 4:
-        return 0.0
-
-    raw_entropy = shannon_entropy(token)
-
-    # Determine the character set used
-    has_special = any(not c.isalnum() for c in token)
-
-    # Determine max entropy based on character set
-    if not has_special:
-        if _is_hex_like(token):
-            max_entropy = MAX_ENTROPY_HEX
-        elif _is_base64_like(token):
-            max_entropy = MAX_ENTROPY_BASE64
-        else:
-            max_entropy = MAX_ENTROPY_ALPHANUMERIC
-    else:
-        # Include special characters - assume ~90 printable ASCII chars
-        max_entropy = 6.5  # log2(90) ≈ 6.5
-
-    return min(raw_entropy / max_entropy, 1.0)
-
-
-def _calculate_cryptographic_score(token: str) -> float:
-    """
-    Score how cryptographically random a token appears.
-
-    This uses multiple heuristics to distinguish cryptographic secrets from
-    structured data like UUIDs, version strings, etc.
-
-    Returns:
-        0.0 = structured/predictable
-        1.0 = cryptographically random
-    """
-    if not token or len(token) < 8:
-        return 0.0
-
-    score = 0.0
-
-    # High normalized entropy is a strong indicator
-    norm_entropy = _calculate_normalized_entropy(token)
-    if norm_entropy > 0.9:
-        score += 0.4
-    elif norm_entropy > 0.7:
-        score += 0.2
-
-    # Check for lack of structure
-    structure_score = _calculate_token_structure_score(token)
-    if structure_score < 0.1:
-        score += 0.3
-    elif structure_score < 0.3:
-        score += 0.15
-
-    # Check character distribution uniformity
-    # Cryptographic secrets have more uniform character distribution
-    char_counts = {}
-    for c in token:
-        char_counts[c] = char_counts.get(c, 0) + 1
-
-    if char_counts:
-        avg_count = len(token) / len(char_counts)
-        max_count = max(char_counts.values())
-        # Low max deviation from average = more uniform
-        uniformity = 1 - (max_count - avg_count) / len(token) if len(token) > 0 else 0
-        if uniformity > 0.8:
-            score += 0.2
-        elif uniformity > 0.6:
-            score += 0.1
-
-    # Penalize known non-cryptographic patterns
-    # UUIDs have predictable structure
-    if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', token, re.I):
-        score -= 0.4
-
-    # Git SHA (40 hex chars) - common false positive
-    if len(token) == 40 and all(c in HEX_CHARS for c in token):
-        score -= 0.3
-
-    return max(0.0, min(1.0, score))
 
 
 def _get_vendor_prefix_boost(token: str) -> float:
@@ -698,27 +637,48 @@ def _is_uuid_v4(token: str) -> bool:
     return bool(UUID_V4_PATTERN.match(token))
 
 
-def _is_known_hash_length(token: str) -> bool:
-    """
-    Check if token length matches known hash algorithm output lengths.
+def _is_hex_with_no_alpha_mix(token: str) -> bool:
+    """True if token is all lowercase hex with no uppercase — typical of hashes, not credentials."""
+    return bool(re.fullmatch(r"[a-f0-9]+", token) and len(token) >= 20)
 
-    Common hash lengths:
-    - MD5: 32 hex characters
-    - SHA-1: 40 hex characters (also Git SHA)
-    - SHA-256: 64 hex characters
-    - SHA-512: 128 hex characters
 
-    Returns:
-        True if token length matches a known hash length AND is hex-like
-    """
-    if not token:
-        return False
+_KNOWN_EXT_RE = re.compile(
+    r"\.(?:pem|key|crt|cer|jks|p12|pfx|der|json|yaml|yml|txt|env|conf|config)$",
+    re.IGNORECASE,
+)
+_DOTTED_QUAD_RE = re.compile(
+    r"^(?:10\.\d+\.\d+\.\d+|"
+    r"172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|"
+    r"192\.168\.\d+\.\d+|"
+    r"127\.0\.0\.1|0\.0\.0\.0|localhost|::1)$",
+    re.IGNORECASE,
+)
+_TEMPLATE_SYNTAX_RE = re.compile(
+    r"\$\{[^}]+\}|\{\{[^}]+\}\}|__[A-Z][A-Z0-9_]+__|<<[^>]+>>",
+)
 
-    # Must be all hex characters
-    if not all(c in HEX_CHARS for c in token):
-        return False
 
-    return len(token) in KNOWN_HASH_LENGTHS
+def _value_shape_features(token: str) -> dict:
+    """Compute Phase 7.0 value-shape features for a token."""
+    starts_with_slash = token.startswith(("/", "~", "./", "../"))
+    # Path separator: exclude any URL scheme (s3://, gs://, ftp://, postgres://, etc.)
+    has_path_sep = ("/" in token or "\\" in token) and "://" not in token
+    ends_with_ext = bool(_KNOWN_EXT_RE.search(token))
+    is_lowercase_word = bool(re.fullmatch(r"[a-z]+", token))
+    is_host = bool(_DOTTED_QUAD_RE.match(token))
+    # Combines template syntax (${}, {{}}, __X__, <<>>) and AI placeholder patterns
+    # (YOUR_KEY, CHANGEME, dummy_*) — both indicate non-secret values.
+    is_placeholder = bool(_TEMPLATE_SYNTAX_RE.search(token) or _AI_PLACEHOLDER_RE.search(token))
+    is_hex_no_alpha_mix = _is_hex_with_no_alpha_mix(token)
+    return {
+        "value_starts_with_slash": starts_with_slash,
+        "value_contains_path_separator": has_path_sep,
+        "value_ends_with_known_ext": ends_with_ext,
+        "value_is_lowercase_word": is_lowercase_word,
+        "value_is_dotted_quad_or_host": is_host,
+        "value_is_template_syntax": is_placeholder,
+        "is_hex_with_no_alpha_mix": is_hex_no_alpha_mix,
+    }
 
 
 def _is_jwt_structure_valid(token: str) -> bool:
@@ -1474,12 +1434,13 @@ def _extract_token_features(
     Instead, we use advanced entropy analysis and vendor prefix boost which
     provide the model with useful signal without enabling trivial shortcuts.
 
-    NEW DISCRIMINATIVE FEATURES (for precision boost):
+    DISCRIMINATIVE FEATURES (for precision boost):
     - is_uuid_v4: UUIDs are identifiers, not secrets
-    - is_known_hash_length: Hex tokens matching hash lengths are likely hashes
     - jwt_structure_valid: Invalid JWTs are not real secrets
     - entropy_charset_mismatch: High entropy + low charset = likely hash/UUID
     - has_hash_prefix: sha256:xxx prefixes indicate hashes
+
+    Phase 7.0 drops: normalized_entropy, cryptographic_score, is_known_hash_length
     """
     length = len(token)
 
@@ -1495,18 +1456,14 @@ def _extract_token_features(
         "regex_match_type": regex_match_type,
         "token_structure_score": _calculate_token_structure_score(token),
         "has_version_pattern": _has_version_pattern(token),
-        # Advanced entropy features
-        "normalized_entropy": _calculate_normalized_entropy(token),
-        "cryptographic_score": _calculate_cryptographic_score(token),
         "vendor_prefix_boost": _get_vendor_prefix_boost(token),
         # Token position/structure features
         "token_span_offset": _calculate_token_span_offset(line, token),
         "token_in_multiline_block": _detect_multiline_block(context_text, token),
         "embedded_token_flag": _detect_embedded_token(line, token),
         "token_quote_type": _detect_quote_type(line, token),
-        # NEW: Discriminative features for precision boost
+        # Discriminative features for precision boost
         "is_uuid_v4": _is_uuid_v4(token),
-        "is_known_hash_length": _is_known_hash_length(token),
         "jwt_structure_valid": _is_jwt_structure_valid(token),
         "entropy_charset_mismatch": _calculate_entropy_charset_mismatch(token),
         "has_hash_prefix": _has_hash_prefix(token),
@@ -1514,11 +1471,10 @@ def _extract_token_features(
 
 
 def _extract_var_features(var_name: Optional[str], line: str, token: str) -> dict:
-    """Extract variable name features (10 features)."""
+    """Extract variable name features (9 features — dropped var_contains_secret)."""
     if not var_name:
         return {
             "var_name_extracted": False,
-            "var_contains_secret": False,
             "var_contains_safe": False,
             "var_name_length": 0,
             "var_is_uppercase": False,
@@ -1532,7 +1488,6 @@ def _extract_var_features(var_name: Optional[str], line: str, token: str) -> dic
 
     return {
         "var_name_extracted": True,
-        "var_contains_secret": any(p.search(var_name) for p in SECRET_VAR_PATTERNS),
         "var_contains_safe": any(p.search(var_name) for p in SAFE_VAR_PATTERNS),
         "var_name_length": len(var_name),
         "var_is_uppercase": var_name.isupper() and "_" in var_name,
@@ -1550,7 +1505,7 @@ def _extract_context_features(
     token: str = "",
     var_name: Optional[str] = None,
 ) -> dict:
-    """Extract context-level features (18 features including advanced context)."""
+    """Extract context-level features (17 features — dropped line_position_ratio)."""
     full_text = context.full_context
     line = context.line_content
 
@@ -1591,13 +1546,6 @@ def _extract_context_features(
         entropies = [shannon_entropy(t) for t in nearby_tokens[:10]]
         avg_entropy = sum(entropies) / len(entropies)
 
-    # NEW: Calculate line position ratio (0=top, 1=bottom)
-    # Secrets are often defined at the top of files (config sections)
-    line_position_ratio = 0.5  # Default to middle
-    if context.line_number is not None and context.total_lines is not None:
-        if context.total_lines > 0:
-            line_position_ratio = context.line_number / context.total_lines
-
     return {
         "line_is_comment": context.in_comment,
         "context_mentions_test": bool(test_pattern.search(full_text)),
@@ -1609,11 +1557,9 @@ def _extract_context_features(
         "file_is_config": context.is_config_file,
         "file_extension_risk": ext_risk,
         "surrounding_entropy_avg": avg_entropy,
-        # NEW: Enhanced context analysis features
         "semantic_context_score": _calculate_semantic_context_score(full_text),
-        "line_position_ratio": line_position_ratio,
         "surrounding_secret_density": _calculate_surrounding_secret_density(full_text),
-        # NEW: Advanced context features
+        # Advanced context features
         "surrounding_token_count": _count_surrounding_tokens(line),
         "key_value_distance": _calculate_key_value_distance(line, token, var_name),
         "json_path_hint": _calculate_json_path_hint(line),
@@ -1797,7 +1743,7 @@ def extract_features(
     regex_match_type: int = 0,
 ) -> FeatureVector:
     """
-    Extract all 65 features from a finding and its context.
+    Extract all 67 features from a finding and its context.
 
     Args:
         finding: The Finding object with token and metadata
@@ -1805,7 +1751,7 @@ def extract_features(
         regex_match_type: Encoded type of regex match (0 = entropy-only)
 
     Returns:
-        FeatureVector with all 65 features
+        FeatureVector with all 67 features
     """
     token = finding.token or ""
 
@@ -1857,6 +1803,9 @@ def extract_features(
     token_pos = context.line_content.find(token)
     env_fallback = _detect_env_fallback_value(context.line_content, token_pos) if token_pos >= 0 else False
 
+    # Phase 7.0 value-shape features
+    value_shape = _value_shape_features(token)
+
     # Combine all features
     return FeatureVector(
         **token_features,
@@ -1866,6 +1815,7 @@ def extract_features(
         **hex_features,
         env_loader_in_context=env_in_ctx,
         is_env_fallback_value=env_fallback,
+        **value_shape,
     )
 
 
@@ -1877,7 +1827,7 @@ def extract_features_from_record(record: dict) -> FeatureVector:
         record: Dict with token, line_content, context_before, context_after, etc.
 
     Returns:
-        FeatureVector with all 65 features
+        FeatureVector with all 67 features
     """
     from Harpocrates.core.result import EvidenceType, Finding
 
@@ -1955,6 +1905,7 @@ def extract_features_from_record(record: dict) -> FeatureVector:
 
 
 __all__ = [
+    "FEATURE_NAMES",
     "FeatureVector",
     "extract_features",
     "extract_features_from_record",

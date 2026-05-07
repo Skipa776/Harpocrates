@@ -296,14 +296,14 @@ class TestAdversarialRobustness:
 class TestFeatureVector:
     """Tests for feature vector correctness."""
 
-    def test_feature_count_is_65(self):
-        """Verify we have exactly 65 features (63 original + 2 env-loading features)."""
+    def test_feature_count_is_67(self):
+        """Verify we have exactly 67 features (Phase 7.0: 65 - 5 dropped + 7 value-shape)."""
         names = FeatureVector.get_feature_names()
-        assert len(names) == 65, f"Expected 65 features, got {len(names)}"
+        assert len(names) == 67, f"Expected 67 features, got {len(names)}"
 
         vec = FeatureVector()
         arr = vec.to_array()
-        assert len(arr) == 65, f"Expected 65 values, got {len(arr)}"
+        assert len(arr) == 67, f"Expected 67 values, got {len(arr)}"
 
     def test_removed_features_not_present(self):
         """Verify leaky features were removed."""
@@ -320,7 +320,7 @@ class TestFeatureVector:
         for record in records:
             features = extract_features_from_record(record)
             arr = features.to_array()
-            assert len(arr) == 65, f"Expected 65 features, got {len(arr)}"
+            assert len(arr) == 67, f"Expected 67 features, got {len(arr)}"
 
 
 class TestAmbiguousTokenGenerators:
