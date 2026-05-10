@@ -5,13 +5,13 @@
 // Three inference layers: regex signature → var-name lexicon → value structure.
 //
 // Expected categories:
-//   DB_PASSWORD      → password        (var-name lexicon, confidence 0.90)
-//   clientSecret     → oauth_secret    (var-name lexicon, confidence 0.85)
-//   hmacSigningKey   → crypto_key      (var-name lexicon, confidence 0.85)
-//   sessionIdToken   → session_token   (var-name lexicon, confidence 0.75)
-//   token (eyJ...)   → jwt             (value-structure: eyJ prefix + two dots)
-//   dbUrl            → connection_string (value-structure: postgres:// with credentials)
-//   SOME_SECRET      → generic_secret  (no specific signal)
+//   DB_PASSWORD         → password           (var-name lexicon, confidence 0.90)
+//   clientSecret        → oauth_secret       (var-name lexicon, confidence 0.85)
+//   hmacSigningKey      → crypto_key         (var-name lexicon, confidence 0.85)
+//   sessionIdToken      → session_token      (var-name lexicon, confidence 0.75)
+//   token (eyJ...)      → jwt               (value-structure: eyJ prefix segment)
+//   dbUrl               → connection_string  (value-structure: postgres:// with credentials)
+//   NONDESCRIPT_VALUE   → generic_secret     (no var-name or value-structure signal)
 
 const DB_PASSWORD    = "Tr0ub4dor3_longEnoughForEntropy_xyz123";
 const clientSecret   = "xK9mN3pQ7rS2tV8wY1zA5cE0gH4jL6nP9qT3uW7yB2dF5hK8m";
@@ -24,5 +24,5 @@ const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIn0.SflK
 // Postgres URI with embedded credentials
 const dbUrl = "postgres://admin:Tr0ub4dor3_SecretPass@prod-db.internal:5432/appdb";
 
-// Falls through all layers → generic_secret
-const SOME_SECRET = "xK9mN3pQ7rS2tV8wY1zA5cE0gH4jL6nP9qT3uW7yB2dF5hK8m";
+// Falls through all layers → generic_secret (no recognisable var-name signal)
+const NONDESCRIPT_VALUE = "xK9mN3pQ7rS2tV8wY1zA5cE0gH4jL6nP9qT3uW7yB2dF5hK8m";

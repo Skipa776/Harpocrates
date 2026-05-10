@@ -120,17 +120,26 @@ def test_apim_secret_key_real_secret_severity_is_at_least_medium() -> None:
         )
 
 
-def test_entropy_only_path_cannot_produce_high_severity() -> None:
-    """detect_text (no ML) must never surface entropy findings as HIGH or CRITICAL."""
+def test_entropy_path_produces_high_for_strong_category_signal() -> None:
+    """detect_text entropy findings with strong cat_conf (>=0.85) must reach HIGH.
+
+    _severity_from_entropy now delegates to _severity_from_classification so
+    that well-named credentials (DB_PASSWORD, jwt_token) surface as HIGH
+    without waiting for ML verification.  CRITICAL remains unreachable from
+    the entropy path.
+    """
     from Harpocrates.core.detector import detect_text
     from Harpocrates.core.result import EvidenceType
 
     line = 'db_password = "Xk9mQ2vRpLwYhN3cD7bJsTqFuEiAo8WP"\n'
     findings = detect_text(line)
     entropy_findings = [f for f in findings if f.evidence in (EvidenceType.ENTROPY, EvidenceType.ML)]
+    assert any(f.severity == Severity.HIGH for f in entropy_findings), (
+        "Strong-signal entropy finding (db_password, cat_conf=0.90) must be HIGH"
+    )
     for f in entropy_findings:
-        assert f.severity in (Severity.INFO, Severity.MEDIUM), (
-            f"detect_text entropy/ML finding must not reach HIGH or CRITICAL; got {f.severity}"
+        assert f.severity != Severity.CRITICAL, (
+            f"CRITICAL is unreachable from entropy path; got {f.severity}"
         )
 
 
