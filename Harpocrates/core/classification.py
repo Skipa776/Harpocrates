@@ -130,10 +130,16 @@ _VAR_NAME_LEXICON: Tuple[Tuple[re.Pattern, ViolationCategory, float], ...] = (
      ViolationCategory.JWT, 0.85),
     (re.compile(r"(?i)client_?secret"),
      ViolationCategory.OAUTH_SECRET, 0.85),
-    (re.compile(r"(?i)(?:refresh|access|id)_?token"),
-     ViolationCategory.OAUTH_SECRET, 0.80),
+    # session must come before the refresh/access/id_token pattern: `sessionIdToken`
+    # contains `idToken` which the oauth pattern would greedily match otherwise.
     (re.compile(r"(?i)session(?:_id|_token|_key|id)?"),
      ViolationCategory.SESSION_TOKEN, 0.75),
+    (re.compile(r"(?i)(?:refresh|access)_?token"),
+     ViolationCategory.OAUTH_SECRET, 0.80),
+    # `id_token` (standalone, not inside sessionIdToken) is an OAuth 2.0 term.
+    # Requires ^ or _ boundary so it doesn't match mid-identifier (sessionIdToken).
+    (re.compile(r"(?i)(?:^|_)id_?token"),
+     ViolationCategory.OAUTH_SECRET, 0.80),
     (re.compile(r"(?i)webhook(?:_(?:url|secret|key))?"),
      ViolationCategory.WEBHOOK_URL, 0.80),
     (re.compile(r"(?i)ssh_?(?:key|priv(?:ate)?|id)"),
@@ -185,12 +191,21 @@ _HEX64_RE = re.compile(r"^[a-f0-9]{64}$")
 
 def _classify_by_value(token: str) -> Optional[CategoryInference]:
     """Layer 3: structural signal from the token value itself."""
-    # JWT — three base64url segments separated by dots
+    # JWT — three base64url segments separated by dots (full token)
     if token.startswith("eyJ") and token.count(".") == 2:
         return CategoryInference(
             ViolationCategory.JWT,
             _reason("value_structure", "jwt_three_segment", 0.95),
             0.95,
+        )
+    # JWT header/payload segment — `eyJ` is base64url for `{"` and is highly
+    # distinctive. Confidence 0.86 is intentionally above var-name + 0.10 so
+    # this wins over API_TOKEN 0.75 from a bare `token` var name (0.86 > 0.85).
+    if token.startswith("eyJ"):
+        return CategoryInference(
+            ViolationCategory.JWT,
+            _reason("value_structure", "jwt_eyj_prefix_segment", 0.86),
+            0.86,
         )
     # PEM/OpenSSH private key header
     if "BEGIN" in token and any(k in token for k in ("PRIVATE KEY", "RSA", "OPENSSH")):
@@ -313,11 +328,25 @@ def extract_var_name(line: str, token: str) -> Optional[str]:
     Pull the LHS variable name from a line of the form `var = 'token'`.
 
     Looks left of the token for `identifier =` or `identifier:` patterns.
+    Also handles dotenv/shell KEY=VALUE format where the token starts at
+    position 0 and the key is embedded as `KEY=value` in the token itself.
+
     Returns None if no clear LHS variable is found (multi-assignment, tuple
     unpacking, dict literals, etc.) — callers fall through to value_structure.
     """
     idx = line.find(token)
-    if idx <= 0:
+    if idx < 0:
+        return None
+    if idx == 0:
+        # Token starts at line beginning — dotenv/shell KEY=VALUE or KEY:VALUE.
+        # Extract the identifier before the first `=` or `:` separator.
+        eq = token.find("=")
+        colon = token.find(":")
+        sep = min((p for p in (eq, colon) if p > 0), default=-1)
+        if sep > 0:
+            candidate = token[:sep].strip()
+            m = re.match(r"([A-Za-z_][A-Za-z0-9_]*)$", candidate)
+            return m.group(1) if m else None
         return None
     lhs = line[:idx]
     m = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*['\"]?$", lhs)
