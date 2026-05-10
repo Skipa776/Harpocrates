@@ -133,20 +133,24 @@ class TestFeatureVector:
     """Tests for complete feature vector extraction."""
 
     def test_feature_vector_length(self):
-        """Test that feature vector has 67 features (Phase 7.0 vector)."""
+        """Test that feature vector has 64 features (Phase 7.0.11 vector)."""
         fv = FeatureVector()
         array = fv.to_array()
-        assert len(array) == 67
+        assert len(array) == 64
 
     def test_feature_names(self):
         """Test that feature names are defined."""
         names = FeatureVector.get_feature_names()
-        assert len(names) == 67
+        assert len(names) == 64
         assert "token_length" in names
         assert "var_ngram_secret_score" in names
         assert "file_is_test" in names
         # Phase 7.0: label-leak features removed
         assert "var_contains_secret" not in names
+        # Phase 7.0.11: collinearity sweep
+        assert "cross_line_entropy" not in names
+        assert "contains_example_keyword" not in names
+        assert "hex_context_git_keywords" not in names
         assert "line_position_ratio" not in names
         assert "is_known_hash_length" not in names
         assert "normalized_entropy" not in names
@@ -346,8 +350,9 @@ class TestStageBPrecisionFeatures:
         features = extract_features(finding, context)
         assert features.is_test_token is True
 
-    def test_example_keyword_feature(self):
-        """Test detection of example/placeholder tokens."""
+    def test_example_token_still_detected_via_is_test_token(self):
+        """Example/placeholder tokens no longer have contains_example_keyword (dropped in 7.0.11).
+        Verify the token still flows through feature extraction without error."""
         example_token = "AKIAIOSFODNN7EXAMPLE"
         finding = Finding(
             type="AWS_ACCESS_KEY_ID",
@@ -363,7 +368,9 @@ class TestStageBPrecisionFeatures:
         )
 
         features = extract_features(finding, context)
-        assert features.contains_example_keyword is True
+        arr = features.to_array()
+        assert len(arr) == 64
+        assert not hasattr(features, "contains_example_keyword")
 
     def test_git_related_path_feature(self):
         """Test detection of git-related file paths."""
@@ -441,5 +448,5 @@ class TestStageBPrecisionFeatures:
 
         features = extract_features(finding, context)
         assert features.is_test_token is True
-        assert features.contains_example_keyword is True  # 'xxxx' pattern
         assert features.file_is_example is True
+        assert not hasattr(features, "contains_example_keyword")  # dropped in 7.0.11

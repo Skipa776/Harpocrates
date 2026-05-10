@@ -297,21 +297,25 @@ class TestFeatureVector:
     """Tests for feature vector correctness."""
 
     def test_feature_count_is_67(self):
-        """Verify we have exactly 67 features (Phase 7.0: 65 - 5 dropped + 7 value-shape)."""
+        """Verify we have exactly 64 features (Phase 7.0.11: 65 - 5 dropped + 7 value-shape - 3 collinearity sweep)."""
         names = FeatureVector.get_feature_names()
-        assert len(names) == 67, f"Expected 67 features, got {len(names)}"
+        assert len(names) == 64, f"Expected 64 features, got {len(names)}"
 
         vec = FeatureVector()
         arr = vec.to_array()
-        assert len(arr) == 67, f"Expected 67 values, got {len(arr)}"
+        assert len(arr) == 64, f"Expected 64 values, got {len(arr)}"
 
     def test_removed_features_not_present(self):
-        """Verify leaky features were removed."""
+        """Verify leaky and collinear features were removed."""
         names = FeatureVector.get_feature_names()
 
         assert "has_known_prefix" not in names, "has_known_prefix should be removed"
         assert "prefix_type" not in names, "prefix_type should be removed"
         assert "is_hex_like" not in names, "is_hex_like should be removed"
+        # Phase 7.0.11: collinearity sweep
+        assert "cross_line_entropy" not in names, "cross_line_entropy removed (collinear with surrounding_entropy_avg)"
+        assert "contains_example_keyword" not in names, "contains_example_keyword removed (collinear with context_mentions_test)"
+        assert "hex_context_git_keywords" not in names, "hex_context_git_keywords removed (collinear with context_mentions_git)"
 
     def test_feature_extraction_works(self):
         """Verify feature extraction from training records works."""
@@ -320,7 +324,7 @@ class TestFeatureVector:
         for record in records:
             features = extract_features_from_record(record)
             arr = features.to_array()
-            assert len(arr) == 67, f"Expected 67 features, got {len(arr)}"
+            assert len(arr) == 64, f"Expected 64 features, got {len(arr)}"
 
 
 class TestAmbiguousTokenGenerators:

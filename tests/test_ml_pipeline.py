@@ -22,10 +22,10 @@ class TestFeatureExtraction:
     """Tests for feature extraction pipeline."""
 
     def test_feature_vector_has_67_features(self):
-        """Verify feature vector produces exactly 67 features (Phase 7.0 vector)."""
+        """Verify feature vector produces exactly 64 features (Phase 7.0.11 vector)."""
         fv = FeatureVector()
         array = fv.to_array()
-        assert len(array) == 67, f"Expected 67 features, got {len(array)}"
+        assert len(array) == 64, f"Expected 64 features, got {len(array)}"
 
     def test_feature_names_match_array_length(self):
         """Verify feature names match array length."""
@@ -52,7 +52,7 @@ class TestFeatureExtraction:
         features = extract_features(finding, context)
         array = features.to_array()
 
-        assert len(array) == 67
+        assert len(array) == 64
         assert features.token_length == 20
         assert features.var_ngram_secret_score > 0  # "api_key" matches via N-gram
 
@@ -208,7 +208,7 @@ class TestVerifierNoCrash:
 
             # Just verify no exception is raised during feature extraction
             features = extract_features(finding, context)
-            assert len(features.to_array()) == 67
+            assert len(features.to_array()) == 64
 
     def test_feature_extraction_with_empty_context(self):
         """Test feature extraction with minimal context."""
@@ -226,7 +226,7 @@ class TestVerifierNoCrash:
 
         # Should not raise
         features = extract_features(finding, context)
-        assert len(features.to_array()) == 67
+        assert len(features.to_array()) == 64
 
     def test_feature_extraction_with_unicode(self):
         """Test feature extraction with unicode content."""
@@ -245,7 +245,7 @@ class TestVerifierNoCrash:
 
         # Should not raise
         features = extract_features(finding, context)
-        assert len(features.to_array()) == 67
+        assert len(features.to_array()) == 64
 
 
 class TestCrossValidation:
