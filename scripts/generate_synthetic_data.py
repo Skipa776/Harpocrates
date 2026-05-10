@@ -1277,6 +1277,155 @@ def _neg_file_extension_value() -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 7.1 — Multiline-context negatives (context-only approach)
+# One record per line; multi-line structure encoded in context_before / context_after.
+# Existing context-aware features (surrounding_entropy_avg, surrounding_secret_density,
+# key_value_distance, json_path_hint, adjacency_ngram_score) pick up the structure.
+# ---------------------------------------------------------------------------
+
+def _neg_pem_pubkey_body() -> Dict[str, Any]:
+    """Negative: a base64 body line from a PUBLIC key block — high entropy, not a secret."""
+    key_type = random.choice([
+        "PUBLIC KEY", "RSA PUBLIC KEY", "EC PUBLIC KEY", "OPENSSH PUBLIC KEY",
+    ])
+    body = _rand_b64(random.randint(48, 64))
+    prior_bodies = [_rand_b64(random.randint(48, 64)) for _ in range(random.randint(0, 2))]
+    after_bodies = [_rand_b64(random.randint(48, 64)) for _ in range(random.randint(0, 2))]
+    pos = 0
+    return {
+        "token": body,
+        "token_start": pos,
+        "token_end": pos + len(body),
+        "line_content": body,
+        "context_before": [f"-----BEGIN {key_type}-----"] + prior_bodies,
+        "context_after": after_bodies + [f"-----END {key_type}-----"],
+        "file_path": random.choice(["certs/public.pem", "keys/server.pub", "config/jwt_public.pem"]),
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _neg_lockfile_hash_block() -> Dict[str, Any]:
+    """Negative: a hash entry inside a requirements.txt --hash / package-lock / Cargo.lock block."""
+    style = random.choice(["pip", "npm", "cargo"])
+    if style == "pip":
+        pkg = random.choice(["requests", "cryptography", "boto3", "django", "flask"])
+        version = f"{random.randint(1,4)}.{random.randint(0,30)}.{random.randint(0,10)}"
+        body = _rand_b64(40).lower().replace("+", "a").replace("/", "b").replace("=", "c")
+        token = f"sha256:{body}"
+        line = f"    --hash={token} \\"
+        ctx_before = [
+            f"{pkg}=={version} \\",
+            f"    --hash=sha256:{_rand_b64(40).lower()[:43]} \\",
+        ]
+        ctx_after = [
+            f"    --hash=sha256:{_rand_b64(40).lower()[:43]}",
+        ]
+        fp = "requirements.txt"
+    elif style == "npm":
+        body = _rand_b64(48)
+        token = f"sha512-{body}"
+        line = f'    "integrity": "{token}",'
+        ctx_before = [
+            '  "lodash": {',
+            f'    "version": "{random.randint(4,5)}.{random.randint(0,20)}.{random.randint(0,5)}",',
+        ]
+        ctx_after = [
+            '    "resolved": "https://registry.npmjs.org/lodash/-/lodash.tgz"',
+            "  }",
+        ]
+        fp = "package-lock.json"
+    else:
+        body = _rand_b64(32).lower().replace("+", "a").replace("/", "b").replace("=", "")
+        token = body
+        line = f'   "{token}"'
+        ctx_before = [
+            '[[package]]',
+            'name = "serde"',
+            f'version = "{random.randint(1,2)}.{random.randint(0,10)}.{random.randint(0,5)}"',
+            '[package.metadata]',
+            '"checksum" = [',
+        ]
+        ctx_after = ["]"]
+        fp = "Cargo.lock"
+    pos = line.find(token)
+    return {
+        "token": token,
+        "token_start": pos,
+        "token_end": pos + len(token),
+        "line_content": line,
+        "context_before": ctx_before,
+        "context_after": ctx_after,
+        "file_path": fp,
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _neg_yaml_pipe_prose() -> Dict[str, Any]:
+    """Negative: body line of a YAML pipe-block containing prose/documentation."""
+    prose_lines = [
+        "This service handles authentication and authorization for the API gateway.",
+        "Configure the timeout value according to your SLA requirements.",
+        "See the official documentation at https://docs.example.com for details.",
+        "The default value is used when no environment override is present.",
+        "Rotate credentials every 90 days per the security policy.",
+        "This field accepts ISO 8601 formatted datetime strings.",
+        "Contact the platform team to request elevated permissions.",
+    ]
+    token = random.choice(prose_lines)
+    parent_key = random.choice(["description", "notes", "comment", "help", "body"])
+    indent = random.choice(["  ", "    "])
+    pos = len(indent)
+    return {
+        "token": token,
+        "token_start": pos,
+        "token_end": pos + len(token),
+        "line_content": f"{indent}{token}",
+        "context_before": [
+            random.choice(["apiVersion: v1", "kind: ConfigMap", "---"]),
+            f"{parent_key}: |",
+        ],
+        "context_after": [
+            f"{indent}{random.choice(prose_lines)}",
+            random.choice(["metadata:", "spec:", ""]),
+        ],
+        "file_path": random.choice(["k8s/configmap.yaml", "config/values.yaml", "docs/api.yaml"]),
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _neg_jwks_pubkey_array() -> Dict[str, Any]:
+    """Negative: a JWK public key object inside a JWKS array — public key material, not a secret."""
+    kid = f"key-{random.randint(1, 99):02d}"
+    n_val = _rand_b64(random.randint(256, 342))
+    member = f'{{"kty":"RSA","n":"{n_val}","e":"AQAB","kid":"{kid}","use":"sig"}}'
+    sibling_n = _rand_b64(random.randint(256, 342))
+    sibling_kid = f"key-{random.randint(100, 199):03d}"
+    sibling = f'{{"kty":"RSA","n":"{sibling_n}","e":"AQAB","kid":"{sibling_kid}","use":"sig"}}'
+    line_content = f"  {member},"
+    pos = line_content.find(member)
+    return {
+        "token": member,
+        "token_start": pos,
+        "token_end": pos + len(member),
+        "line_content": line_content,
+        "context_before": [
+            '{"keys": [',
+            f"  {sibling},",
+        ],
+        "context_after": [
+            f"  {sibling}",
+            "]}",
+        ],
+        "file_path": random.choice(["static/jwks.json", ".well-known/jwks.json", "auth/keys.json"]),
+        "label": 0,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
 _NEGATIVE_GENERATORS = [
     _neg_lock_file_hash,
     _neg_css_hex_color,
@@ -1301,12 +1450,17 @@ _NEGATIVE_GENERATORS = [
     _neg_llm_placeholder,
     _neg_runtime_token_generation,
     _neg_documented_placeholder_in_docstring,
-    # Phase 7.1 additions
+    # Phase 7.1 baseline
     _neg_file_path_value,
     _neg_enum_constant_lowercase,
     _neg_host_port_config,
     _neg_template_placeholder,
     _neg_file_extension_value,
+    # Phase 7.1 multiline-context
+    _neg_pem_pubkey_body,
+    _neg_lockfile_hash_block,
+    _neg_yaml_pipe_prose,
+    _neg_jwks_pubkey_array,
 ]
 
 _AUGMENT_NEGATIVE_GENERATORS = [
@@ -1317,12 +1471,22 @@ _AUGMENT_NEGATIVE_GENERATORS = [
     _neg_llm_placeholder,
     _neg_runtime_token_generation,
     _neg_documented_placeholder_in_docstring,
-    # Phase 7.1 additions
+    # Phase 7.1 baseline
     _neg_file_path_value,
     _neg_enum_constant_lowercase,
     _neg_host_port_config,
     _neg_template_placeholder,
     _neg_file_extension_value,
+    # Phase 7.1 multiline-context (listed twice to match 6-positive weight in augment pool,
+    # keeping multiline pos:neg ratio near 1.3:1 instead of 2.1:1 with single listing)
+    _neg_pem_pubkey_body,
+    _neg_lockfile_hash_block,
+    _neg_yaml_pipe_prose,
+    _neg_jwks_pubkey_array,
+    _neg_pem_pubkey_body,
+    _neg_lockfile_hash_block,
+    _neg_yaml_pipe_prose,
+    _neg_jwks_pubkey_array,
 ]
 
 
@@ -1923,6 +2087,242 @@ def _pos_value_shape_adversarial() -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 7.2 — Multiline-context positives (context-only approach)
+# One record per line; the secret IS the token on that line.
+# Multi-line structure (BEGIN/END markers, array brackets, manifest headers)
+# is encoded entirely in context_before / context_after.
+# ---------------------------------------------------------------------------
+
+def _pos_pem_block_body() -> Dict[str, Any]:
+    """Positive: a base64 body line from a PRIVATE key block — the secret IS the body line."""
+    key_type = random.choice([
+        "RSA PRIVATE KEY", "EC PRIVATE KEY", "PRIVATE KEY",
+        "OPENSSH PRIVATE KEY", "ENCRYPTED PRIVATE KEY",
+    ])
+    body = _rand_b64(random.randint(48, 64))
+    prior_bodies = [_rand_b64(random.randint(48, 64)) for _ in range(random.randint(0, 3))]
+    after_bodies = [_rand_b64(random.randint(48, 64)) for _ in range(random.randint(0, 3))]
+    pos = 0
+    return {
+        "token": body,
+        "token_start": pos,
+        "token_end": pos + len(body),
+        "line_content": body,
+        "context_before": [f"-----BEGIN {key_type}-----"] + prior_bodies,
+        "context_after": after_bodies + [f"-----END {key_type}-----"],
+        "file_path": random.choice([
+            "keys/private.pem", "auth/jwt_private.pem", "config/signing.key",
+            "certs/server.key", "secrets/tls.pem",
+        ]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_yaml_pipe_block_secret() -> Dict[str, Any]:
+    """Positive: a secret value under a YAML pipe or folded scalar."""
+    key_type = random.choice([
+        "RSA PRIVATE KEY", "EC PRIVATE KEY", "PRIVATE KEY",
+    ])
+    body = _rand_b64(random.randint(48, 64))
+    parent_key = random.choice(["private_key", "tls_key", "signing_key", "jwt_secret", "api_key"])
+    scalar_style = random.choice(["|", ">"])
+    indent = "  "
+    pos = len(indent)
+    return {
+        "token": body,
+        "token_start": pos,
+        "token_end": pos + len(body),
+        "line_content": f"{indent}{body}",
+        "context_before": [
+            random.choice(["---", "apiVersion: v1", "kind: Secret"]),
+            f"{parent_key}: {scalar_style}",
+            f"{indent}-----BEGIN {key_type}-----",
+        ],
+        "context_after": [
+            f"{indent}-----END {key_type}-----",
+            random.choice(["", "metadata:", "spec:"]),
+        ],
+        "file_path": random.choice([
+            "k8s/secret.yaml", "config/credentials.yaml", "helm/values.yaml",
+        ]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_k8s_secret_data_block() -> Dict[str, Any]:
+    """Positive: a base64-encoded secret value in a k8s Secret data block."""
+    import base64 as _b64
+    secret_vars = [
+        ("password", _rand_b64(16)),
+        ("api-key", _rand_b64(24)),
+        ("token", _rand_b64(20)),
+        ("db-password", _rand_b64(16)),
+        ("jwt-secret", _rand_b64(32)),
+    ]
+    key, plaintext = random.choice(secret_vars)
+    # k8s data values are base64 of base64 of the real secret (double-encoded in practice)
+    encoded = _b64.b64encode(plaintext.encode()).decode()
+    sibling_key, sibling_plain = random.choice(secret_vars)
+    sibling_encoded = _b64.b64encode(sibling_plain.encode()).decode()
+    line = f"  {key}: {encoded}"
+    pos = line.find(encoded)
+    return {
+        "token": encoded,
+        "token_start": pos,
+        "token_end": pos + len(encoded),
+        "line_content": line,
+        "context_before": [
+            "apiVersion: v1",
+            "kind: Secret",
+            "metadata:",
+            f"  name: {random.choice(['app-secrets', 'db-credentials', 'api-keys'])}",
+            "data:",
+            f"  {sibling_key}: {sibling_encoded}",
+        ],
+        "context_after": [
+            random.choice([
+                f"  {sibling_key}-backup: {sibling_encoded}",
+                "",
+            ]),
+        ],
+        "file_path": random.choice(["k8s/secret.yaml", "manifests/secrets.yaml", "deploy/secrets.yaml"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_env_file_multikey() -> Dict[str, Any]:
+    """Positive: one secret KEY=value line amid a block of .env key-value pairs.
+
+    Siblings include a mix of secrets and plausible non-secrets so the model
+    learns to pick individual secrets out of .env blocks rather than firing
+    on the whole block.
+    """
+    secret_vars = [
+        ("DATABASE_PASSWORD", _rand_b64(16)),
+        ("STRIPE_SECRET_KEY", f"sk_live_{_rand_b64(24)}"),
+        ("OPENAI_API_KEY", f"sk-{_rand_b64(32)}"),
+        ("JWT_SECRET", _rand_b64(32)),
+        ("API_TOKEN", _rand_b64(20)),
+        ("APIM_CLIENT_KEY", _rand_b64(24)),
+    ]
+    safe_lines = [
+        "LOG_LEVEL=info",
+        "PORT=8080",
+        "ENVIRONMENT=production",
+        "DATABASE_HOST=db.internal",
+        f"MAX_CONNECTIONS={random.randint(5, 100)}",
+        "REDIS_URL=redis://localhost:6379",
+        "DEBUG=false",
+    ]
+    var, value = random.choice(secret_vars)
+    line = f"{var}={value}"
+    pos = line.find(value)
+    n_before = random.randint(2, 4)
+    n_after = random.randint(1, 3)
+    ctx_before = random.sample(safe_lines, min(n_before, len(safe_lines)))
+    ctx_after = random.sample(safe_lines, min(n_after, len(safe_lines)))
+    return {
+        "token": value,
+        "token_start": pos,
+        "token_end": pos + len(value),
+        "line_content": line,
+        "context_before": ctx_before,
+        "context_after": ctx_after,
+        "file_path": random.choice([".env", ".env.production", "config/.env"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_json_array_of_keys_member() -> Dict[str, Any]:
+    """Positive: a secret string member in a JSON array of credentials.
+
+    Sibling members are also high-entropy so surrounding_secret_density fires
+    correctly and the model can't shortcut on 'only member in array'.
+    """
+    token = f"sk_{random.choice(['live', 'prod', 'key'])}_{_rand_b64(random.randint(24, 40))}"
+    sibling_a = f"sk_{random.choice(['live', 'prod', 'key'])}_{_rand_b64(random.randint(24, 40))}"
+    sibling_b = f"sk_{random.choice(['live', 'prod', 'key'])}_{_rand_b64(random.randint(24, 40))}"
+    line = f'  "{token}",'
+    pos = line.find(token)
+    array_key = random.choice(["api_keys", "credentials", "signing_keys", "tokens"])
+    return {
+        "token": token,
+        "token_start": pos,
+        "token_end": pos + len(token),
+        "line_content": line,
+        "context_before": [
+            f'"{array_key}": [',
+            f'  "{sibling_a}",',
+        ],
+        "context_after": [
+            f'  "{sibling_b}"',
+            "]",
+        ],
+        "file_path": random.choice(["config/keys.json", "secrets/api_keys.json", "auth/tokens.json"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
+def _pos_terraform_for_each_secret() -> Dict[str, Any]:
+    """Positive: a secret value inside a Terraform for_each map or locals block."""
+    secret_vars = [
+        ("api_key", f"sk_live_{_rand_b64(24)}"),
+        ("db_password", _rand_b64(16)),
+        ("signing_secret", _rand_b64(32)),
+        ("webhook_secret", f"whsec_{_rand_b64(24)}"),
+        ("oauth_secret", _rand_b64(20)),
+    ]
+    var, value = random.choice(secret_vars)
+    sibling_var, sibling_val = random.choice([x for x in secret_vars if x[0] != var])
+    indent = "  "
+    line = f'{indent}{var} = "{value}"'
+    pos = line.find(value)
+    block_type = random.choice(["locals", "for_each"])
+    if block_type == "locals":
+        ctx_before = [
+            "locals {",
+            '  secrets = {',
+            f'    {sibling_var} = "{sibling_val}"',
+        ]
+        ctx_after = [
+            "  }",
+            "}",
+            random.choice([
+                'resource "aws_secretsmanager_secret_version" "main" {',
+                'module "app" {',
+            ]),
+        ]
+    else:
+        resource = random.choice(["vault_generic_secret", "kubernetes_secret"])
+        ctx_before = [
+            f'resource "{resource}" "creds" {{',
+            '  for_each = {',
+            f'    {sibling_var} = "{sibling_val}"',
+        ]
+        ctx_after = [
+            "  }",
+            "  path = var.vault_path",
+            "}",
+        ]
+    return {
+        "token": value,
+        "token_start": pos,
+        "token_end": pos + len(value),
+        "line_content": line,
+        "context_before": ctx_before,
+        "context_after": ctx_after,
+        "file_path": random.choice(["main.tf", "secrets.tf", "modules/secrets/main.tf"]),
+        "label": 1,
+        "secret_type": "ENTROPY_CANDIDATE",
+    }
+
+
 _POSITIVE_GENERATORS = [
     _pos_hardcoded_api_key,
     _pos_connection_string,
@@ -1937,9 +2337,16 @@ _POSITIVE_GENERATORS = [
     _pos_commented_secret,
     _pos_devprod_swap,
     _pos_python_getenv_fallback_explicit,
-    # Phase 7.2 additions
+    # Phase 7.2 baseline + adversarial
     _pos_apim_style_var_names,
     _pos_value_shape_adversarial,
+    # Phase 7.2 multiline-context
+    _pos_pem_block_body,
+    _pos_yaml_pipe_block_secret,
+    _pos_k8s_secret_data_block,
+    _pos_env_file_multikey,
+    _pos_json_array_of_keys_member,
+    _pos_terraform_for_each_secret,
 ]
 
 _AUGMENT_POSITIVE_GENERATORS = [
@@ -1956,6 +2363,13 @@ _AUGMENT_POSITIVE_GENERATORS = [
     # Phase 7.2 additions
     _pos_apim_style_var_names,
     _pos_value_shape_adversarial,
+    # Phase 7.2 multiline-context generators
+    _pos_pem_block_body,
+    _pos_yaml_pipe_block_secret,
+    _pos_k8s_secret_data_block,
+    _pos_env_file_multikey,
+    _pos_json_array_of_keys_member,
+    _pos_terraform_for_each_secret,
 ]
 
 
