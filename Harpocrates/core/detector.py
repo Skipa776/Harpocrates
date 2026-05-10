@@ -70,13 +70,14 @@ def _calculate_entropy_confidence(entropy_val: Optional[float]) -> float:
 
 
 def _severity_from_entropy(inference: "CategoryInference") -> Severity:
-    """Severity for pre-ML entropy/ML_CANDIDATE findings (no ML involved yet).
+    """Severity for entropy-stage findings (before ML verification, if any).
 
-    HIGH is intentionally unreachable here — that requires ML confirmation via
-    _severity_from_classification(..., ml_confidence=...) in _apply_ml_verification.
-    Use this in _scan_line; use _severity_from_classification only after ML.
+    Delegates to _severity_from_classification without ml_confidence so strong
+    heuristic signals (e.g., PASSWORD 0.90, JWT 0.85) reach HIGH without
+    requiring ML confirmation.  ML verification can still upgrade MEDIUM→HIGH
+    via ml_confidence when the verifier runs.
     """
-    return Severity.MEDIUM if inference.confidence >= 0.70 else Severity.INFO
+    return _severity_from_classification(inference)
 
 
 def _severity_from_classification(
@@ -277,11 +278,38 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     return findings
 
 
+def _apply_block_comment_flag(
+    line_findings: List[Finding], in_block: bool
+) -> List[Finding]:
+    """Set in_comment=True on findings from inside an open /* */ block.
+
+    _scan_line only sets in_comment when the line STARTS with a comment prefix.
+    Interior lines of /* */ blocks don't start with a prefix, so this patch
+    propagates the open-block state tracked by the collector.
+    """
+    if not in_block or not line_findings:
+        return line_findings
+    import dataclasses
+    return [
+        dataclasses.replace(f, in_comment=True) if f.in_comment is None else f
+        for f in line_findings
+    ]
+
+
 def _collect_text_findings(text: str) -> List[Finding]:
     """Raw scan of text — returns all findings including evidence=ML."""
     findings: List[Finding] = []
+    in_block_comment = False
     for lineno, line in enumerate(text.splitlines(), start=1):
-        findings.extend(_scan_line(line, lineno, file=None))
+        stripped = line.strip()
+        # Track /* */ block state: a line can open and close on the same line
+        # (/* ... */), in which case we must NOT set in_block for the next line.
+        opens = stripped.count("/*")
+        closes = stripped.count("*/")
+        was_in_block = in_block_comment and not stripped.startswith("/*")
+        line_findings = _scan_line(line, lineno, file=None)
+        findings.extend(_apply_block_comment_flag(line_findings, was_in_block))
+        in_block_comment = (in_block_comment and closes == 0) or (opens > closes)
     return findings
 
 
@@ -289,8 +317,15 @@ def _collect_file_findings(path_obj: Path, max_bytes: Optional[int]) -> List[Fin
     """Raw scan of a file — returns all findings including evidence=ML."""
     file_name = str(path_obj)
     findings: List[Finding] = []
+    in_block_comment = False
     for lineno, line in iter_text_lines(path_obj, max_bytes=max_bytes):
-        findings.extend(_scan_line(line, lineno, file=file_name))
+        stripped = line.strip()
+        opens = stripped.count("/*")
+        closes = stripped.count("*/")
+        was_in_block = in_block_comment and not stripped.startswith("/*")
+        line_findings = _scan_line(line, lineno, file=file_name)
+        findings.extend(_apply_block_comment_flag(line_findings, was_in_block))
+        in_block_comment = (in_block_comment and closes == 0) or (opens > closes)
     return findings
 
 
@@ -348,19 +383,16 @@ def detect_file(
 # ---------------------------------------------------------------------------
 
 
+_REASON_CONF_RE = re.compile(r"confidence=(\d+\.\d+)")
+
+
 def _inference_from_finding(finding: Finding) -> "CategoryInference":
     """Reconstruct a CategoryInference from an existing finding's category fields.
 
-    Used in _apply_ml_verification to recompute severity with ml_confidence
-    without storing CategoryInference objects in a side-channel dict.
-
-    The original CategoryInference.confidence is not stored on Finding, so this
-    uses a fixed default: 0.75 for specific categories (MEDIUM band, eligible for
-    HIGH promotion when ml_confidence >= 0.85) and 0.30 for GENERIC_SECRET (INFO
-    floor — GENERIC_SECRET is never promoted to HIGH regardless of ML confidence).
-    This is a known approximation: a finding originally at cat_conf=0.55 (INFO)
-    is promoted to MEDIUM/HIGH post-ML via the 0.75 reconstruction default. That
-    behaviour is intentional — ML confirmation should elevate credible signals.
+    Used in _apply_ml_verification to recompute severity with ml_confidence.
+    Recovers the original cat_conf from the structured reason string so that
+    strong-signal findings (PASSWORD 0.90, JWT 0.85) are promoted to HIGH by
+    cat_conf alone without requiring ml_confidence >= 0.85.
     """
     from Harpocrates.core.classification import CategoryInference, ViolationCategory
 
@@ -369,9 +401,13 @@ def _inference_from_finding(finding: Finding) -> "CategoryInference":
             cat = ViolationCategory(finding.category)
         except ValueError:
             cat = ViolationCategory.GENERIC_SECRET
-        # Derive confidence from category tier: specific non-generic categories
-        # default to 0.75 (MEDIUM band), generic to 0.30.
+        # Try to recover the original cat_conf from the reason string.
+        # Format written by _reason(): "... confidence=0.90"
         cat_conf = 0.30 if cat == ViolationCategory.GENERIC_SECRET else 0.75
+        if finding.category_reason:
+            m = _REASON_CONF_RE.search(finding.category_reason)
+            if m:
+                cat_conf = float(m.group(1))
     else:
         cat = ViolationCategory.GENERIC_SECRET
         cat_conf = 0.30

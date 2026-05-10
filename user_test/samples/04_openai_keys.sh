@@ -12,10 +12,10 @@
 # the broader pattern sk- + 16+ chars has higher false-positive potential.
 
 # Current-format key — 48 alphanumeric chars after sk-
-export OPENAI_API_KEY="sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK"
+export OPENAI_API_KEY="sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL"
 
 # Legacy / short format with hyphens in body — NEW detection in v0.4
 export OPENAI_KEY_LEGACY="sk-RQMJj8ELDjv7TRcaB9xTestValue"
 
 # Project-scoped key
-export OPENAI_PROJ_KEY="sk-proj-xK9mN3pQ7rS2tV8wY1zA5T3cE0gH4jL6nP9qT3uW7"
+export OPENAI_PROJ_KEY="sk-proj-xK9mN3pQ7rS2tV8wY1zAT3cE0gH4jL6nP9qT3uW7yB"

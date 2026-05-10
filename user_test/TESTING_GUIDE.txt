@@ -46,11 +46,11 @@ WHAT TO VERIFY:
   harpocrates scan --ml user_test/samples/01_severity_calibration.env
 
   EXPECTED FINDINGS:
-    Line  3  APIM_CLIENT_KEY   → severity: MEDIUM, category: api_token
-    Line  4  APIM_SECRET_KEY   → severity: MEDIUM, category: api_token
-    Line  7  DB_PASSWORD       → severity: HIGH,   category: password
-    Line 10  jwt_bearer_token  → severity: HIGH,   category: jwt
-    Line 13  generic_val       → severity: INFO    (low-signal var name)
+    Line 14  APIM_CLIENT_KEY   → severity: MEDIUM, category: api_token
+    Line 15  APIM_SECRET_KEY   → severity: MEDIUM, category: api_token
+    Line 16  DB_PASSWORD       → severity: HIGH,   category: password
+    Line 17  JWT_BEARER_TOKEN  → severity: HIGH,   category: jwt
+    Line 18  GENERIC_VAL       → severity: INFO    (low-signal var name)
 
   VERIFY THAT:
     - None of the above appear as CRITICAL (that would be a regression)
@@ -79,12 +79,13 @@ WHAT TO VERIFY:
   harpocrates scan --json user_test/samples/02_violation_categories.js | python -m json.tool
 
   EXPECTED (each finding in the JSON array):
-    Line  3  DB_PASSWORD      category: "password"
-    Line  4  client_secret    category: "oauth_secret"
-    Line  5  hmac_signing_key category: "crypto_key"
-    Line  6  session_id_token category: "session_token"
-    Line  9  JWT value (eyJ)  category: "jwt"     (value-structure inference)
-    Line 12  GENERIC_SECRET   category: "generic_secret"
+    Line 16  DB_PASSWORD          category: "password"
+    Line 17  clientSecret         category: "oauth_secret"
+    Line 18  hmacSigningKey       category: "crypto_key"
+    Line 19  sessionIdToken       category: "session_token"
+    Line 22  token (eyJ...)       category: "jwt"     (value-structure: eyJ prefix)
+    Line 25  dbUrl                category: "connection_string"
+    Line 28  NONDESCRIPT_VALUE    category: "generic_secret"
 
   VERIFY THAT:
     - category field is present on every finding (not null)
@@ -120,14 +121,14 @@ WHAT TO VERIFY:
   harpocrates scan user_test/samples/03_commented_secrets.go
 
   EXPECTED FINDINGS:
-    Line  4  commented Python  → found (in_comment: true in --json output)
-    Line  5  commented JS //   → found (in_comment: true)
-    Line  9  commented SQL --  → found (in_comment: true)
+    Line 11  commented // DB_PASSWORD  → found (in_comment: true in --json output)
+    Line 12  commented // apiKey       → found (in_comment: true)
+    Line 15  block /* clientSecret */  → found (in_comment: true)
 
   VERIFY THAT:
     - Findings ARE produced for commented lines (pre-v0.4 these were missed)
     - in_comment: true appears in --json output
-    - Line 13 (pure prose comment, no = or ") produces NO finding
+    - Line 20 (pure prose comment, no = or ") produces NO finding
 
 
 =======================================================================
@@ -149,9 +150,9 @@ WHAT TO VERIFY:
   harpocrates scan user_test/samples/04_openai_keys.sh
 
   EXPECTED FINDINGS:
-    Line  3  current-format key  → severity: CRITICAL, category: openai_key
-    Line  6  legacy/short key    → severity: HIGH,     category: openai_key
-    Line  9  proj-scoped key     → severity: CRITICAL, category: openai_key
+    Line 15  current-format key  → severity: CRITICAL, category: openai_key
+    Line 18  legacy/short key    → severity: HIGH,     category: openai_key
+    Line 21  proj-scoped key     → severity: CRITICAL, category: openai_key
 
   VERIFY THAT:
     - The legacy key on line 6 IS detected (it was missed before v0.4)
