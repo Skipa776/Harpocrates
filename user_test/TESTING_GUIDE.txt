@@ -23,6 +23,7 @@ Sample files and their languages:
   04_openai_keys.sh               — Bash / shell script
   05_false_positive_suppression.yml — Kubernetes / Helm YAML
   06_explain_demo.java            — Java / Spring Boot
+  07_regex_priority.py            — Python (regex-tier priority demo)
 
 
 =======================================================================
@@ -298,6 +299,78 @@ WHAT TO VERIFY:
     - Each finding has an "explanation" field when include_contributions=true
     - Server does not crash on the request
     - Without include_contributions (or false), "explanation" is absent
+
+
+=======================================================================
+FEATURE 8 — REGEX-TIER PRIORITY (CRITICAL / HIGH before ML)
+File: samples/07_regex_priority.py  (Python)
+=======================================================================
+WHAT THIS DEMONSTRATES:
+  Harpocrates runs three detection passes in priority order:
+    1. CRITICAL_SIGNATURES regex  — fires first, no ML needed
+    2. HIGH_SIGNATURES regex      — fires second, no ML needed
+    3. Shannon entropy + XGBoost  — fires last, only for unknowns
+
+  When a line matches a regex pattern the finding carries:
+    evidence: "regex"        (never "entropy" or "ml")
+    severity: "critical"     for CRITICAL_SIGNATURES
+           or "high"         for HIGH_SIGNATURES
+  The ML model is NOT involved at all for these lines.
+
+  This file covers all 14 built-in patterns across 9 CRITICAL and 5 HIGH
+  signatures. No --ml flag needed — regex runs on every scan unconditionally.
+
+WHAT TO VERIFY:
+  harpocrates scan user_test/samples/07_regex_priority.py
+
+  EXPECTED FINDINGS — all with evidence: "regex":
+    AWS_ACCESS_KEY_ID   → CRITICAL, category: aws_key
+    GITHUB_TOKEN        → CRITICAL, category: github_token
+    SLACK_BOT_TOKEN     → CRITICAL, category: slack_token
+    STRIPE_LIVE_KEY     → CRITICAL, category: stripe_key
+    OPENAI_STRICT_KEY   → CRITICAL, category: openai_key
+    ANTHROPIC_API_KEY   → CRITICAL, category: anthropic_key
+    GCP_API_KEY         → CRITICAL, category: gcp_key
+    NPM_TOKEN           → CRITICAL, category: npm_token
+    PYPI_API_TOKEN      → CRITICAL, category: pypi_token
+    private_key_pem     → HIGH,     category: private_key
+    SENDGRID_API_KEY    → HIGH,     category: sendgrid_key
+    TWILIO_API_KEY      → HIGH,     category: twilio_key
+    DATABRICKS_TOKEN    → HIGH,     category: databricks_token
+    VAULT_SERVICE_TOKEN → HIGH,     category: vault_token
+
+  VERIFY THAT (machine-readable check):
+    harpocrates scan --json user_test/samples/07_regex_priority.py \
+      | python -c "
+    import json, sys
+    data = json.load(sys.stdin)
+    findings = data['findings']
+    bad = [f for f in findings if f['evidence'] != 'regex']
+    if bad:
+        for f in bad:
+            print(f'FAIL: {f[\"snippet\"][:60]} has evidence={f[\"evidence\"]}')
+    else:
+        print(f'OK: all {len(findings)} findings have evidence=regex')
+    critical = sum(1 for f in findings if f['severity'] == 'critical')
+    high     = sum(1 for f in findings if f['severity'] == 'high')
+    print(f'  CRITICAL: {critical} (expected 9)')
+    print(f'  HIGH:     {high} (expected 6)')
+    "
+
+  VERIFY THAT:
+    - ALL findings have evidence: "regex" (none should be "entropy" or "ml")
+    - 9 findings are CRITICAL (one per CRITICAL signature)
+    - 6 findings are HIGH (5 HIGH signatures + 1 overlap — see note below)
+    - No --ml flag was needed to produce these findings
+
+  NOTE ON FINDING COUNT:
+    The Anthropic key (sk-ant-api03-...) produces TWO findings:
+      1. ANTHROPIC_API_KEY  → CRITICAL (precise Anthropic-format match)
+      2. OPENAI_API_KEY_LEGACY → HIGH  (sk- prefix is shared; legacy pattern
+         is intentionally broad to catch historical OpenAI keys with hyphens)
+    Both detections are correct behavior. When two patterns overlap on one
+    line, both findings are emitted independently. The CRITICAL finding is
+    what matters for triage; the HIGH is additional signal, not noise.
 
 
 =======================================================================
