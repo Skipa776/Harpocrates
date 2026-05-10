@@ -41,7 +41,7 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -363,6 +363,229 @@ def _build_negative_prompt() -> Tuple[str, str]:
         f"The file should be 30+ lines with realistic structure. "
         f"Do NOT include any real API keys, passwords, private keys, or secrets. "
         f"All high-entropy strings must be derived/public/mock values. "
+        f"Output ONLY the code."
+    )
+    return prompt, file_path
+
+
+# ---------------------------------------------------------------------------
+# Holdout Prompt Matrix — provider-spec-grounded, format-validated positives
+#
+# Each entry specifies the exact format constraint from regex_patterns.py so
+# the LLM generates tokens that MATCH the provider's pattern.  A canonical
+# example is supplied so the LLM understands the format but is instructed to
+# produce a DIFFERENT value.
+#
+# Records generated from these prompts go to --holdout-output exclusively and
+# are NEVER mixed into the training corpus.
+# ---------------------------------------------------------------------------
+
+_SYSTEM_MESSAGE_HOLDOUT = (
+    "You are generating synthetic test data for a secret-detection evaluation suite. "
+    "Your job is to embed a fake but format-faithful credential into a realistic code "
+    "snippet. The credential must match the exact format described — correct prefix, "
+    "correct length, correct character set. Never copy the example value verbatim; "
+    "always generate a structurally equivalent but distinct value. "
+    "Output ONLY the code, no explanation."
+)
+
+# Provider specs derived directly from CRITICAL_SIGNATURES + HIGH_SIGNATURES
+# in Harpocrates/detectors/regex_patterns.py.
+_HOLDOUT_PROVIDERS: List[Dict[str, Any]] = [
+    {
+        "name": "AWS_ACCESS_KEY_ID",
+        "description": "AWS IAM Access Key ID",
+        "format": (
+            "starts with one of: AKIA, A3T, AGPA, AIDA, AROA, AIPA, ANPA, ANVA, ASIA "
+            "followed by exactly 16 uppercase letters and digits (total 20 chars)"
+        ),
+        "example": "AKIAIOSFODNN7EXAMPLE",
+        "variable_names": ["aws_access_key_id", "AWS_ACCESS_KEY_ID", "access_key", "aws_key"],
+        "file_paths": ["config/aws.py", ".env", "infrastructure/aws.tf", "src/aws/client.py"],
+    },
+    {
+        "name": "GITHUB_PAT",
+        "description": "GitHub Personal Access Token (classic)",
+        "format": "starts with ghp_ followed by exactly 36 alphanumeric characters (total 40 chars)",
+        "example": "(ghp_ followed by 36 alphanumeric chars)",
+        "variable_names": ["github_token", "GITHUB_TOKEN", "gh_pat", "github_pat"],
+        "file_paths": ["scripts/deploy.py", ".env", "ci/release.sh", "config/vcs.py"],
+    },
+    {
+        "name": "GITHUB_PAT_FINE_GRAINED",
+        "description": "GitHub Fine-Grained Personal Access Token",
+        "format": (
+            "starts with github_pat_ followed by 22 alphanumeric chars, an underscore, "
+            "then 59 alphanumeric chars"
+        ),
+        "example": "github_pat_" + "A" * 22 + "_" + "B" * 59,
+        "variable_names": ["github_token", "GH_TOKEN", "github_fine_grained_token"],
+        "file_paths": [".env", "scripts/release.py", "ci/config.yml"],
+    },
+    {
+        "name": "SLACK_TOKEN",
+        "description": "Slack bot/app token",
+        "format": (
+            "starts with xoxb- or xoxp- or xoxo- or xoxa- or xoxr-, "
+            "followed by 10-13 digits, a hyphen, then 24-34 alphanumeric chars"
+        ),
+        "example": "(xoxb- followed by 10-13 digits, hyphen, 24-34 alphanumeric chars)",
+        "variable_names": ["slack_token", "SLACK_BOT_TOKEN", "slack_api_token"],
+        "file_paths": ["integrations/slack.py", ".env", "bots/notifier.py"],
+    },
+    {
+        "name": "STRIPE_KEY_LIVE",
+        "description": "Stripe live secret key",
+        "format": "starts with sk_live_ followed by 24-99 alphanumeric characters",
+        "example": "(sk_live_ followed by 24-99 alphanumeric chars)",
+        "variable_names": ["stripe_secret_key", "STRIPE_SECRET_KEY", "stripe_key"],
+        "file_paths": ["payments/stripe.py", ".env", "billing/checkout.py"],
+    },
+    {
+        "name": "STRIPE_KEY_TEST",
+        "description": "Stripe test secret key",
+        "format": "starts with sk_test_ followed by 24-99 alphanumeric characters",
+        "example": "(sk_test_ followed by 24-99 alphanumeric chars)",
+        "variable_names": ["stripe_secret_key", "STRIPE_TEST_KEY", "stripe_key"],
+        "file_paths": ["tests/test_payments.py", ".env.test", "billing/test_checkout.py"],
+    },
+    {
+        "name": "OPENAI_API_KEY",
+        "description": "OpenAI API key (current format)",
+        "format": "starts with sk- followed by exactly 48 alphanumeric characters (total 51 chars)",
+        "example": "(sk- followed by exactly 48 alphanumeric chars)",
+        "variable_names": ["openai_api_key", "OPENAI_API_KEY", "openai_key"],
+        "file_paths": ["ai/client.py", ".env", "llm/openai_wrapper.py"],
+    },
+    {
+        "name": "OPENAI_API_KEY_LEGACY",
+        "description": "OpenAI API key (legacy/short format with hyphens in body)",
+        "format": "starts with sk- followed by 16+ alphanumeric chars, underscores, or hyphens",
+        "example": "(sk- followed by 16+ alphanumeric chars, underscores, or hyphens)",
+        "variable_names": ["openai_api_key", "OPENAI_KEY", "openai_secret"],
+        "file_paths": ["ai/client.py", ".env", "config/ai_settings.py"],
+    },
+    {
+        "name": "ANTHROPIC_API_KEY",
+        "description": "Anthropic Claude API key",
+        "format": "starts with sk-ant-api03- followed by 93+ alphanumeric chars, hyphens, or underscores",
+        "example": "sk-ant-api03-" + "a" * 93,
+        "variable_names": ["anthropic_api_key", "ANTHROPIC_API_KEY", "claude_api_key"],
+        "file_paths": ["ai/claude.py", ".env", "llm/anthropic_client.py"],
+    },
+    {
+        "name": "GCP_API_KEY",
+        "description": "Google Cloud Platform API key",
+        "format": "starts with AIza followed by exactly 35 alphanumeric chars, hyphens, or underscores",
+        "example": "(AIza followed by exactly 35 alphanumeric, hyphen, or underscore chars)",
+        "variable_names": ["gcp_api_key", "GOOGLE_API_KEY", "google_cloud_key"],
+        "file_paths": ["integrations/google.py", ".env", "maps/client.py"],
+    },
+    {
+        "name": "NPM_TOKEN",
+        "description": "NPM automation/publish token",
+        "format": "starts with npm_ followed by exactly 36 alphanumeric characters",
+        "example": "(npm_ followed by exactly 36 alphanumeric chars)",
+        "variable_names": ["NPM_TOKEN", "npm_auth_token", "npm_publish_token"],
+        "file_paths": [".env", ".npmrc", "scripts/publish.sh", "ci/release.yml"],
+    },
+    {
+        "name": "PYPI_TOKEN",
+        "description": "PyPI API token",
+        "format": "starts with pypi- followed by 50+ alphanumeric chars, hyphens, or underscores",
+        "example": "(pypi- followed by 50+ alphanumeric, hyphen, or underscore chars)",
+        "variable_names": ["PYPI_API_TOKEN", "pypi_token", "twine_password"],
+        "file_paths": [".env", "scripts/release.py", ".pypirc", "ci/publish.sh"],
+    },
+    {
+        "name": "SENDGRID_API_KEY",
+        "description": "SendGrid API key",
+        "format": "starts with SG. followed by 22 alphanumeric/hyphen/underscore chars, a dot, then 43 more",
+        "example": "(SG. followed by 22 alphanumeric/hyphen/underscore chars, dot, 43 more)",
+        "variable_names": ["SENDGRID_API_KEY", "sendgrid_key", "email_api_key"],
+        "file_paths": ["email/sendgrid.py", ".env", "notifications/email.py"],
+    },
+    {
+        "name": "TWILIO_API_KEY",
+        "description": "Twilio API Key SID",
+        "format": "starts with SK followed by exactly 32 hex digits (lowercase or uppercase)",
+        "example": "(SK followed by exactly 32 hex digits)",
+        "variable_names": ["TWILIO_API_KEY", "twilio_key_sid", "twilio_auth"],
+        "file_paths": ["sms/twilio.py", ".env", "voice/client.py"],
+    },
+    {
+        "name": "DATABRICKS_TOKEN",
+        "description": "Databricks personal access token",
+        "format": "starts with dapi followed by exactly 32 lowercase hex characters",
+        "example": "(dapi followed by exactly 32 lowercase hex chars)",
+        "variable_names": ["DATABRICKS_TOKEN", "databricks_pat", "databricks_access_token"],
+        "file_paths": ["data/databricks.py", ".env", "pipelines/spark.py"],
+    },
+    {
+        "name": "HASHICORP_VAULT_TOKEN",
+        "description": "HashiCorp Vault service token",
+        "format": "starts with hvs. followed by 90+ alphanumeric chars, hyphens, or underscores",
+        "example": "hvs." + "a" * 90,
+        "variable_names": ["VAULT_TOKEN", "vault_service_token", "hcp_vault_token"],
+        "file_paths": ["secrets/vault.py", ".env", "infra/vault_client.py"],
+    },
+    {
+        "name": "PRIVATE_KEY_RSA",
+        "description": "RSA private key PEM block",
+        "format": (
+            "a complete -----BEGIN RSA PRIVATE KEY----- ... -----END RSA PRIVATE KEY----- block "
+            "with realistic base64 body lines (64 chars each)"
+        ),
+        "example": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+        "variable_names": ["private_key", "rsa_private_key", "signing_key"],
+        "file_paths": ["certs/server.key", "config/keys.py", "auth/rsa_key.py"],
+    },
+    {
+        "name": "SLACK_WEBHOOK",
+        "description": "Slack incoming webhook URL",
+        "format": (
+            "https://hooks.slack.com/services/T followed by 8-10 alphanumeric/underscore chars, "
+            "/B followed by 8-10 alphanumeric/underscore chars, "
+            "/ followed by 24 alphanumeric/underscore chars"
+        ),
+        "example": "(https://hooks.slack.com/services/T{8-10chars}/B{8-10chars}/{24chars})",
+        "variable_names": ["SLACK_WEBHOOK_URL", "slack_webhook", "slack_notification_url"],
+        "file_paths": ["notifications/slack.py", ".env", "alerts/webhook.py"],
+    },
+    {
+        "name": "DISCORD_WEBHOOK",
+        "description": "Discord webhook URL",
+        "format": (
+            "https://discord.com/api/webhooks/ followed by 17-19 digits, "
+            "/ followed by exactly 68 alphanumeric chars, hyphens, or underscores"
+        ),
+        "example": "(https://discord.com/api/webhooks/{17-19 digits}/{68 alphanumeric/hyphen/underscore chars})",
+        "variable_names": ["DISCORD_WEBHOOK_URL", "discord_webhook", "discord_notification"],
+        "file_paths": ["bots/discord.py", ".env", "notifications/discord.py"],
+    },
+]
+
+
+def _build_holdout_prompt() -> Tuple[str, str]:
+    """Build a holdout prompt grounded in a specific provider's format spec.
+
+    The LLM receives the exact format constraint and a canonical example so it
+    understands the required structure.  It is instructed to generate a DIFFERENT
+    value — not to copy the example verbatim.
+    """
+    provider = random.choice(_HOLDOUT_PROVIDERS)
+    lang = random.choice(_POS_LANGUAGES)
+    var_name = random.choice(provider["variable_names"])
+    file_path = random.choice(provider.get("file_paths", _POS_FILE_PATHS.get(lang, ["config.py"])))
+
+    prompt = (
+        f"Write a {lang} code snippet (15-30 lines) that hardcodes a fake {provider['description']}.\n\n"
+        f"Format requirement: the credential value MUST {provider['format']}.\n\n"
+        f"Example of a correctly-formatted value (do NOT copy this exact string, "
+        f"generate a structurally equivalent but different one):\n  {provider['example']}\n\n"
+        f"Use a realistic variable name such as {var_name!r}. "
+        f"Include realistic surrounding code (imports, usage, error handling). "
+        f"The credential should appear as a hardcoded literal (not env var). "
         f"Output ONLY the code."
     )
     return prompt, file_path
@@ -2483,8 +2706,18 @@ async def generate_llm_samples_async(
     max_concurrent: int,
     label: int,
     progress_prefix: str = "",
+    prompt_builder: Optional[Callable[[], Tuple[str, str]]] = None,
+    system_message: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Generate samples via LLM with async batching."""
+    """Generate samples via LLM with async batching.
+
+    Args:
+        prompt_builder: Override the default prompt builder.  Receives no
+            arguments, returns (prompt_text, file_path).  If None, defaults
+            to _build_positive_prompt / _build_negative_prompt based on label.
+        system_message: Override the system message sent to the LLM.  If None,
+            defaults based on label.
+    """
     import aiohttp
 
     try:
@@ -2509,8 +2742,12 @@ async def generate_llm_samples_async(
     attempts = 0
     max_attempts = count * 4
 
-    build_prompt = _build_positive_prompt if label == 1 else _build_negative_prompt
-    system_msg = _SYSTEM_MESSAGE if label == 1 else _SYSTEM_MESSAGE_NEGATIVE
+    build_prompt = prompt_builder if prompt_builder is not None else (
+        _build_positive_prompt if label == 1 else _build_negative_prompt
+    )
+    system_msg = system_message if system_message is not None else (
+        _SYSTEM_MESSAGE if label == 1 else _SYSTEM_MESSAGE_NEGATIVE
+    )
 
     label_name = "pos" if label == 1 else "neg"
     pbar = _make_pbar(total=count, desc=f"{progress_prefix}LLM ({label_name})")
@@ -2612,6 +2849,21 @@ def main() -> None:
     # Legacy alias for backward compatibility
     parser.add_argument("--ollama-url", type=str, default=None,
                         help=argparse.SUPPRESS)
+    # Holdout generation — written to a separate file, never mixed into --output
+    parser.add_argument("--holdout-output", type=Path, default=None,
+                        dest="holdout_output",
+                        help=(
+                            "Path to write holdout fixture records (JSONL). "
+                            "Records use provider-spec-grounded prompts and are "
+                            "NEVER written to --output. Requires LLM (ignored with --no-llm)."
+                        ))
+    parser.add_argument("--holdout-count", type=int, default=300,
+                        dest="holdout_count",
+                        help=(
+                            "Number of holdout LLM calls to attempt. LLM yield is "
+                            "typically 60-80%%, so 300 calls ≈ 180-240 records. "
+                            "(default: 300)"
+                        ))
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -2730,6 +2982,53 @@ def main() -> None:
     print(f"\nWrote {len(all_samples)} records → {args.output}")
     print(f"  positive (secret): {pos_n}")
     print(f"  negative (safe):   {neg_n}")
+
+    # ---------------------------------------------------------------------------
+    # Holdout generation — provider-spec-grounded positives for recall gate
+    #
+    # These records are NEVER added to all_samples and are written to a separate
+    # file.  The structural separation is enforced below: holdout_samples is a
+    # distinct list that is never merged with all_samples.
+    # ---------------------------------------------------------------------------
+    if args.holdout_output and not args.no_llm:
+        print(f"\n[HOLDOUT] Generating ≤{args.holdout_count} holdout positives via LLM "
+              f"({args.model} @ {args.lm_studio_url}, {len(_HOLDOUT_PROVIDERS)} provider specs)...")
+
+        async def _run_holdout() -> List[Dict[str, Any]]:
+            return await generate_llm_samples_async(
+                args.holdout_count,
+                args.model,
+                args.lm_studio_url,
+                args.max_concurrent,
+                label=1,
+                progress_prefix="H ",
+                prompt_builder=_build_holdout_prompt,
+                system_message=_SYSTEM_MESSAGE_HOLDOUT,
+            )
+
+        holdout_samples = asyncio.run(_run_holdout())
+        for s in holdout_samples:
+            s["source"] = "llm_holdout"
+
+        if not args.no_features:
+            print(f"\n[F] Extracting features from {len(holdout_samples)} holdout records...")
+            holdout_samples = [_attach_features(s) for s in holdout_samples]
+
+        args.holdout_output.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.holdout_output, "w") as f:
+            for record in holdout_samples:
+                f.write(json.dumps(record) + "\n")
+
+        h_pos = sum(1 for r in holdout_samples if r.get("label") == 1)
+        print(f"\nWrote {len(holdout_samples)} holdout records → {args.holdout_output}")
+        print(f"  positive (format-validated against provider specs): {h_pos}")
+        print(f"  Provider specs used: {len(_HOLDOUT_PROVIDERS)}")
+        print(f"  These records are NOT in {args.output} (training corpus)")
+    elif args.holdout_output and args.no_llm:
+        print(
+            "[HOLDOUT] Skipped — holdout generation requires LLM (--no-llm was set).",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":
