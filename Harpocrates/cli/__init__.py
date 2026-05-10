@@ -110,6 +110,14 @@ def scan(
         ),
         callback=_fail_on_callback,
     ),
+    explain: bool = typer.Option(
+        False, "--explain",
+        help=(
+            "Emit JSON with per-feature ML contribution scores (TreeSHAP). "
+            "Implies --ml. Loads xgboost lazily — cost paid only when set. "
+            "Requires pip install harpocrates[ml]."
+        ),
+    ),
 ) -> None:
     """
     Scan a file or directory for secrets.
@@ -145,10 +153,17 @@ def scan(
 
         # Report findings but never return a non-zero exit code
         harpocrates scan ./my_project --fail-on none
+
+        # XAI: emit JSON with per-feature SHAP contributions (implies --ml)
+        harpocrates scan ./my_project --explain | jq '.findings[0].explanation.top_positive'
     """
     # Zero-file early return — pre-commit passes no files when nothing is staged.
     if not paths:
         raise typer.Exit(code=0)
+
+    # --explain implies --ml (explanations require the ML stage).
+    if explain:
+        use_ml = True
 
     if not (0.0 <= ml_threshold <= 1.0):
         error_console.print(
@@ -260,6 +275,29 @@ def scan(
     exit_on_findings = (
         1 if _should_fail(result.findings, fail_on_severity) else 0
     )
+
+    if explain:
+        # Lazy import — xgboost is never loaded on the default scan path.
+        try:
+            from Harpocrates.ml.context import extract_context_from_finding
+            from Harpocrates.ml.explain import explain_finding
+        except ImportError:
+            error_console.print(
+                "[red]✗[/red] --explain requires XGBoost. "
+                "Install with: pip install harpocrates[ml]"
+            )
+            raise typer.Exit(code=2)
+
+        payload = []
+        for f in result.findings:
+            ctx = extract_context_from_finding(f)
+            explanation = explain_finding(f, ctx)
+            payload.append({
+                "finding": f.to_json_dict(include_token=show_secrets),
+                "explanation": explanation.to_dict() if explanation else None,
+            })
+        print(json.dumps({"findings": payload}, indent=2))
+        raise typer.Exit(code=exit_on_findings)
 
     if json_output:
         print(json.dumps(result.to_dict(include_token=show_secrets), indent=2))

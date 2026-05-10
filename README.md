@@ -244,10 +244,58 @@ harpocrates-mcp                  # listens on stdio, speaks JSON-RPC
 
 | Tool | Arguments | Returns |
 |------|-----------|---------|
-| `scan_text` | `text: str`, `include_token: bool = False` | List of finding dicts |
-| `scan_file` | `path: str`, `include_token: bool = False`, `max_bytes: int\|None = None` | List of finding dicts |
+| `scan_text` | `text: str`, `include_token: bool = False`, `include_contributions: bool = False` | List of finding dicts |
+| `scan_file` | `path: str`, `include_token: bool = False`, `max_bytes: int\|None = None`, `include_contributions: bool = False` | List of finding dicts |
 
-Tokens are redacted by default (`include_token=False`). The MCP process has the same filesystem read scope as the user who launched it.
+Tokens are redacted by default (`include_token=False`). Pass `include_contributions=True` to receive TreeSHAP explanations (requires `pip install harpocrates[ml]`). The MCP process has the same filesystem read scope as the user who launched it.
+
+---
+
+## Explainability
+
+Harpocrates ships opt-in TreeSHAP explanations for ML-stage findings via `--explain`. The default scan path is unchanged — XGBoost is not imported unless `--explain` is passed.
+
+**Install:**
+```bash
+pip install "harpocrates[ml]"
+```
+
+**CLI:**
+```bash
+# Emit JSON with per-feature SHAP contributions (implies --ml)
+harpocrates scan ./my_project --explain
+
+# Inspect the top features driving the first finding
+harpocrates scan ./my_project --explain | jq '.findings[0].explanation.top_positive'
+```
+
+**Output shape:**
+```json
+{
+  "findings": [
+    {
+      "finding": { "type": "ML_CANDIDATE", "severity": "high", "category": "api_token", ... },
+      "explanation": {
+        "finding_id": "a1b2c3d4e5f6a7b8",
+        "category": "api_token",
+        "base_log_odds": -1.4,
+        "raw_log_odds": 2.8,
+        "predicted_probability": 0.943,
+        "top_positive": [
+          { "name": "var_ngram_secret_score", "index": 12, "value": 0.873, "contribution": 1.85, "direction": "positive" },
+          { "name": "token_entropy",          "index": 3,  "value": null,  "contribution": 1.10, "direction": "positive" }
+        ],
+        "top_negative": [ ... ],
+        "contributions": [ ... ]
+      }
+    }
+  ]
+}
+```
+
+`explanation` is `null` for regex-tier findings (they have no model decision to explain). Token-derived feature values (`token_entropy`, `token_length`, etc.) are suppressed to `null` in the output to prevent token reconstruction.
+
+**MCP:** pass `include_contributions=true` to `scan_text` or `scan_file` to receive explanations inline.
 
 ---
 

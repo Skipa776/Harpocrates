@@ -77,10 +77,18 @@ def test_default_scan_path_does_not_import_xai_runtime() -> None:
 
 def _forbidden_imports_in_file(path: Path) -> list[str]:
     """
-    Return list of forbidden import lines found in `path`.
+    Return list of forbidden module-level import lines found in `path`.
 
-    Ignores imports inside `if TYPE_CHECKING:` blocks — those are
-    type-annotation only and never executed at runtime.
+    Skips:
+    - `if TYPE_CHECKING:` blocks (type-annotation only, never executed at runtime).
+    - Function / async-function bodies (imports inside functions are lazy by
+      definition — they execute only when the function is called, not when the
+      module is imported). This allows opt-in paths like `include_contributions=True`
+      or `--explain` to import XAI deps inside function bodies without tripping the
+      hot-path guard.
+
+    Uses a recursive DFS so subtrees can be truly skipped (ast.walk cannot skip
+    subtrees — continue only advances the flat iterator, not the traversal).
     """
     src = path.read_text(encoding="utf-8")
     try:
@@ -90,39 +98,46 @@ def _forbidden_imports_in_file(path: Path) -> list[str]:
 
     violations: list[str] = []
 
-    for node in ast.walk(tree):
-        # Skip the body of `if TYPE_CHECKING:` guards.
-        if isinstance(node, ast.If):
-            test = node.test
-            is_type_checking = (
-                (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING")
-                or (
-                    isinstance(test, ast.Attribute)
-                    and test.attr == "TYPE_CHECKING"
-                )
-            )
-            if is_type_checking:
-                continue  # don't descend into TYPE_CHECKING blocks
+    def _visit(nodes: list[ast.AST]) -> None:
+        for node in nodes:
+            # Skip function/method bodies — imports inside are lazy (runtime-only).
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
 
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                root = alias.name.split(".")[0]
-                full = alias.name
-                if root in _FORBIDDEN_MODULES or full in _FORBIDDEN_MODULES:
+            # Skip `if TYPE_CHECKING:` blocks — type-annotation only.
+            if isinstance(node, ast.If):
+                test = node.test
+                is_type_checking = (
+                    (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING")
+                    or (
+                        isinstance(test, ast.Attribute)
+                        and test.attr == "TYPE_CHECKING"
+                    )
+                )
+                if is_type_checking:
+                    continue
+
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    full = alias.name
+                    if root in _FORBIDDEN_MODULES or full in _FORBIDDEN_MODULES:
+                        violations.append(
+                            f"{path.relative_to(_REPO_ROOT)}:{node.lineno}: "
+                            f"import {alias.name}"
+                        )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                root = module.split(".")[0]
+                if root in _FORBIDDEN_MODULES or module in _FORBIDDEN_MODULES:
                     violations.append(
                         f"{path.relative_to(_REPO_ROOT)}:{node.lineno}: "
-                        f"import {alias.name}"
+                        f"from {module} import ..."
                     )
 
-        elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            root = module.split(".")[0]
-            if root in _FORBIDDEN_MODULES or module in _FORBIDDEN_MODULES:
-                violations.append(
-                    f"{path.relative_to(_REPO_ROOT)}:{node.lineno}: "
-                    f"from {module} import ..."
-                )
+            _visit(list(ast.iter_child_nodes(node)))
 
+    _visit(list(ast.iter_child_nodes(tree)))
     return violations
 
 

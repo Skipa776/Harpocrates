@@ -52,7 +52,11 @@ def _check_path(path: Path) -> None:
 
 
 @mcp.tool()
-def scan_text(text: str, include_token: bool = False) -> List[Dict[str, Any]]:
+def scan_text(
+    text: str,
+    include_token: bool = False,
+    include_contributions: bool = False,
+) -> List[Dict[str, Any]]:
     """
     Scan a text blob for secrets using regex + entropy detection.
 
@@ -60,17 +64,45 @@ def scan_text(text: str, include_token: bool = False) -> List[Dict[str, Any]]:
     field contains the raw source line and may still include the matched secret.
     Do not log or store findings in contexts where the snippet must be redacted.
 
+    Each finding includes:
+      - `category`: violation classification (e.g., "password", "api_token",
+        "connection_string", "jwt", "private_key", "generic_secret"). Use this
+        field to decide remediation (rotate password vs revoke token vs
+        regenerate keypair).
+      - `category_reason`: human-readable explanation of how the category
+        was inferred. Surface this in agent-facing UIs.
+
     Args:
         text: The text content to scan.
         include_token: If True, include the raw matched token in each finding
                        (default False — token field is redacted).
+        include_contributions: If True, each finding gains an `explanation` key
+                               with TreeSHAP per-feature contributions. Loads
+                               xgboost lazily — only pay the cost when needed.
+                               Requires pip install harpocrates[ml].
 
     Returns:
         A list of finding dicts with type, severity, evidence, file, line,
-        snippet, entropy, confidence. Token is included only if include_token=True.
+        snippet, entropy, confidence, category, category_reason.
+        Token is included only if include_token=True.
+        Explanation is included only if include_contributions=True.
     """
     findings: List[Finding] = detect_text(text)
-    return [f.to_json_dict(include_token=include_token) for f in findings]
+    if not include_contributions:
+        return [f.to_json_dict(include_token=include_token) for f in findings]
+
+    # Lazy import — xgboost never loaded on the default scan path.
+    from Harpocrates.ml.context import extract_context_from_finding
+    from Harpocrates.ml.explain import explain_finding
+
+    result = []
+    for f in findings:
+        ctx = extract_context_from_finding(f, full_content=text)
+        explanation = explain_finding(f, ctx)
+        d = f.to_json_dict(include_token=include_token)
+        d["explanation"] = explanation.to_dict() if explanation else None
+        result.append(d)
+    return result
 
 
 @mcp.tool()
@@ -78,6 +110,7 @@ def scan_file(
     path: str,
     include_token: bool = False,
     max_bytes: Optional[int] = None,
+    include_contributions: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Scan a file on disk for secrets using regex + entropy detection.
@@ -92,19 +125,40 @@ def scan_file(
     Note: `include_token=False` redacts the `token` field only. The `snippet`
     field contains the raw source line and may still include the matched secret.
 
+    Each finding includes `category` and `category_reason` fields — see
+    scan_text docstring for details.
+
     Args:
         path: Absolute path to the file to scan.
         include_token: If True, include the raw matched token (default False).
         max_bytes: Cap on bytes read. Capped at 10 MB regardless of this value.
+        include_contributions: If True, each finding gains an `explanation` key
+                               with TreeSHAP per-feature contributions. Loads
+                               xgboost lazily. Requires pip install harpocrates[ml].
 
     Returns:
         List of finding dicts. Empty list if the path does not exist or is binary.
+        Explanation is included only if include_contributions=True.
     """
     resolved = Path(path)
     _check_path(resolved)
     cap = min(max_bytes, _MAX_SCAN_BYTES) if max_bytes is not None else _MAX_SCAN_BYTES
     findings: List[Finding] = detect_file(resolved, max_bytes=cap)
-    return [f.to_json_dict(include_token=include_token) for f in findings]
+    if not include_contributions:
+        return [f.to_json_dict(include_token=include_token) for f in findings]
+
+    # Lazy import — xgboost never loaded on the default scan path.
+    from Harpocrates.ml.context import extract_context_from_finding
+    from Harpocrates.ml.explain import explain_finding
+
+    result = []
+    for f in findings:
+        ctx = extract_context_from_finding(f)
+        explanation = explain_finding(f, ctx)
+        d = f.to_json_dict(include_token=include_token)
+        d["explanation"] = explanation.to_dict() if explanation else None
+        result.append(d)
+    return result
 
 
 def main() -> None:
