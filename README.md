@@ -301,6 +301,37 @@ harpocrates scan ./my_project --explain | jq '.findings[0].explanation.top_posit
 
 ## Version history
 
+### v0.4.0 — Redesigned 64-feature vector, v0.4 retrain, opt-in TreeSHAP explainability
+
+**Feature engineering (Phase 7.0 / 7.0.11):**
+
+- **Dropped 8 shortcut / collinear features** that caused the model to memorise narrow synthetic distributions rather than generalise. Dropped: `var_contains_secret` (25% importance but a direct mirror of the heuristic layer — label leak), `is_known_hash_length` (inverted signal on real credentials), `cryptographic_score`, `normalized_entropy` (collinear with `token_entropy` + char counts), `line_position_ratio` (train/serve skew from synthetic estimation), `hex_context_git_keywords`, `cross_line_entropy`, `contains_example_keyword` (collinear with their sibling features). Net feature count: 65 → 64.
+- **Added 7 value-shape features** that distinguish credentials from file paths, enum constants, host configs, and template placeholders — the four false-positive classes from real-world scans: `value_starts_with_slash`, `value_contains_path_separator`, `value_ends_with_known_ext`, `value_is_lowercase_word`, `value_is_dotted_quad_or_host_literal`, `value_is_template_syntax`, `is_hex_with_no_alpha_mix`.
+- **Tightened XGBoost regularisation** (`max_depth` 6→5, `n_estimators` 500→300, L1/L2 increased) to break reliance on shortcut features.
+
+**v0.4 retrain (Phase 7):**
+
+- Retrained on ~40k samples (v4 corpus) with the redesigned 64-feature vector.
+- New negative-class generators covering the four v0.3.0 FP classes: file-path values, enum constants (lowercase words), host/port configs, template placeholders (`${...}`, `{{...}}`, `__X__`), file-extension values (`.pem`, `.jks`, `.p12`).
+- New positive-class generators: APIM-style compound var names (`APIM_CLIENT_KEY`, `APIM_SECRET_KEY`), multiline structures (PEM blocks, YAML pipe-block secrets, k8s `Secret` manifests, `.env` multikey blocks, JSON arrays of keys, Terraform `for_each` secret maps) encoded via `context_before`/`context_after`.
+- 300-sample hand-curated positive holdout fixture (`tests/fixtures/positive_holdout_v4.jsonl`); golden OOD recall **97.33%** (gate: ≥97%).
+
+**Opt-in explainability (Phase 8):**
+
+- `--explain` flag on `harpocrates scan` emits structured JSON with per-feature TreeSHAP contributions. Implies `--ml`. Default scan path unchanged — xgboost is never imported without `--explain`.
+- `include_contributions=True` on MCP `scan_text`/`scan_file` tools adds an `explanation` key to each finding dict.
+- All float outputs rounded to 3 decimal places. Token-derived feature values (`token_entropy`, `token_length`, `char_class_count`, `digit_ratio`, `special_char_ratio`) suppressed to `null` in JSON output to prevent token reconstruction.
+- Booster cached per process (first `--explain` call ~30ms; subsequent calls ~0.2ms each).
+- Hot-path invariant enforced by `tests/test_hot_path_no_xai.py` (subprocess isolation + AST static analysis).
+
+**Severity calibration (v0.3.2, folded into this release train):**
+
+- `_entropy_severity()` stub replaced with a classification-aware helper — entropy/ML findings now surface at MEDIUM or HIGH instead of always INFO.
+- Suffix-style var-name lexicon added (`*_KEY`, `*_SECRET_KEY`, `*_CLIENT_KEY`, etc.) so `APIM_CLIENT_KEY`, `APIM_SECRET_KEY` classify as `api_token` at confidence 0.80 → MEDIUM.
+- `OPENAI_API_KEY_LEGACY` regex added to `HIGH_SIGNATURES` — catches legacy/short OpenAI keys with hyphens (`sk-RQMJj8ELDjv7TRc-...`) missed by the strict 48-char CRITICAL pattern.
+
+---
+
 ### v0.3.0 — ML model retrained on 62k samples, comment scanning, violation classification
 
 **New ML capabilities (what the model can now detect that it couldn't before):**
