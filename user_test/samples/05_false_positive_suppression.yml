@@ -1,0 +1,49 @@
+# Kubernetes / Helm values file — false positive suppression
+# Run: harpocrates scan --ml user_test/samples/05_false_positive_suppression.yml
+#
+# Before v0.4.0 the ML model had no features distinguishing credentials from
+# file paths, enum constants, host literals, or template placeholders.
+# These all triggered CRITICAL or HIGH findings incorrectly.
+#
+# Six new value-shape binary features now suppress these false positives.
+# EXPECTED: all values below should appear at INFO or produce no finding.
+# Any HIGH or CRITICAL result is a regression.
+#
+#   key_path      → INFO  (value_starts_with_slash)
+#   status        → INFO  (value_is_lowercase_word)
+#   host          → INFO  (value_is_dotted_quad_or_host_literal)
+#   api_key       → INFO  (value_is_template_syntax: ${...})
+#   helm_secret   → INFO  (value_is_template_syntax: {{ .Values.* }})
+#   keystore      → INFO  (value_ends_with_known_ext: .jks)
+#   cert          → INFO  (value_ends_with_known_ext: .pem)
+#   bind_address  → INFO  (value_is_dotted_quad_or_host_literal)
+#   placeholder   → INFO  (value_is_template_syntax: __X__)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          env:
+            - name: KEY_PATH
+              value: "/etc/ssl/private/server.key"
+            - name: AUTH_STATUS
+              value: "authenticated"
+            - name: DB_HOST
+              value: "0.0.0.0"
+            - name: API_KEY
+              value: "${API_KEY}"
+            - name: HELM_SECRET
+              value: "{{ .Values.apiKey }}"
+            - name: KEYSTORE_PATH
+              value: "truststore.jks"
+            - name: CERT_FILE
+              value: "server.pem"
+            - name: BIND_ADDRESS
+              value: "127.0.0.1"
+            - name: PLACEHOLDER
+              value: "__API_KEY_PLACEHOLDER__"

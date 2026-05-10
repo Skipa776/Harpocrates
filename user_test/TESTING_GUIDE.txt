@@ -7,16 +7,27 @@ SETUP
   pip install harpocrates[ml,mcp]          # installs all required extras
   harpocrates --version                    # must print 0.4.0
 
-All sample files live in user_test/samples/. Run any of them with:
+Sample files live in user_test/samples/ and span multiple languages to
+reflect real-world use cases. Harpocrates scans any file regardless of
+extension. Run any sample with:
+
   harpocrates scan user_test/samples/<file>
   harpocrates scan --ml user_test/samples/<file>      # adds ML verification pass
   harpocrates scan --json user_test/samples/<file>    # machine-readable output
   harpocrates scan --explain user_test/samples/<file> # XAI contributions (requires [ml])
 
+Sample files and their languages:
+  01_severity_calibration.env     — dotenv / deployment config
+  02_violation_categories.js      — JavaScript / Node.js
+  03_commented_secrets.go         — Go
+  04_openai_keys.sh               — Bash / shell script
+  05_false_positive_suppression.yml — Kubernetes / Helm YAML
+  06_explain_demo.java            — Java / Spring Boot
+
 
 =======================================================================
 FEATURE 1 — SEVERITY CALIBRATION
-File: samples/01_severity_calibration.py
+File: samples/01_severity_calibration.env  (dotenv)
 =======================================================================
 WHAT CHANGED:
   Before v0.4.0, every finding produced by the entropy/ML stage showed
@@ -31,7 +42,7 @@ WHAT CHANGED:
   (e.g., a full AWS access key or GitHub PAT in exact format).
 
 WHAT TO VERIFY:
-  harpocrates scan --ml user_test/samples/01_severity_calibration.py
+  harpocrates scan --ml user_test/samples/01_severity_calibration.env
 
   EXPECTED FINDINGS:
     Line  3  APIM_CLIENT_KEY   → severity: MEDIUM, category: api_token
@@ -48,7 +59,7 @@ WHAT TO VERIFY:
 
 =======================================================================
 FEATURE 2 — VIOLATION CATEGORIES
-File: samples/02_violation_categories.py
+File: samples/02_violation_categories.js  (JavaScript)
 =======================================================================
 WHAT CHANGED:
   All findings now include two new fields:
@@ -64,7 +75,7 @@ WHAT CHANGED:
     3. Value structure (eyJ...  → jwt, confidence 0.95)
 
 WHAT TO VERIFY:
-  harpocrates scan --json user_test/samples/02_violation_categories.py | python -m json.tool
+  harpocrates scan --json user_test/samples/02_violation_categories.js | python -m json.tool
 
   EXPECTED (each finding in the JSON array):
     Line  3  DB_PASSWORD      category: "password"
@@ -83,7 +94,7 @@ WHAT TO VERIFY:
 
 =======================================================================
 FEATURE 3 — COMMENTED-OUT SECRET DETECTION
-File: samples/03_commented_secrets.py
+File: samples/03_commented_secrets.go  (Go)
 =======================================================================
 WHAT CHANGED:
   Before v0.4.0, any line starting with # (or //, /*, --, <!--) was
@@ -105,7 +116,7 @@ WHAT CHANGED:
   preserve the 2ms per-file budget.
 
 WHAT TO VERIFY:
-  harpocrates scan user_test/samples/03_commented_secrets.py
+  harpocrates scan user_test/samples/03_commented_secrets.go
 
   EXPECTED FINDINGS:
     Line  4  commented Python  → found (in_comment: true in --json output)
@@ -120,7 +131,7 @@ WHAT TO VERIFY:
 
 =======================================================================
 FEATURE 4 — OPENAI LEGACY KEY DETECTION
-File: samples/04_openai_keys.py
+File: samples/04_openai_keys.sh  (Bash)
 =======================================================================
 WHAT CHANGED:
   The existing OpenAI pattern only matched the current 48-char format
@@ -134,7 +145,7 @@ WHAT CHANGED:
   false-positive potential than the strict 48-char form.
 
 WHAT TO VERIFY:
-  harpocrates scan user_test/samples/04_openai_keys.py
+  harpocrates scan user_test/samples/04_openai_keys.sh
 
   EXPECTED FINDINGS:
     Line  3  current-format key  → severity: CRITICAL, category: openai_key
@@ -149,7 +160,7 @@ WHAT TO VERIFY:
 
 =======================================================================
 FEATURE 5 — FALSE POSITIVE SUPPRESSION (VALUE-SHAPE FEATURES)
-File: samples/05_false_positive_suppression.py
+File: samples/05_false_positive_suppression.yml  (Kubernetes / Helm YAML)
 =======================================================================
 WHAT CHANGED:
   The v0.3.0 model had no features distinguishing a credential from a
@@ -167,7 +178,7 @@ WHAT CHANGED:
   These features feed the ML model, suppressing false positives at inference.
 
 WHAT TO VERIFY:
-  harpocrates scan --ml user_test/samples/05_false_positive_suppression.py
+  harpocrates scan --ml user_test/samples/05_false_positive_suppression.yml
 
   EXPECTED (with --ml flag for full ML verification pass):
     Line  3  key_path = "/etc/ssl/server.key"     → INFO  (file path)
@@ -188,7 +199,7 @@ WHAT TO VERIFY:
 
 =======================================================================
 FEATURE 6 — EXPLAINABILITY (--explain flag)
-File: samples/06_explain_demo.py
+File: samples/06_explain_demo.java  (Java / Spring Boot)
 =======================================================================
 WHAT CHANGED:
   A new --explain CLI flag generates JSON output with per-feature
@@ -224,7 +235,7 @@ WHAT CHANGED:
   Requires: pip install harpocrates[ml]
 
 WHAT TO VERIFY:
-  harpocrates scan --explain user_test/samples/06_explain_demo.py
+  harpocrates scan --explain user_test/samples/06_explain_demo.java
 
   EXPECTED:
     - Output is valid JSON (pipe to | python -m json.tool to confirm)
@@ -236,10 +247,10 @@ WHAT TO VERIFY:
     - "predicted_probability" is a float between 0 and 1
 
   VERIFY THAT:
-    harpocrates scan --explain user_test/samples/06_explain_demo.py \
+    harpocrates scan --explain user_test/samples/06_explain_demo.java \
       | python -m json.tool > /dev/null && echo "valid JSON"
 
-    harpocrates scan --explain user_test/samples/06_explain_demo.py \
+    harpocrates scan --explain user_test/samples/06_explain_demo.java \
       | python -c "
     import json, sys
     data = json.load(sys.stdin)
