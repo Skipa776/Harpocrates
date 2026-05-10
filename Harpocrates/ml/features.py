@@ -1,7 +1,7 @@
 """
 Feature engineering for ML-based secrets verification.
 
-Extracts 67 features from tokens and their context to enable
+Extracts 64 features from tokens and their context to enable
 context-aware classification of potential secrets.
 
 Features are organized into seven categories:
@@ -10,10 +10,10 @@ Features are organized into seven categories:
   (is_uuid_v4, jwt_structure_valid, entropy_charset_mismatch, has_hash_prefix)
 - Variable name features (9): Properties of the variable/key name including
   N-gram scoring for secret and safe patterns
-- Context features (17): Properties of surrounding code including semantic
+- Context features (16): Properties of surrounding code including semantic
   analysis and secret density
-- Stage B precision features (7): Targeted FP reduction features
-- Stage B generalization features (5): Hex disambiguation features
+- Stage B precision features (6): Targeted FP reduction features
+- Stage B generalization features (4): Hex disambiguation features
 - Env-loading awareness features (2): Env-loader and fallback detection
 - Phase 7.0 value-shape features (7): Value-shape FP suppression features
 """
@@ -167,7 +167,7 @@ FEATURE_NAMES: Tuple[str, ...] = (
     "in_string_literal",
     "var_ngram_secret_score",
     "var_ngram_safe_score",
-    # Context features (17 — dropped line_position_ratio)
+    # Context features (16 — dropped line_position_ratio, cross_line_entropy)
     "line_is_comment",
     "context_mentions_test",
     "context_mentions_git",
@@ -184,17 +184,14 @@ FEATURE_NAMES: Tuple[str, ...] = (
     "key_value_distance",
     "json_path_hint",
     "adjacency_ngram_score",
-    "cross_line_entropy",
-    # Stage B precision improvement features (7)
+    # Stage B precision improvement features (6 — dropped contains_example_keyword)
     "is_hex_len_40",
     "is_hex_len_64",
     "is_test_token",
-    "contains_example_keyword",
     "file_is_git_related",
     "file_is_build",
     "file_is_example",
-    # Stage B generalization improvement features (5)
-    "hex_context_git_keywords",
+    # Stage B generalization improvement features (4 — dropped hex_context_git_keywords)
     "hex_context_crypto_keywords",
     "hex_adjacent_assignment_pattern",
     "hex_in_url_or_dsn",
@@ -216,14 +213,14 @@ FEATURE_NAMES: Tuple[str, ...] = (
 @dataclass
 class FeatureVector:
     """
-    67 extracted features for ML classification.
+    64 extracted features for ML classification.
 
     Organized into seven categories:
     - Token features (20): Properties of the token itself
     - Variable name features (9): Properties of the variable/key name
-    - Context features (17): Properties of surrounding code
-    - Stage B precision features (7): Targeted FP reduction features
-    - Stage B generalization features (5): Hex disambiguation features
+    - Context features (16): Properties of surrounding code
+    - Stage B precision features (6): Targeted FP reduction features
+    - Stage B generalization features (4): Hex disambiguation features
     - Env-loading awareness features (2): Env-loader and fallback detection
     - Phase 7.0 value-shape features (7): Value-shape FP suppression
 
@@ -239,6 +236,14 @@ class FeatureVector:
     - var_contains_secret: label-leak (25.4% importance mirrors heuristic)
     - line_position_ratio: train/serve skew (always ~0.5 in synthetic data)
 
+    Phase 7.0.11 drops (SHAP/XAI collinearity sweep — Groups 3-5):
+    - cross_line_entropy: same full_text source as surrounding_entropy_avg; both call
+      shannon_entropy(), per-line entropy dominated by long tokens → high Pearson r
+    - contains_example_keyword: same vocabulary as context_mentions_test
+      (test|mock|fake|example|sample|dummy) on token instead of context
+    - hex_context_git_keywords: subset of context_mentions_git, gated on hex shape;
+      co-fires >90% with context_mentions_git on hex tokens in git contexts
+
     DISCRIMINATIVE FEATURES (for precision boost):
     - is_uuid_v4: Detects UUID v4 format (strong non-secret indicator)
     - jwt_structure_valid: JWT has valid base64-encoded JSON header
@@ -249,13 +254,11 @@ class FeatureVector:
     - is_hex_len_40: Token is exactly 40 hex chars (git SHA/SHA1)
     - is_hex_len_64: Token is exactly 64 hex chars (SHA256)
     - is_test_token: Has _test_, _staging_, test_ prefix
-    - contains_example_keyword: Contains EXAMPLE, xxxx, demo, placeholder
     - file_is_git_related: Path contains .git/, hash, commit
     - file_is_build: Path contains build/, dist/, node_modules/
     - file_is_example: Path contains example/, docs/, demo/
 
     STAGE B GENERALIZATION FEATURES (hex disambiguation):
-    - hex_context_git_keywords: Context contains git, commit, merge keywords
     - hex_context_crypto_keywords: Context contains encrypt, sign, key keywords
     - hex_adjacent_assignment_pattern: Assignment pattern (env_var, config, func_arg)
     - hex_in_url_or_dsn: Token is embedded in URL/DSN
@@ -309,7 +312,7 @@ class FeatureVector:
     var_ngram_secret_score: float = 0.0  # Weighted sum of secret N-gram matches
     var_ngram_safe_score: float = 0.0  # Weighted sum of safe N-gram matches
 
-    # Context features (17) - dropped line_position_ratio
+    # Context features (16) - dropped line_position_ratio, cross_line_entropy
     line_is_comment: bool = False
     context_mentions_test: bool = False
     context_mentions_git: bool = False
@@ -327,20 +330,17 @@ class FeatureVector:
     key_value_distance: int = -1  # Distance between var name and token (-1 if no var)
     json_path_hint: int = 0  # Depth in JSON/YAML structure (0=root)
     adjacency_ngram_score: float = 0.0  # Sum of N-gram scores in nearby var names
-    cross_line_entropy: float = 0.0  # Average entropy across ±3 lines
 
     # STAGE B PRECISION IMPROVEMENT: Features targeting observed FP patterns
     is_hex_len_40: bool = False  # Token is exactly 40 hex chars (git SHA/SHA1)
     is_hex_len_64: bool = False  # Token is exactly 64 hex chars (SHA256)
     is_test_token: bool = False  # Has _test_, _staging_, test_ prefix
-    contains_example_keyword: bool = False  # Contains EXAMPLE, xxxx, demo, placeholder
     file_is_git_related: bool = False  # Path contains .git/, hash, commit
     file_is_build: bool = False  # Path contains build/, dist/, node_modules/
     file_is_example: bool = False  # Path contains example/, docs/, demo/
 
     # STAGE B GENERALIZATION IMPROVEMENT: Hex disambiguation features
     # These help distinguish hex secrets from git SHAs/checksums
-    hex_context_git_keywords: bool = False  # Context contains git, commit, merge, branch
     hex_context_crypto_keywords: bool = False  # Context contains encrypt, sign, key, secret
     hex_adjacent_assignment_pattern: int = 0  # 0=unknown, 1=env_var, 2=config, 3=func_arg
     hex_in_url_or_dsn: bool = False  # Token is embedded in URL/DSN
@@ -360,7 +360,7 @@ class FeatureVector:
     is_hex_with_no_alpha_mix: bool = False       # all hex but no uppercase letter → hash
 
     def to_array(self) -> List[float]:
-        """Convert to numpy-compatible array of 67 floats."""
+        """Convert to numpy-compatible array of 64 floats."""
         return [
             # Token features (20)
             float(self.token_length),
@@ -395,7 +395,7 @@ class FeatureVector:
             float(self.in_string_literal),
             self.var_ngram_secret_score,
             self.var_ngram_safe_score,
-            # Context features (17)
+            # Context features (16)
             float(self.line_is_comment),
             float(self.context_mentions_test),
             float(self.context_mentions_git),
@@ -413,17 +413,14 @@ class FeatureVector:
             float(self.key_value_distance),
             float(self.json_path_hint),
             self.adjacency_ngram_score,
-            self.cross_line_entropy,
-            # Stage B precision improvement features (7)
+            # Stage B precision improvement features (6)
             float(self.is_hex_len_40),
             float(self.is_hex_len_64),
             float(self.is_test_token),
-            float(self.contains_example_keyword),
             float(self.file_is_git_related),
             float(self.file_is_build),
             float(self.file_is_example),
-            # Stage B generalization improvement features (5)
-            float(self.hex_context_git_keywords),
+            # Stage B generalization improvement features (4)
             float(self.hex_context_crypto_keywords),
             float(self.hex_adjacent_assignment_pattern),
             float(self.hex_in_url_or_dsn),
@@ -443,7 +440,7 @@ class FeatureVector:
 
     @staticmethod
     def get_feature_names() -> List[str]:
-        """Get ordered list of 67 feature names."""
+        """Get ordered list of 64 feature names."""
         return list(FEATURE_NAMES)
 
 def _get_char_class_count(token: str) -> int:
@@ -548,8 +545,6 @@ def _has_version_pattern(token: str) -> bool:
         re.compile(r'version[_-]?\d+', re.I),  # version1, version_1
     ]
     return any(p.search(token) for p in version_patterns)
-
-
 
 
 def _get_vendor_prefix_boost(token: str) -> float:
@@ -862,27 +857,6 @@ def _is_test_token(token: str) -> bool:
         'sk_test_', 'pk_test_', 'rk_test_',
     ]
     return any(p in token for p in test_patterns)
-
-
-def _contains_example_keyword(token: str) -> bool:
-    """
-    Check if token contains known example/placeholder patterns.
-
-    Targets FP pattern: Documentation example tokens like AKIAIOSFODNN7EXAMPLE
-    or placeholder patterns with 'xxxx', 'demo', etc.
-
-    Returns:
-        True if token contains example/placeholder keywords
-    """
-    if not token:
-        return False
-
-    patterns = [
-        'EXAMPLE', 'example', 'xxxx', 'XXXX', 'demo', 'DEMO',
-        'placeholder', 'your_', 'YOUR_', '0000', 'sample', 'SAMPLE',
-        'fake', 'FAKE', 'dummy', 'DUMMY', 'mock', 'MOCK',
-    ]
-    return any(p in token for p in patterns)
 
 
 def _is_git_related_path(file_path: Optional[str]) -> bool:
@@ -1289,49 +1263,6 @@ def _calculate_adjacency_ngram_score(context_text: str, token: str) -> float:
     return total_score
 
 
-def _calculate_cross_line_entropy(context_text: str, token: str) -> float:
-    """
-    Calculate average entropy across ±3 lines from the token.
-
-    Returns:
-        Average Shannon entropy of nearby lines
-    """
-    if not context_text or not token:
-        return 0.0
-
-    lines = context_text.split('\n')
-
-    # Find the line containing the token
-    token_line_idx = -1
-    for i, line in enumerate(lines):
-        if token in line:
-            token_line_idx = i
-            break
-
-    if token_line_idx == -1:
-        return 0.0
-
-    # Get ±3 lines (excluding the token line itself)
-    start_idx = max(0, token_line_idx - 3)
-    end_idx = min(len(lines), token_line_idx + 4)
-
-    nearby_lines = []
-    for i in range(start_idx, end_idx):
-        if i != token_line_idx:  # Exclude the token line
-            nearby_lines.append(lines[i])
-
-    if not nearby_lines:
-        return 0.0
-
-    # Calculate average entropy
-    entropies = [shannon_entropy(line) for line in nearby_lines if line.strip()]
-
-    if not entropies:
-        return 0.0
-
-    return sum(entropies) / len(entropies)
-
-
 def _detect_assignment_type(line: str, token: str) -> int:
     """Detect the type of assignment operator used."""
     token_pos = line.find(token)
@@ -1564,18 +1495,16 @@ def _extract_context_features(
         "key_value_distance": _calculate_key_value_distance(line, token, var_name),
         "json_path_hint": _calculate_json_path_hint(line),
         "adjacency_ngram_score": _calculate_adjacency_ngram_score(full_text, token),
-        "cross_line_entropy": _calculate_cross_line_entropy(full_text, token),
     }
 
 
 def _extract_stage_b_precision_features(token: str, file_path: Optional[str]) -> dict:
     """
-    Extract Stage B precision improvement features (7 features).
+    Extract Stage B precision improvement features (6 features).
 
     These features specifically target observed false positive patterns:
     - 40/64-char hex tokens (git SHAs, SHA256 hashes)
     - Test-mode tokens (sk_test_*, pk_test_*)
-    - Example/placeholder tokens
     - Git-related, build, and example file paths
 
     Args:
@@ -1583,13 +1512,12 @@ def _extract_stage_b_precision_features(token: str, file_path: Optional[str]) ->
         file_path: The file path for context
 
     Returns:
-        Dict with 7 Stage B precision features
+        Dict with 6 Stage B precision features
     """
     return {
         "is_hex_len_40": _is_hex_exact_length(token, 40),
         "is_hex_len_64": _is_hex_exact_length(token, 64),
         "is_test_token": _is_test_token(token),
-        "contains_example_keyword": _contains_example_keyword(token),
         "file_is_git_related": _is_git_related_path(file_path),
         "file_is_build": _is_build_path(file_path),
         "file_is_example": _is_example_path(file_path),
@@ -1604,7 +1532,7 @@ def _extract_hex_disambiguation_features(
     embedded_in_url: bool = False,
 ) -> dict:
     """
-    Extract Stage B generalization features for hex token disambiguation (5 features).
+    Extract Stage B generalization features for hex token disambiguation (4 features).
 
     These features help distinguish hex secrets from git SHAs/checksums by
     analyzing the surrounding context rather than the token format.
@@ -1617,7 +1545,7 @@ def _extract_hex_disambiguation_features(
         embedded_in_url: Whether token was extracted from a URL/DSN
 
     Returns:
-        Dict with 5 hex disambiguation features
+        Dict with 4 hex disambiguation features
     """
     # Only compute these features for hex-like tokens (40 or 64 chars)
     hex_chars = set("0123456789abcdefABCDEF")
@@ -1629,7 +1557,6 @@ def _extract_hex_disambiguation_features(
     if not is_hex_candidate:
         # Return defaults for non-hex tokens
         return {
-            "hex_context_git_keywords": False,
             "hex_context_crypto_keywords": False,
             "hex_adjacent_assignment_pattern": 0,
             "hex_in_url_or_dsn": False,
@@ -1639,15 +1566,11 @@ def _extract_hex_disambiguation_features(
     context_lower = context_text.lower() if context_text else ""
     line_lower = line_content.lower() if line_content else ""
 
-    # Feature 1: Git-related keywords in context (suggests NOT a secret)
-    git_keywords = ["commit", "git", "merge", "branch", "checkout", "sha", "rev", "HEAD"]
-    hex_context_git = any(kw in context_lower for kw in git_keywords)
-
-    # Feature 2: Crypto/secret keywords in context (suggests IS a secret)
+    # Feature 1: Crypto/secret keywords in context (suggests IS a secret)
     crypto_keywords = ["encrypt", "decrypt", "sign", "key", "secret", "auth", "password", "credential", "token"]
     hex_context_crypto = any(kw in context_lower for kw in crypto_keywords)
 
-    # Feature 3: Assignment pattern (helps identify source)
+    # Feature 2: Assignment pattern (helps identify source)
     # 0=unknown, 1=env_var, 2=config_assignment, 3=func_arg
     assignment_pattern = 0
     if "os.environ" in line_lower or "process.env" in line_lower or "env[" in line_lower:
@@ -1657,13 +1580,13 @@ def _extract_hex_disambiguation_features(
     elif "(" in line_content and ")" in line_content:
         assignment_pattern = 3  # Function argument
 
-    # Feature 4: Token embedded in URL/DSN
+    # Feature 3: Token embedded in URL/DSN
     hex_in_url = embedded_in_url or any(
         pattern in line_lower
         for pattern in ["http://", "https://", "://", "postgres://", "mysql://", "mongodb://"]
     )
 
-    # Feature 5: File path suggests secrets
+    # Feature 4: File path suggests secrets
     hex_file_secret = False
     if file_path:
         path_lower = file_path.lower()
@@ -1674,7 +1597,6 @@ def _extract_hex_disambiguation_features(
         hex_file_secret = any(sp in path_lower for sp in secret_paths)
 
     return {
-        "hex_context_git_keywords": hex_context_git,
         "hex_context_crypto_keywords": hex_context_crypto,
         "hex_adjacent_assignment_pattern": assignment_pattern,
         "hex_in_url_or_dsn": hex_in_url,
@@ -1743,7 +1665,7 @@ def extract_features(
     regex_match_type: int = 0,
 ) -> FeatureVector:
     """
-    Extract all 67 features from a finding and its context.
+    Extract all 64 features from a finding and its context.
 
     Args:
         finding: The Finding object with token and metadata
@@ -1751,7 +1673,7 @@ def extract_features(
         regex_match_type: Encoded type of regex match (0 = entropy-only)
 
     Returns:
-        FeatureVector with all 67 features
+        FeatureVector with all 64 features
     """
     token = finding.token or ""
 
@@ -1827,7 +1749,7 @@ def extract_features_from_record(record: dict) -> FeatureVector:
         record: Dict with token, line_content, context_before, context_after, etc.
 
     Returns:
-        FeatureVector with all 67 features
+        FeatureVector with all 64 features
     """
     from Harpocrates.core.result import EvidenceType, Finding
 

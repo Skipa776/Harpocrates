@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
-N_FEATURES = 67
+N_FEATURES = 64
 
 
 # ---------------------------------------------------------------------------
