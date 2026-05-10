@@ -49,14 +49,19 @@ def test_default_scan_path_does_not_import_xai_runtime() -> None:
     if a prior test loaded xgboost, it would already be in sys.modules before
     the snapshot is taken, and the diff would miss the leak.
     """
+    # `mcp` is an optional extra — gracefully skip if not installed.
+    # The test is about XAI leakage, not about optional-dep availability.
     check_code = (
-        "import sys; "
-        "import Harpocrates.core.detector; "
-        "import Harpocrates.core.scanner; "
-        "import Harpocrates.mcp.server; "
-        "forbidden = {'xgboost', 'shap', 'lime', 'Harpocrates.ml.explain'}; "
-        "leaked = forbidden & set(sys.modules); "
-        "assert not leaked, f'Hot path leaked XAI imports: {leaked}'"
+        "import sys\n"
+        "import Harpocrates.core.detector\n"
+        "import Harpocrates.core.scanner\n"
+        "try:\n"
+        "    import Harpocrates.mcp.server\n"
+        "except ImportError:\n"
+        "    pass\n"
+        "forbidden = {'xgboost', 'shap', 'lime', 'Harpocrates.ml.explain'}\n"
+        "leaked = forbidden & set(sys.modules)\n"
+        "assert not leaked, f'Hot path leaked XAI imports: {leaked}'\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", check_code],
