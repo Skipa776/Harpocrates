@@ -218,7 +218,7 @@ Harpocrates runs a three-phase pipeline on every line of every file:
 
 2. **Entropy analysis** — Shannon entropy flags high-randomness tokens that don't match any known pattern. Catches credentials stored under ambiguous variable names (`my_key`, `token`, `secret`) that regex scanners miss entirely.
 
-3. **ML verification** (opt-in via `--ml`) — a single-stage XGBoost classifier extracts 65 features from the token, its variable name, and the surrounding code context. It learns to distinguish `api_secret = "AKIA..."` (secret) from `commit_sha = "a1b2c..."` (Git SHA) without relying on the variable name alone. Inference runs via ONNX Runtime when available, with native XGBoost as fallback.
+3. **ML verification** (opt-in via `--ml`) — a single-stage XGBoost classifier extracts 64 features from the token, its variable name, and the surrounding code context. It learns to distinguish `api_secret = "AKIA..."` (secret) from `commit_sha = "a1b2c..."` (Git SHA) without relying on the variable name alone. Inference runs via ONNX Runtime when available, with native XGBoost as fallback.
 
 **Ships pre-trained. No user training required.**
 
@@ -281,8 +281,8 @@ Threshold high (precision gate): `0.85` — anything above this is reported as a
 
 **ML capabilities added:**
 
-- **XGBoost + ONNX Runtime** — single-stage classifier with 65 features. Replaces the v0.1 heuristic confidence scores with a calibrated probability (Platt-scaled).
-- **65-feature context model** — captures token entropy, variable name semantics (`var_contains_secret`, `var_ngram_secret_score`), file type risk (`file_is_config`, `file_extension_risk`), surrounding context (`context_has_function_def`), and value structure (`is_known_hash_length`, `hex_adjacent_assignment_pattern`, `has_padding`, `is_test_token`, `line_position_ratio`).
+- **XGBoost + ONNX Runtime** — single-stage classifier with 64 features. Replaces the v0.1 heuristic confidence scores with a calibrated probability (Platt-scaled).
+- **64-feature context model** — captures token entropy, variable name semantics (`var_ngram_secret_score`), file type risk (`file_is_config`, `file_extension_risk`), surrounding context (`context_has_function_def`), and value structure (`is_hex_with_no_alpha_mix`, `value_starts_with_slash`, `value_is_dotted_quad_or_host_literal`, `value_is_template_syntax`).
 - **Dual-threshold routing** — findings are routed to `SAFE` (below threshold\_low), `REVIEW` (between thresholds), or `SECRET` (above threshold\_high). The review zone is ~5% of lines on average.
 - **Entropy candidates surfaced** — high-entropy tokens under any variable name now reach the ML stage, not just those matching known patterns.
 - **MCP server** — `harpocrates-mcp` exposes `scan_text` and `scan_file` as JSON-RPC tools for agent-to-agent scanning (Claude, Cursor, Codeium, etc.).
