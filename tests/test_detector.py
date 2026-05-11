@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from Harpocrates.core.detector import detect_file, detect_text
-from Harpocrates.core.result import EvidenceType, Finding
+from Harpocrates.core.result import EvidenceType, Finding, Severity
 
 
 def test_detect_text_finds_github_token() -> None:
@@ -241,3 +241,75 @@ def test_detect_text_never_exposes_ml_candidates_for_any_input() -> None:
     assert ml_findings == [], (
         "detect_text must not expose ML_CANDIDATEs regardless of input shape"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 9: file-type-aware URL detection in .env / credential files
+# ---------------------------------------------------------------------------
+
+def test_env_file_preserves_url_bodies_in_connection_string(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DATABASE_URL=postgres://admin:hunter2_xyz_long_password@host/db\n"
+    )
+    findings = detect_file(env_file)
+    assert findings, "expected at least one finding in .env connection string"
+    assert any(
+        f.category == "connection_string" for f in findings
+    ), f"expected connection_string category, got {[f.category for f in findings]}"
+    # At least one finding must be MEDIUM or HIGH (connection_string at 0.90 → HIGH)
+    assert any(f.severity in (Severity.MEDIUM, Severity.HIGH) for f in findings)
+
+
+def test_env_file_surfaces_endpoint_var_at_info(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_BASE_URL=https://api.openai.com/v1\n")
+    findings = detect_file(env_file)
+    assert findings, "expected a finding for OPENAI_BASE_URL"
+    env_findings = [f for f in findings if f.type == "ENV_ASSIGNMENT"]
+    assert env_findings, "expected ENV_ASSIGNMENT finding type"
+    assert all(f.severity == Severity.INFO for f in env_findings)
+    assert all(f.category == "generic_secret" for f in env_findings)
+
+
+def test_non_env_file_still_strips_urls(tmp_path: Path) -> None:
+    py_file = tmp_path / "config.py"
+    # A URL that would produce entropy candidates if NOT stripped
+    py_file.write_text(
+        'CDN_URL = "https://cdn.example.com/assets/bundle.js"\n'
+    )
+    findings = detect_file(py_file)
+    # No ENV_ASSIGNMENT finding in a .py file
+    assert not any(f.type == "ENV_ASSIGNMENT" for f in findings)
+
+
+def test_pem_file_preserves_url_bodies(tmp_path: Path) -> None:
+    pem_file = tmp_path / "sso.pem"
+    pem_file.write_text(
+        "DATABASE_URL=postgres://admin:hunter2_xyz_long_password@host/db\n"
+    )
+    findings = detect_file(pem_file)
+    # .pem is in HIGH_RISK_EXTENSIONS — URL bodies preserved, connection string detected
+    assert findings, "expected findings in .pem credential file"
+    assert any(f.category == "connection_string" for f in findings)
+
+
+def test_env_assignment_regex_skips_when_critical_regex_matched(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_API_KEY=sk-RQMJj8ELDjv7TRc-dS9sSw\n")
+    findings = detect_file(env_file)
+    # The OPENAI_API_KEY_LEGACY HIGH regex should fire; no duplicate ENV_ASSIGNMENT
+    env_assignment_findings = [f for f in findings if f.type == "ENV_ASSIGNMENT"]
+    regex_findings = [f for f in findings if f.evidence == EvidenceType.REGEX and f.type != "ENV_ASSIGNMENT"]
+    assert regex_findings, "expected a regex-tier finding for the OpenAI key"
+    assert not env_assignment_findings, (
+        "ENV_ASSIGNMENT must not fire when a higher-priority regex already matched"
+    )
+
+
+def test_dotenv_local_basename_treated_as_env(tmp_path: Path) -> None:
+    env_local = tmp_path / ".env.local"
+    env_local.write_text("OPENAI_BASE_URL=https://api.openai.com/v1\n")
+    findings = detect_file(env_local)
+    assert findings, "expected findings in .env.local (basename-gating)"
+    assert any(f.type == "ENV_ASSIGNMENT" for f in findings)

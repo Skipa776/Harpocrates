@@ -76,6 +76,42 @@ def test_var_name_connection_string() -> None:
     assert inf.category == ViolationCategory.CONNECTION_STRING
 
 
+def test_var_name_endpoint_url_classifies_as_generic_secret_low_conf() -> None:
+    inf = infer_category(signature_name=None, var_name="OPENAI_BASE_URL", token="https://api.openai.com/v1")
+    assert inf.category == ViolationCategory.GENERIC_SECRET
+    assert inf.confidence < 0.5
+
+
+def test_var_name_sso_callback_url() -> None:
+    inf = infer_category(signature_name=None, var_name="SSO_CALLBACK_URL", token="https://sso.corp.example.com/callback")
+    assert inf.category == ViolationCategory.GENERIC_SECRET
+    assert inf.confidence < 0.5
+
+
+def test_database_url_still_classifies_as_connection_string() -> None:
+    inf = infer_category(signature_name=None, var_name="DATABASE_URL", token="postgres://admin:pass@host/db")
+    assert inf.category == ViolationCategory.CONNECTION_STRING
+    assert inf.confidence >= 0.85
+
+
+def test_mongo_url_classifies_as_connection_string() -> None:
+    inf = infer_category(signature_name=None, var_name="MONGO_URL", token="mongodb://user:pass@host/db")
+    assert inf.category == ViolationCategory.CONNECTION_STRING
+    assert inf.confidence >= 0.85
+
+
+def test_redis_url_classifies_as_connection_string() -> None:
+    inf = infer_category(signature_name=None, var_name="REDIS_URL", token="redis://:pass@host:6379/0")
+    assert inf.category == ViolationCategory.CONNECTION_STRING
+    assert inf.confidence >= 0.85
+
+
+def test_webhook_url_not_reclassified_by_url_entry() -> None:
+    inf = infer_category(signature_name=None, var_name="WEBHOOK_URL", token="https://hooks.example.com/abc")
+    assert inf.category == ViolationCategory.WEBHOOK_URL
+    assert inf.confidence >= 0.80
+
+
 def test_var_name_api_token() -> None:
     inf = infer_category(signature_name=None, var_name="api_key", token="x" * 20)
     assert inf.category == ViolationCategory.API_TOKEN
