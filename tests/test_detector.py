@@ -313,3 +313,61 @@ def test_dotenv_local_basename_treated_as_env(tmp_path: Path) -> None:
     findings = detect_file(env_local)
     assert findings, "expected findings in .env.local (basename-gating)"
     assert any(f.type == "ENV_ASSIGNMENT" for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Phase 10: LOW_NOISE_EXTENSIONS — entropy skipped for markup/style/vector files
+# ---------------------------------------------------------------------------
+
+def test_html_entropy_tokens_produce_no_findings(tmp_path: Path) -> None:
+    """Webpack content hashes in HTML must not trigger ENTROPY_CANDIDATE."""
+    # 32-char hex token — typical webpack fingerprint, entropy ~4.0 bits
+    html_file = tmp_path / "index.html"
+    html_file.write_text(
+        '<link rel="stylesheet" href="/static/main.a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6.css">\n'
+    )
+    findings = detect_file(html_file)
+    entropy_findings = [f for f in findings if f.evidence == EvidenceType.ENTROPY]
+    assert entropy_findings == [], (
+        f"HTML entropy must be suppressed — got {len(entropy_findings)} ENTROPY_CANDIDATE(s)"
+    )
+
+
+def test_html_regex_still_fires_for_structured_secrets(tmp_path: Path) -> None:
+    """Regex tier must still run in HTML — API keys in <script> blocks are real leaks."""
+    token = "ghp_" + "x" * 36
+    html_file = tmp_path / "page.html"
+    html_file.write_text(f"<script>const TOKEN = '{token}';</script>\n")
+    findings = detect_file(html_file)
+    assert any(f.type == "GITHUB_PAT" for f in findings), (
+        "GITHUB_PAT regex must still fire in HTML files"
+    )
+
+
+def test_css_entropy_tokens_produce_no_findings(tmp_path: Path) -> None:
+    """CSS content hashes must not trigger ENTROPY_CANDIDATE."""
+    css_file = tmp_path / "styles.css"
+    css_file.write_text(".App-header__button_3xKJ9aB2cD4eF6gH8iJ0kL2mN4o {\n  color: red;\n}\n")
+    findings = detect_file(css_file)
+    entropy_findings = [f for f in findings if f.evidence == EvidenceType.ENTROPY]
+    assert entropy_findings == [], "CSS entropy must be suppressed"
+
+
+def test_svg_entropy_tokens_produce_no_findings(tmp_path: Path) -> None:
+    """SVG path data tokens must not trigger ENTROPY_CANDIDATE."""
+    svg_file = tmp_path / "icon.svg"
+    svg_file.write_text(
+        '<path d="M10 10 C 20 20, 40 20, 50 10 S 80 0 100 10 Z ABCDEFabcdef12345678"/>\n'
+    )
+    findings = detect_file(svg_file)
+    entropy_findings = [f for f in findings if f.evidence == EvidenceType.ENTROPY]
+    assert entropy_findings == [], "SVG entropy must be suppressed"
+
+
+def test_py_file_still_gets_entropy_scan(tmp_path: Path) -> None:
+    """Regression: .py files must still run entropy — LOW_NOISE_EXTENSIONS must not affect them."""
+    py_file = tmp_path / "config.py"
+    py_file.write_text("# secret_key = aB3dEfGhIjKlMnOpQrStUvWxYz012\n")
+    findings = detect_file(py_file)
+    entropy_findings = [f for f in findings if f.evidence == EvidenceType.ENTROPY]
+    assert entropy_findings, ".py files must still produce ENTROPY_CANDIDATE findings"
