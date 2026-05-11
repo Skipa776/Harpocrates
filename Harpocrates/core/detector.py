@@ -19,7 +19,7 @@ from Harpocrates.core.classification import extract_var_name, infer_category
 from Harpocrates.core.result import EvidenceType, Finding, Severity
 from Harpocrates.detectors.entropy_detector import looks_like_secret, shannon_entropy
 from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNATURES
-from Harpocrates.ml.context import HIGH_RISK_EXTENSIONS
+from Harpocrates.ml.context import HIGH_RISK_EXTENSIONS, LOW_NOISE_EXTENSIONS
 from Harpocrates.utils.file_utils import iter_text_lines
 
 if TYPE_CHECKING:
@@ -232,6 +232,13 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
         # Tier 1: skip PEM/X.509 certificate body lines (pure base64, 60-76
         # chars). The BEGIN header was already caught by the regex tier above.
         if _PEM_BODY_RE.match(scan_target):
+            return findings
+
+        # Tier 1b: skip entropy for markup/style/vector files — webpack hashes,
+        # CSS class fingerprints, and SVG path data saturate the entropy threshold
+        # but are never credentials. Regex tier already ran above and catches any
+        # real structured API key in an HTML <script> block.
+        if file_ext in LOW_NOISE_EXTENSIONS:
             return findings
 
         # Tier 2: strip URL substrings before tokenizing so CDN/IDP/doc URLs
