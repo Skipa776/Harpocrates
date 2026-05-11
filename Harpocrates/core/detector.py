@@ -19,6 +19,7 @@ from Harpocrates.core.classification import extract_var_name, infer_category
 from Harpocrates.core.result import EvidenceType, Finding, Severity
 from Harpocrates.detectors.entropy_detector import looks_like_secret, shannon_entropy
 from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNATURES
+from Harpocrates.ml.context import HIGH_RISK_EXTENSIONS
 from Harpocrates.utils.file_utils import iter_text_lines
 
 if TYPE_CHECKING:
@@ -55,6 +56,17 @@ _PROSE_FILTER_RE = re.compile(r"[=:'\"]")
 # entropy gate. Only fires when regex phases found nothing on the line.
 _SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"(?i)(?<![a-zA-Z])(?:pass(?:word|wd|w)?|pwd|usr(?:name)?|user|host|conn(?:ection|str)?|secret|token|key|auth|cred)[a-z0-9_]*\s*[:=]\s*['\"]([^'\"]{3,100})['\"]"
+)
+
+# Phase 2c: unquoted KEY=VALUE for .env-style files. Restricted to
+# HIGH_RISK_EXTENSIONS (detector.py gates by file extension). Covers cases
+# _SENSITIVE_ASSIGNMENT_RE misses because .env files write values without quotes.
+# Value stops at whitespace or quote to avoid double-matching quoted .env values.
+# Intentionally excludes `host` and `user` — unquoted HOST=localhost and
+# USER=postgres are standard config, not credentials; quoted variants are still
+# caught by _SENSITIVE_ASSIGNMENT_RE.
+_ENV_ASSIGNMENT_RE = re.compile(
+    r"(?i)(?<![a-zA-Z])(?:pass(?:word|wd|w)?|pwd|conn(?:ection|str)?|secret|token|key|auth|cred|url|endpoint|callback)[a-z0-9_]*\s*=\s*([^\s'\"]{3,200})"
 )
 
 
@@ -135,6 +147,17 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     findings: List[Finding] = []
     stripped = line.strip()
 
+    # Determine whether this file belongs to a credential-bearing extension set
+    # (.env, .pem, .key, etc.) where URL bodies are credentials, not noise.
+    # Also handles dotted-variant names like .env.local and .env.production.
+    file_ext = ""
+    if file is not None:
+        file_ext = Path(file).suffix.lower()
+        if not file_ext or file_ext not in HIGH_RISK_EXTENSIONS:
+            basename = Path(file).name.lower()
+            if basename == ".env" or basename.startswith(".env."):
+                file_ext = ".env"
+
     if not stripped:
         return findings
 
@@ -213,7 +236,12 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
 
         # Tier 2: strip URL substrings before tokenizing so CDN/IDP/doc URLs
         # don't generate entropy candidates from their path components.
-        scan_text = _URL_RE.sub(" ", scan_target)
+        # Exception: skip stripping for credential-bearing file types (.env,
+        # .pem, .key, etc.) where URLs ARE the credential (e.g. DATABASE_URL).
+        if file_ext in HIGH_RISK_EXTENSIONS:
+            scan_text = scan_target
+        else:
+            scan_text = _URL_RE.sub(" ", scan_target)
 
         # TODO(v0.3): switch to finditer to capture offsets → TokenMatch for entropy candidates.
         # URL stripping does not preserve length so offsets would be scan_text-relative;
@@ -274,6 +302,40 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                         category_reason=_inf.reason,
                     )
                 )
+                found_tokens.add(value)
+
+        # Phase 2c: unquoted KEY=VALUE for .env-style files. Runs on scan_text
+        # which equals scan_target for HIGH_RISK files (URL-strip is skipped
+        # above), so offsets are consistent with found_tokens populated by the
+        # entropy and SA passes. Deduplicates against found_tokens to avoid
+        # double-emitting a value already caught above.
+        if file_ext in HIGH_RISK_EXTENSIONS:
+            for match in _ENV_ASSIGNMENT_RE.finditer(scan_text):
+                value = match.group(1)
+                if value in found_tokens:
+                    continue
+                _vn = scan_text[: match.start(1)].split("=")[0].split(":")[0].strip()
+                _vn = _vn or None
+                _inf = infer_category(signature_name=None, var_name=_vn, token=value)
+                findings.append(
+                    Finding(
+                        type="ENV_ASSIGNMENT",
+                        file=file,
+                        line=lineno,
+                        snippet=stripped[:200],
+                        entropy=shannon_entropy(value),
+                        evidence=EvidenceType.REGEX,
+                        severity=_severity_from_classification(_inf),
+                        confidence=_inf.confidence,
+                        token=value,
+                        token_start=match.start(1),
+                        token_end=match.end(1),
+                        in_comment=in_comment,
+                        category=_inf.category.value,
+                        category_reason=_inf.reason,
+                    )
+                )
+                found_tokens.add(value)
 
     return findings
 
