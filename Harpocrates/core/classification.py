@@ -170,6 +170,14 @@ _VAR_NAME_LEXICON: Tuple[Tuple[re.Pattern, ViolationCategory, float], ...] = (
     # not credentials. Using `$` anchor prevents matching key_id, key_type, etc.
     (re.compile(r"(?i)(?:^|_)key$"),
      ViolationCategory.GENERIC_SECRET, 0.65),
+    # Endpoint / URL variable suffix — covers OPENAI_BASE_URL, SSO_CALLBACK_URL,
+    # APIM_TOKEN_URLS and similar. INFO band (cat_conf < 0.5) only — these are
+    # operational metadata, not secrets. Must come last — three higher-priority
+    # patterns intercept before reaching here: credentialed DB/AMQP URLs
+    # (DATABASE_URL, MONGO_URL, REDIS_URL) via the connection_string entries at
+    # 0.85-0.90, and WEBHOOK_URL via the webhook entry at 0.80.
+    (re.compile(r"(?i)(?:^|_)urls?$"),
+     ViolationCategory.GENERIC_SECRET, 0.45),
 )
 
 # ---------------------------------------------------------------------------
