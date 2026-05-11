@@ -55,6 +55,12 @@ RISKY_CONTEXT_PATTERNS: List[Pattern[str]] = [
 # File extensions with higher risk scores
 HIGH_RISK_EXTENSIONS = {".env", ".pem", ".key", ".secret", ".credentials"}
 CONFIG_EXTENSIONS = {".yaml", ".yml", ".json", ".toml", ".ini", ".cfg", ".conf"}
+
+# File extensions where entropy is pure noise — structured markup/style/vector files
+# generate webpack fingerprints, CSS class hashes, and SVG path data that satisfy
+# the entropy threshold but are never credentials. Regex tier still runs so
+# accidentally hardcoded API keys in <script> blocks are still caught.
+LOW_NOISE_EXTENSIONS = frozenset({".html", ".htm", ".css", ".scss", ".sass", ".svg", ".xml"})
 TEST_PATH_PATTERNS = [
     re.compile(r"(^|[/\\])tests?[/\\]", re.I),
     re.compile(r"(^|[/\\])__tests__[/\\]", re.I),
