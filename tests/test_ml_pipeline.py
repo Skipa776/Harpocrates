@@ -85,6 +85,19 @@ class TestFeatureExtraction:
         # Version pattern should be detected
         assert features.has_version_pattern is True
 
+    def test_extract_context_from_pre_split_lines_matches_text_api(self):
+        """Batch callers can split a file once without changing context semantics."""
+        from Harpocrates.ml.context import extract_context, extract_context_from_lines
+
+        content = "first\napi_secret = value\nthird\nfourth\n"
+
+        expected = extract_context(content, 2, "config.py", context_lines=1)
+        actual = extract_context_from_lines(
+            content.splitlines(), 2, "config.py", context_lines=1
+        )
+
+        assert actual == expected
+
 
 class TestDataGeneration:
     """Tests for training data generation."""

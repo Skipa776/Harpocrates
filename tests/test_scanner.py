@@ -1,9 +1,30 @@
 """Tests for the scanner module."""
+
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
-from Harpocrates.core.scanner import scan_directory, scan_file
+from Harpocrates.core.scanner import DEFAULT_IGNORE_PATTERNS, scan_directory, scan_file
+
+
+def test_agent_configuration_directories_are_not_ignored() -> None:
+    """Tool settings can contain credentials and must remain in scan scope."""
+    assert ".claude" not in DEFAULT_IGNORE_PATTERNS
+    assert ".taskmaster" not in DEFAULT_IGNORE_PATTERNS
+
+
+def test_python_ignore_patterns_support_character_classes(tmp_path: Path) -> None:
+    for name in ("a.env", "b.env", "c.env"):
+        (tmp_path / name).write_text("APP_NAME=Test\n", encoding="utf-8")
+
+    result = scan_directory(
+        tmp_path,
+        ignore_patterns={"[ab].env"},
+        engine="python",
+    )
+
+    assert result.scanned_files == 1
 
 
 def test_scan_file_with_secrets(tmp_path: Path) -> None:
@@ -108,6 +129,24 @@ def test_scan_directory_custom_ignore(tmp_path: Path) -> None:
     assert not result.found_secrets
 
 
+def test_python_ignore_globs_match_directory_components_and_question_marks(
+    tmp_path: Path,
+) -> None:
+    generated = tmp_path / "build-generated"
+    generated.mkdir()
+    (generated / "secret.env").write_text("AKIAIOSFODNN7EXAMPLE\n", encoding="utf-8")
+    (tmp_path / "key1.env").write_text("AKIAIOSFODNN7EXAMPLE\n", encoding="utf-8")
+
+    result = scan_directory(
+        tmp_path,
+        engine="python",
+        ignore_patterns={"build-*", "key?.env"},
+    )
+
+    assert result.scanned_files == 0
+    assert result.findings == []
+
+
 def test_scan_directory_nonexistent(tmp_path: Path) -> None:
     """Test scanning a nonexistent directory."""
     nonexistent = tmp_path / "nonexistent"
@@ -168,3 +207,132 @@ def test_scan_result_summary(tmp_path: Path) -> None:
     assert result.high_count >= 0
     # Duration should be set
     assert result.duration_ms >= 0
+
+
+def test_python_directory_line_count_includes_lines_after_a_finding(tmp_path: Path) -> None:
+    (tmp_path / "secret.env").write_text(
+        "AKIAIOSFODNN7EXAMPLE\nAPP_NAME=Test\nVERSION=1\n",
+        encoding="utf-8",
+    )
+
+    result = scan_directory(tmp_path, engine="python")
+
+    assert result.total_lines == 3
+
+
+def test_python_directory_line_count_excludes_binary_payload_lines(tmp_path: Path) -> None:
+    (tmp_path / "binary.dat").write_bytes(b"\x00binary\nmore\n")
+
+    result = scan_directory(tmp_path, engine="python")
+
+    assert result.scanned_files == 1
+    assert result.total_lines == 0
+
+
+def test_python_scanner_keeps_valid_unicode_text(tmp_path: Path) -> None:
+    (tmp_path / "unicode.env").write_text(
+        "設定値=秘密\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n",
+        encoding="utf-8",
+    )
+
+    result = scan_directory(tmp_path, engine="python")
+
+    assert result.total_lines == 2
+    assert any(finding.type == "AWS_ACCESS_KEY_ID" for finding in result.findings)
+
+
+def test_scan_directory_rust_engine_owns_traversal(tmp_path: Path, monkeypatch) -> None:
+    """The native directory path must prune and scan without Python rglob."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    first = tmp_path / "a.txt"
+    second = tmp_path / "b.txt"
+    first.write_text("APP_NAME=A\n", encoding="utf-8")
+    second.write_text("APP_NAME=B\n", encoding="utf-8")
+    backend = Mock()
+    backend.scan_directory.return_value = SimpleNamespace(
+        findings=[],
+        scanned_files=2,
+        total_lines=2,
+        errors=[],
+    )
+    monkeypatch.setattr("Harpocrates.core.scanner._resolve_native_backend", lambda engine: backend)
+
+    def forbid_rglob(*args, **kwargs):
+        raise AssertionError("Python rglob must not run for the Rust engine")
+
+    monkeypatch.setattr(Path, "rglob", forbid_rglob)
+
+    result = scan_directory(tmp_path, engine="rust")
+
+    backend.scan_directory.assert_called_once()
+    backend.scan_files.assert_not_called()
+    backend.scan_file.assert_not_called()
+    assert result.scanned_files == 2
+    assert result.total_lines == 2
+
+
+def test_scan_directory_rust_ml_owns_traversal(tmp_path: Path, monkeypatch) -> None:
+    """Rust traversal remains batched when Python ML verification is enabled."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    (tmp_path / "a.txt").write_text("APP_NAME=A\n", encoding="utf-8")
+    backend = Mock()
+    backend.scan_directory_with_ml.return_value = SimpleNamespace(
+        findings=[], scanned_files=1, total_lines=1, errors=[]
+    )
+    monkeypatch.setattr("Harpocrates.core.scanner._resolve_native_backend", lambda engine: backend)
+    monkeypatch.setattr(
+        Path,
+        "rglob",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Python rglob must not run for Rust + ML")
+        ),
+    )
+    verifier = Mock()
+
+    result = scan_directory(tmp_path, engine="rust", verifier=verifier)
+
+    backend.scan_directory_with_ml.assert_called_once()
+    assert result.scanned_files == 1
+
+
+def test_scan_directory_explicit_rust_failure_is_fatal(tmp_path: Path, monkeypatch) -> None:
+    backend = Mock()
+    backend.scan_directory.side_effect = RuntimeError("native crashed")
+    monkeypatch.setattr("Harpocrates.core.scanner._resolve_native_backend", lambda engine: backend)
+
+    result = scan_directory(tmp_path, engine="rust")
+
+    assert result.scanned_files == 0
+    assert result.errors == ["Rust directory scan failed: native crashed"]
+
+
+def test_scan_directory_auto_falls_back_after_native_failure(tmp_path: Path, monkeypatch) -> None:
+    clean = tmp_path / "clean.txt"
+    clean.write_text("APP_NAME=Test\n", encoding="utf-8")
+    backend = Mock()
+    backend.scan_directory.side_effect = RuntimeError("native crashed")
+    monkeypatch.setattr("Harpocrates.core.scanner._resolve_native_backend", lambda engine: backend)
+
+    result = scan_directory(tmp_path, engine="auto")
+
+    assert result.scanned_files == 1
+    assert result.findings == []
+    assert result.errors == ["Rust directory scan failed; used Python fallback: native crashed"]
+
+
+def test_scan_file_auto_falls_back_after_native_failure(tmp_path: Path, monkeypatch) -> None:
+    clean = tmp_path / "clean.txt"
+    clean.write_text("APP_NAME=Test\n", encoding="utf-8")
+    backend = Mock()
+    backend.scan_file.side_effect = RuntimeError("native crashed")
+    monkeypatch.setattr("Harpocrates.core.scanner._resolve_native_backend", lambda engine: backend)
+
+    result = scan_file(clean, engine="auto")
+
+    assert result.scanned_files == 1
+    assert result.findings == []
+    assert result.errors == ["Rust file scan failed; used Python fallback: native crashed"]

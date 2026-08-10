@@ -212,24 +212,88 @@ def test_detect_text_does_not_expose_ml_candidates() -> None:
     )
 
 
-def test_detect_text_with_ml_drops_ml_candidates_on_verifier_failure() -> None:
-    """On verifier exception, detect_text_with_ml must drop ML_CANDIDATEs."""
+def test_detect_text_with_ml_propagates_verifier_failure() -> None:
+    """An explicitly requested ML scan must not silently hide verifier failure."""
     from unittest.mock import MagicMock
+
+    import pytest
 
     from Harpocrates.core.detector import detect_text_with_ml
 
     failing_verifier = MagicMock()
-    failing_verifier.verify.side_effect = RuntimeError("simulated verifier failure")
+    failing_verifier.verify_batch.side_effect = RuntimeError("simulated verifier failure")
 
     text = 'secret = "aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890_long"\n'
 
-    findings = detect_text_with_ml(text, verifier=failing_verifier)
+    with pytest.raises(RuntimeError, match="simulated verifier failure"):
+        detect_text_with_ml(text, verifier=failing_verifier)
 
-    ml_findings = [f for f in findings if f.evidence == EvidenceType.ML]
-    assert ml_findings == [], (
-        "On verifier failure, ML_CANDIDATEs must be dropped — "
-        f"got {len(ml_findings)} unverified finding(s)"
+
+def test_detect_text_with_ml_batches_all_candidates() -> None:
+    """Multiple candidates should require one verifier inference call."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from Harpocrates.core.detector import detect_text_with_ml
+
+    verifier = Mock()
+    verifier.verify.side_effect = AssertionError("single-item verification is forbidden")
+    verifier.verify_batch.side_effect = lambda items: [
+        SimpleNamespace(is_secret=True, combined_confidence=0.95) for _ in items
+    ]
+    text = (
+        'api_secret = "aB3dEfGhIjKlMnOpQrStUvWxYz012345"\n'
+        'auth_token = "N7vK2xP9mQ4rT8wY6zA3cD5fG1hJ"\n'
     )
+
+    findings = detect_text_with_ml(text, verifier=verifier, ml_threshold=0.0)
+
+    verifier.verify_batch.assert_called_once()
+    verifier.verify.assert_not_called()
+    assert len(findings) == 2
+    assert all(finding.evidence == EvidenceType.HYBRID for finding in findings)
+
+
+def test_ml_verification_splits_candidate_dense_inputs_into_bounded_batches() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from Harpocrates.core.detector import _apply_ml_verification_with_contexts
+
+    finding = Finding(
+        type="ENTROPY_CANDIDATE",
+        snippet="secret",
+        evidence=EvidenceType.ENTROPY,
+        confidence=0.7,
+    )
+    verifier = Mock()
+    verifier.verify_batch.side_effect = lambda items: [
+        SimpleNamespace(is_secret=True, combined_confidence=0.95) for _ in items
+    ]
+
+    verified = _apply_ml_verification_with_contexts(
+        [(finding, Mock()) for _ in range(1025)],
+        verifier=verifier,
+        ml_threshold=0.0,
+    )
+
+    assert len(verified) == 1025
+    assert [len(call.args[0]) for call in verifier.verify_batch.call_args_list] == [1024, 1]
+
+
+def test_detect_text_with_ml_rejects_wrong_batch_result_count() -> None:
+    from unittest.mock import Mock
+
+    import pytest
+
+    from Harpocrates.core.detector import MLVerificationError, detect_text_with_ml
+
+    verifier = Mock()
+    verifier.verify_batch.return_value = []
+    text = 'api_secret = "aB3dEfGhIjKlMnOpQrStUvWxYz012345"\n'
+
+    with pytest.raises(MLVerificationError, match="1 candidates"):
+        detect_text_with_ml(text, verifier=verifier)
 
 
 def test_detect_text_never_exposes_ml_candidates_for_any_input() -> None:
