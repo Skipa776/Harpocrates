@@ -152,6 +152,9 @@ harpocrates scan ./my_project --json
 # Enable ML verification to suppress false positives
 harpocrates scan ./my_project --ml
 
+# Use the Rust regex/entropy engine and the existing Python ML verifier
+harpocrates scan ./my_project --engine rust --ml
+
 # Only fail CI on high or critical findings
 harpocrates scan ./my_project --fail-on high
 
@@ -183,6 +186,7 @@ Add to `.pre-commit-config.yaml`, then run `pre-commit install`. Harpocrates sca
 |------|---------|-------------|
 | `--ml` | off | Enable ML verification to reduce false positives |
 | `--ml-threshold FLOAT` | `0.19` | ML confidence threshold `0.0–1.0`. Lower = more recall, higher = more precision |
+| `--engine ENGINE` | `auto` | `auto` prefers an available Rust binary; `rust` requires it; `python` uses the original engine |
 | `--fail-on LEVEL` | `medium` | Severity that triggers exit code `1`: `critical` \| `high` \| `medium` \| `low` \| `info` \| `none` |
 | `--json` | off | Output results as JSON instead of a table |
 | `--show-secrets` | off | Print full token values instead of redacted previews |
@@ -219,6 +223,27 @@ Harpocrates runs a three-phase pipeline on every line of every file:
 2. **Entropy analysis** — Shannon entropy flags high-randomness tokens that don't match any known pattern. Catches credentials stored under ambiguous variable names (`my_key`, `token`, `secret`) that regex scanners miss entirely.
 
 3. **ML verification** (opt-in via `--ml`) — a single-stage XGBoost classifier extracts 64 features from the token, its variable name, and the surrounding code context. It learns to distinguish `api_secret = "AKIA..."` (secret) from `commit_sha = "a1b2c..."` (Git SHA) without relying on the variable name alone. Inference runs via ONNX Runtime when available, with native XGBoost as fallback.
+
+### Native Rust scanner
+
+The optional `rust_scanner` crate owns file reading, binary-file rejection,
+comment handling, regex matching, entropy calculation, and candidate generation.
+It returns a small JSON candidate stream to Python. Python remains responsible
+for violation classification, context extraction, and the existing ML verifier;
+known regex hits still bypass ML.
+
+Build it from a source checkout:
+
+```bash
+cargo build --release --manifest-path rust_scanner/Cargo.toml
+harpocrates scan ./my_project --engine rust
+harpocrates scan ./my_project --engine rust --ml
+```
+
+`--engine auto` (the default) finds release/debug binaries in the source tree or
+an installed `harpocrates-rust-scanner` on `PATH`. Set
+`HARPOCRATES_RUST_SCANNER=/absolute/path/to/harpocrates-rust-scanner` to use a
+custom build. Use `--engine python` to force the original implementation.
 
 **Ships pre-trained. No user training required.**
 

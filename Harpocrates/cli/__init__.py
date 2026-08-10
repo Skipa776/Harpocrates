@@ -43,6 +43,7 @@ _VALID_FAIL_ON_LEVELS = (
     Severity.HIGH.value,
     Severity.CRITICAL.value,
 )
+_VALID_ENGINES = ("auto", "python", "rust")
 
 
 def _resolve_fail_on(raw: str) -> Optional[Severity]:
@@ -65,6 +66,15 @@ def _fail_on_callback(value: str) -> str:
     return value
 
 
+def _engine_callback(value: str) -> str:
+    """Validate the selected scan engine at argument-parse time."""
+    normalized = value.strip().lower()
+    if normalized not in _VALID_ENGINES:
+        valid = ", ".join(_VALID_ENGINES)
+        raise typer.BadParameter(f"Invalid --engine value {value!r}. Must be one of: {valid}")
+    return normalized
+
+
 def _should_fail(findings, min_severity: Optional[Severity]) -> bool:
     """Return True if any finding meets or exceeds the minimum severity."""
     if min_severity is None:
@@ -82,6 +92,12 @@ def scan(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
     max_file_size: int = typer.Option(10, "--max-size", help="Max file size in MB"),
+    engine: str = typer.Option(
+        "auto",
+        "--engine",
+        help="Scanning engine: auto, python, or rust. Auto prefers a built Rust binary.",
+        callback=_engine_callback,
+    ),
     ignore: Optional[str] = typer.Option(
         None, "--ignore",
         help="Comma-separated patterns to ignore"
@@ -145,6 +161,9 @@ def scan(
         # ML with custom threshold
         harpocrates scan ./my_project --ml --ml-threshold 0.7
 
+        # Require the native regex/entropy scanner; ML still runs in Python
+        harpocrates scan ./my_project --engine rust --ml
+
         # Display full token values (NOT recommended outside local debugging)
         harpocrates scan config.env --show-secrets
 
@@ -170,6 +189,15 @@ def scan(
             f"[red]✗[/red] --ml-threshold must be between 0.0 and 1.0, got: {ml_threshold}"
         )
         raise typer.Exit(code=2)
+
+    if engine == "rust":
+        from Harpocrates.core.rust_backend import RustScannerBackend, RustScannerError
+
+        try:
+            RustScannerBackend.discover(required=True)
+        except RustScannerError as exc:
+            error_console.print(f"[red]✗[/red] {exc}")
+            raise typer.Exit(code=2) from exc
 
     # Already validated by _fail_on_callback at parse time; safe to call.
     fail_on_severity = _resolve_fail_on(fail_on)
@@ -232,6 +260,7 @@ def scan(
                 ignore_patterns=ignore_patterns,
                 verifier=verifier,
                 ml_threshold=ml_threshold,
+                engine=engine,
             )
         else:
             try:
@@ -240,6 +269,7 @@ def scan(
                     max_file_size=max_bytes,
                     verifier=verifier,
                     ml_threshold=ml_threshold,
+                    engine=engine,
                 )
             except UnicodeDecodeError:
                 error_console.print(

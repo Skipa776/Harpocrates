@@ -36,6 +36,13 @@ def test_detect_text_finds_aws_key() -> None:
     assert any(f.evidence == EvidenceType.REGEX for f in findings)
 
 
+def test_detect_text_finds_private_key_header() -> None:
+    """PEM headers must not be mistaken for SQL ``--`` comments."""
+    findings = detect_text("-----BEGIN PRIVATE KEY-----\n")
+
+    assert any(f.type == "PRIVATE_KEY" for f in findings)
+
+
 def test_detect_text_no_false_positives() -> None:
     """Test that normal text doesn't trigger false positives."""
     text = """
