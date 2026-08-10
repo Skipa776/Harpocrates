@@ -51,7 +51,7 @@ api = [
     "python-multipart>=0.0.6",
 ]
 mcp = [
-    "mcp>=1.0.0",
+    "mcp>=1.27,<2",
 ]
 llm = [
     # LLM providers use standard library (urllib) for HTTP
@@ -71,7 +71,7 @@ all = [
     "uvicorn[standard]>=0.27.0",
     "pydantic-settings>=2.1.0",
     "python-multipart>=0.0.6",
-    "mcp>=1.0.0",
+    "mcp>=1.27,<2",
 ]
 
 [project.scripts]
