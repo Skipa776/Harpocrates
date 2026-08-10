@@ -9,11 +9,12 @@ Three-phase pipeline per line:
 Regex hits bypass XGBoost entirely; only entropy candidates are forwarded
 to the ML verifier. This keeps the fast path deterministic and CPU-free.
 """
+
 from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 
 from Harpocrates.core.classification import extract_var_name, infer_category
 from Harpocrates.core.result import EvidenceType, Finding, Severity
@@ -24,7 +25,16 @@ from Harpocrates.utils.file_utils import iter_text_lines
 
 if TYPE_CHECKING:
     from Harpocrates.core.classification import CategoryInference
+    from Harpocrates.ml.context import CodeContext
     from Harpocrates.ml.verifier import Verifier
+
+
+class MLVerificationError(RuntimeError):
+    """Raised when an explicitly requested ML verification cannot complete."""
+
+
+_ML_VERIFICATION_BATCH_SIZE = 1024
+
 
 # Tier 2: tightened token alphabet — drops '.' so dotted identifiers and URLs
 # no longer form single long tokens. Retains '-' for UUID-style and hyphenated
@@ -163,9 +173,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
 
     # Detect comment lines and strip the prefix so the payload can be scanned.
     # PEM headers start with five hyphens and must not be treated as SQL comments.
-    is_comment = not stripped.startswith("-----BEGIN ") and stripped.startswith(
-        _COMMENT_PREFIXES
-    )
+    is_comment = not stripped.startswith("-----BEGIN ") and stripped.startswith(_COMMENT_PREFIXES)
     scan_target = _COMMENT_STRIP_RE.sub("", stripped) if is_comment else stripped
 
     in_comment = True if is_comment else None
@@ -291,7 +299,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
             if value not in found_tokens:
                 ent = shannon_entropy(value)
                 # var name: everything left of the value in the match, stripped
-                _vn = scan_text[:match.start(1)].split("=")[0].split(":")[0].strip()
+                _vn = scan_text[: match.start(1)].split("=")[0].split(":")[0].strip()
                 _vn = _vn or None
                 _inf = infer_category(signature_name=None, var_name=_vn, token=value)
                 findings.append(
@@ -350,9 +358,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     return findings
 
 
-def _apply_block_comment_flag(
-    line_findings: List[Finding], in_block: bool
-) -> List[Finding]:
+def _apply_block_comment_flag(line_findings: List[Finding], in_block: bool) -> List[Finding]:
     """Set in_comment=True on findings from inside an open /* */ block.
 
     _scan_line only sets in_comment when the line STARTS with a comment prefix.
@@ -362,6 +368,7 @@ def _apply_block_comment_flag(
     if not in_block or not line_findings:
         return line_findings
     import dataclasses
+
     return [
         dataclasses.replace(f, in_comment=True) if f.in_comment is None else f
         for f in line_findings
@@ -495,48 +502,95 @@ def _apply_ml_verification(
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
     """Filter entropy candidates through the ML verifier."""
-    from Harpocrates.ml.context import extract_context
+    lines = full_content.splitlines()
+    verified: List[Finding] = []
+    for start in range(0, len(findings), _ML_VERIFICATION_BATCH_SIZE):
+        candidates = findings[start : start + _ML_VERIFICATION_BATCH_SIZE]
+        findings_with_context = [
+            (finding, _prepare_ml_context_from_lines(finding, lines))
+            for finding in candidates
+        ]
+        verified.extend(
+            _apply_ml_verification_with_contexts(
+                findings_with_context,
+                verifier=verifier,
+                ml_threshold=ml_threshold,
+            )
+        )
+    return verified
+
+
+def _prepare_ml_context_from_lines(finding: Finding, lines: Sequence[str]) -> "CodeContext":
+    """Build verifier context from a file split once for a candidate batch."""
+    from Harpocrates.ml.context import extract_context_from_lines
     from Harpocrates.ml.tokens import TokenMatch
 
-    verified: List[Finding] = []
-    for finding in findings:
-        line_num = finding.line or 1
-        context = extract_context(
-            content=full_content,
-            line_number=line_num,
-            file_path=finding.file,
+    context = extract_context_from_lines(
+        lines=lines,
+        line_number=finding.line or 1,
+        file_path=finding.file,
+    )
+    if (
+        finding.token is not None
+        and finding.token_start is not None
+        and finding.token_end is not None
+    ):
+        context.token_match = TokenMatch(
+            token=finding.token,
+            start=finding.token_start,
+            end=finding.token_end,
+            kind=("regex" if finding.evidence == EvidenceType.REGEX else "sensitive_assignment"),
         )
-        if finding.token is not None and finding.token_start is not None and finding.token_end is not None:
-            context.token_match = TokenMatch(
-                token=finding.token,
-                start=finding.token_start,
-                end=finding.token_end,
-                kind="regex" if finding.evidence == EvidenceType.REGEX else "sensitive_assignment",
+    return context
+
+
+def _apply_ml_verification_with_contexts(
+    findings_with_context: List[Tuple[Finding, "CodeContext"]],
+    verifier: "Verifier",
+    ml_threshold: float = 0.5,
+) -> List[Finding]:
+    """Verify pre-built contexts in bounded batches and preserve alignment."""
+    if not findings_with_context:
+        return []
+
+    verified: List[Finding] = []
+    for start in range(0, len(findings_with_context), _ML_VERIFICATION_BATCH_SIZE):
+        batch = findings_with_context[start : start + _ML_VERIFICATION_BATCH_SIZE]
+        try:
+            results = verifier.verify_batch(batch)
+        except Exception as exc:
+            raise MLVerificationError(f"ML verification failed: {exc}") from exc
+
+        if len(results) != len(batch):
+            raise MLVerificationError(
+                "ML verification failed: verifier returned "
+                f"{len(results)} results for {len(batch)} candidates"
             )
-        result = verifier.verify(finding, context)
-        if result.is_secret and result.combined_confidence >= ml_threshold:
-            inference = _inference_from_finding(finding)
-            new_severity = _severity_from_classification(
-                inference, ml_confidence=result.combined_confidence
-            )
-            verified.append(
-                Finding(
-                    type=finding.type,
-                    file=finding.file,
-                    line=finding.line,
-                    snippet=finding.snippet,
-                    entropy=finding.entropy,
-                    evidence=EvidenceType.HYBRID,
-                    severity=new_severity,
-                    confidence=result.combined_confidence,
-                    token=finding.token,
-                    token_start=finding.token_start,
-                    token_end=finding.token_end,
-                    in_comment=finding.in_comment,
-                    category=finding.category,
-                    category_reason=finding.category_reason,
+
+        for (finding, _context), result in zip(batch, results):
+            if result.is_secret and result.combined_confidence >= ml_threshold:
+                inference = _inference_from_finding(finding)
+                new_severity = _severity_from_classification(
+                    inference, ml_confidence=result.combined_confidence
                 )
-            )
+                verified.append(
+                    Finding(
+                        type=finding.type,
+                        file=finding.file,
+                        line=finding.line,
+                        snippet=finding.snippet,
+                        entropy=finding.entropy,
+                        evidence=EvidenceType.HYBRID,
+                        severity=new_severity,
+                        confidence=result.combined_confidence,
+                        token=finding.token,
+                        token_start=finding.token_start,
+                        token_end=finding.token_end,
+                        in_comment=finding.in_comment,
+                        category=finding.category,
+                        category_reason=finding.category_reason,
+                    )
+                )
     return verified
 
 
@@ -572,15 +626,12 @@ def detect_text_with_ml(
     if not entropy_findings:
         return regex_findings
 
-    try:
-        verified_entropy = _apply_ml_verification(
-            findings=entropy_findings,
-            full_content=text,
-            verifier=verifier,
-            ml_threshold=ml_threshold,
-        )
-    except Exception:
-        verified_entropy = [f for f in entropy_findings if f.evidence != EvidenceType.ML]
+    verified_entropy = _apply_ml_verification(
+        findings=entropy_findings,
+        full_content=text,
+        verifier=verifier,
+        ml_threshold=ml_threshold,
+    )
 
     return regex_findings + verified_entropy
 
@@ -632,15 +683,12 @@ def detect_file_with_ml(
     except (OSError, IOError):
         return [f for f in findings if f.evidence != EvidenceType.ML]
 
-    try:
-        verified_entropy = _apply_ml_verification(
-            findings=entropy_findings,
-            full_content=full_content,
-            verifier=verifier,
-            ml_threshold=ml_threshold,
-        )
-    except Exception:
-        verified_entropy = [f for f in entropy_findings if f.evidence != EvidenceType.ML]
+    verified_entropy = _apply_ml_verification(
+        findings=entropy_findings,
+        full_content=full_content,
+        verifier=verifier,
+        ml_threshold=ml_threshold,
+    )
 
     return regex_findings + verified_entropy
 
@@ -650,5 +698,6 @@ __all__ = [
     "detect_file",
     "detect_text_with_ml",
     "detect_file_with_ml",
+    "MLVerificationError",
     "Finding",
 ]

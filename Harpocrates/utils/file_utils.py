@@ -28,6 +28,15 @@ def _looks_binary(sample: bytes) -> bool:
     if b"\x00" in sample:
         return True
 
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError as error:
+        # A probe can end midway through a valid multi-byte character.
+        if error.end == len(sample) and error.reason == "unexpected end of data":
+            return False
+    else:
+        return False
+
     nontext = 0
     for byte in sample:
         if byte in b"\t\n\r\f\b":

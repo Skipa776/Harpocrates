@@ -1,4 +1,8 @@
-use harpocrates_rust_scanner::{ScanOptions, scan_file, scan_text};
+use harpocrates_rust_scanner::{
+    BatchScanRequest, DirectoryScanRequest, ScanOptions, scan_batch, scan_directory, scan_file,
+    scan_text,
+};
+use serde::Serialize;
 use std::env;
 use std::io::{self, Read};
 use std::process::ExitCode;
@@ -16,7 +20,7 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let command = args.next().ok_or_else(usage)?;
-    let findings = match command.as_str() {
+    match command.as_str() {
         "scan-text" => {
             let mut file = None;
             while let Some(argument) = args.next() {
@@ -29,7 +33,9 @@ fn run() -> Result<(), String> {
             io::stdin()
                 .read_to_string(&mut text)
                 .map_err(|error| format!("failed to read stdin: {error}"))?;
-            scan_text(&text, &ScanOptions { file }).map_err(|error| error.to_string())?
+            let findings =
+                scan_text(&text, &ScanOptions { file }).map_err(|error| error.to_string())?;
+            write_output(&findings)?;
         }
         "scan-file" => {
             let path = args.next().ok_or_else(usage)?;
@@ -47,17 +53,38 @@ fn run() -> Result<(), String> {
                     _ => return Err(usage()),
                 }
             }
-            scan_file(path, max_bytes).map_err(|error| error.to_string())?
+            let findings = scan_file(path, max_bytes).map_err(|error| error.to_string())?;
+            write_output(&findings)?;
+        }
+        "scan-batch" => {
+            if args.next().is_some() {
+                return Err(usage());
+            }
+            let request: BatchScanRequest = serde_json::from_reader(io::stdin())
+                .map_err(|error| format!("failed to decode batch request: {error}"))?;
+            let response = scan_batch(request).map_err(|error| error.to_string())?;
+            write_output(&response)?;
+        }
+        "scan-directory" => {
+            if args.next().is_some() {
+                return Err(usage());
+            }
+            let request: DirectoryScanRequest = serde_json::from_reader(io::stdin())
+                .map_err(|error| format!("failed to decode directory request: {error}"))?;
+            let response = scan_directory(request).map_err(|error| error.to_string())?;
+            write_output(&response)?;
         }
         _ => return Err(usage()),
-    };
-
-    serde_json::to_writer(io::stdout(), &findings)
-        .map_err(|error| format!("failed to encode scan result: {error}"))?;
+    }
     Ok(())
 }
 
+fn write_output(value: &impl Serialize) -> Result<(), String> {
+    serde_json::to_writer(io::stdout(), value)
+        .map_err(|error| format!("failed to encode scan result: {error}"))
+}
+
 fn usage() -> String {
-    "usage: harpocrates-rust-scanner scan-text [--file PATH] | scan-file PATH [--max-bytes N]"
+    "usage: harpocrates-rust-scanner scan-text [--file PATH] | scan-file PATH [--max-bytes N] | scan-batch | scan-directory"
         .to_owned()
 }

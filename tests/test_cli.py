@@ -386,6 +386,119 @@ def test_cli_scan_engine_flag_is_forwarded(tmp_path: Path, monkeypatch) -> None:
     assert captured["engine"] == "rust"
 
 
+def test_cli_explicit_rust_backend_failure_exits_two(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from Harpocrates.core.result import ScanResult
+
+    file_path = tmp_path / "config.txt"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "Harpocrates.cli.scan_file",
+        lambda *args, **kwargs: ScanResult(
+            findings=[],
+            scanned_files=0,
+            errors=["Error scanning file: native crashed"],
+        ),
+    )
+
+    result = runner.invoke(app, ["scan", str(file_path), "--engine", "rust"])
+
+    assert result.exit_code == 2
+
+
+def test_cli_partial_scan_error_exits_two(tmp_path: Path, monkeypatch) -> None:
+    """A partial scan must not report a clean CI result."""
+    from Harpocrates.core.result import ScanResult
+
+    file_path = tmp_path / "config.txt"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "Harpocrates.cli.scan_file",
+        lambda *args, **kwargs: ScanResult(
+            findings=[],
+            scanned_files=1,
+            errors=["oversized.env: file exceeds maximum size"],
+        ),
+    )
+
+    result = runner.invoke(app, ["scan", str(file_path)])
+
+    assert result.exit_code == 2
+
+
+def test_cli_explicit_ml_model_load_failure_exits_two(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """--ml must fail closed when its verifier cannot be initialized."""
+    import Harpocrates.ml.ensemble as ensemble
+
+    file_path = tmp_path / "config.txt"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+
+    def fail_to_load(*args, **kwargs):
+        raise RuntimeError("model schema mismatch")
+
+    monkeypatch.setattr(ensemble, "get_verifier", fail_to_load)
+
+    result = runner.invoke(app, ["scan", str(file_path), "--ml"])
+
+    assert result.exit_code == 2
+    assert "model schema mismatch" in result.output
+
+
+def test_cli_explicit_ml_inference_failure_exits_two(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """--ml must return an error when inference fails during a scan."""
+    from Harpocrates.core.result import ScanResult
+
+    file_path = tmp_path / "config.txt"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "Harpocrates.ml.ensemble.get_verifier",
+        lambda **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "Harpocrates.cli.scan_file",
+        lambda *args, **kwargs: ScanResult(
+            findings=[], errors=["ML verification failed: invalid input width"]
+        ),
+    )
+
+    result = runner.invoke(app, ["scan", str(file_path), "--ml"])
+
+    assert result.exit_code == 2
+    assert "invalid input width" in result.output
+
+
+def test_cli_ml_auto_backend_fallback_warning_is_not_fatal(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A successful Python fallback must remain successful when ML is enabled."""
+    from Harpocrates.core.result import ScanResult
+
+    file_path = tmp_path / "config.txt"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "Harpocrates.ml.ensemble.get_verifier",
+        lambda **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "Harpocrates.cli.scan_file",
+        lambda *args, **kwargs: ScanResult(
+            findings=[],
+            scanned_files=1,
+            errors=["Rust file scan failed; used Python fallback: native crashed"],
+        ),
+    )
+
+    result = runner.invoke(app, ["scan", str(file_path), "--ml"])
+
+    assert result.exit_code == 0
+    assert "used Python fallback" in result.output
+
+
 def test_scan_multiple_files(tmp_path: Path) -> None:
     """harpocrates scan a.txt b.txt c.env processes all three files."""
     a = tmp_path / "a.txt"

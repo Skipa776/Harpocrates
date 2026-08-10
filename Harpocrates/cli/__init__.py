@@ -5,14 +5,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, cast
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from Harpocrates.core.result import ScanResult, Severity
-from Harpocrates.core.scanner import scan_directory, scan_file
+from Harpocrates.core.scanner import ScanEngine, scan_directory, scan_file
 
 app = typer.Typer(
     name="harpocrates",
@@ -226,19 +226,19 @@ def scan(
                         console.print("[cyan]ℹ[/cyan] Ensemble ML verification enabled")
             except Exception as e:
                 error_console.print(
-                    f"[yellow]⚠[/yellow] No ML model found: {e}"
+                    f"[red]✗[/red] ML verifier could not be loaded: {e}"
                 )
                 error_console.print(
                     "[yellow]⚠[/yellow] Train a model with 'harpocrates train' or "
                     "'python -m Harpocrates.training.train_model'"
                 )
-                error_console.print("[yellow]⚠[/yellow] Falling back to standard detection")
+                raise typer.Exit(code=2) from e
         except ImportError:
             error_console.print(
-                "[yellow]⚠[/yellow] ML dependencies not installed. "
+                "[red]✗[/red] ML dependencies not installed. "
                 "Install with: pip install harpocrates[ml]"
             )
-            error_console.print("[yellow]⚠[/yellow] Falling back to standard detection")
+            raise typer.Exit(code=2)
 
     # Scan all paths, aggregating findings across files and directories.
     all_findings = []
@@ -260,7 +260,7 @@ def scan(
                 ignore_patterns=ignore_patterns,
                 verifier=verifier,
                 ml_threshold=ml_threshold,
-                engine=engine,
+                engine=cast(ScanEngine, engine),
             )
         else:
             try:
@@ -269,7 +269,7 @@ def scan(
                     max_file_size=max_bytes,
                     verifier=verifier,
                     ml_threshold=ml_threshold,
-                    engine=engine,
+                    engine=cast(ScanEngine, engine),
                 )
             except UnicodeDecodeError:
                 error_console.print(
@@ -301,6 +301,13 @@ def scan(
     if result.errors:
         for error in result.errors:
             error_console.print(f"[yellow]⚠[/yellow]  {error}")
+        fatal_errors = [
+            error
+            for error in result.errors
+            if "; used Python fallback:" not in error
+        ]
+        if fatal_errors:
+            raise typer.Exit(code=2)
 
     exit_on_findings = (
         1 if _should_fail(result.findings, fail_on_severity) else 0
