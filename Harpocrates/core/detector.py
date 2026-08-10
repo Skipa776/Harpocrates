@@ -162,7 +162,10 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
         return findings
 
     # Detect comment lines and strip the prefix so the payload can be scanned.
-    is_comment = stripped.startswith(_COMMENT_PREFIXES)
+    # PEM headers start with five hyphens and must not be treated as SQL comments.
+    is_comment = not stripped.startswith("-----BEGIN ") and stripped.startswith(
+        _COMMENT_PREFIXES
+    )
     scan_target = _COMMENT_STRIP_RE.sub("", stripped) if is_comment else stripped
 
     in_comment = True if is_comment else None

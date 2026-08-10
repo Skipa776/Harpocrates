@@ -362,6 +362,30 @@ def test_cli_scan_ml_threshold_default_documented_in_help() -> None:
     assert "0.19" in result.stdout
 
 
+def test_cli_scan_engine_flag_is_forwarded(tmp_path: Path, monkeypatch) -> None:
+    """Operators can explicitly require the Rust scanner."""
+    from Harpocrates.core.result import ScanResult
+
+    file_path = tmp_path / "config.txt"
+    file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
+    captured = {}
+
+    def fake_scan_file(*args, **kwargs):
+        captured.update(kwargs)
+        return ScanResult(findings=[], scanned_files=1, total_lines=1)
+
+    monkeypatch.setattr("Harpocrates.cli.scan_file", fake_scan_file)
+    monkeypatch.setattr(
+        "Harpocrates.core.rust_backend.RustScannerBackend.discover",
+        lambda **kwargs: object(),
+    )
+
+    result = runner.invoke(app, ["scan", str(file_path), "--engine", "rust"])
+
+    assert result.exit_code == 0
+    assert captured["engine"] == "rust"
+
+
 def test_scan_multiple_files(tmp_path: Path) -> None:
     """harpocrates scan a.txt b.txt c.env processes all three files."""
     a = tmp_path / "a.txt"

@@ -3,13 +3,16 @@ from __future__ import annotations
 import fnmatch
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Set
+from typing import TYPE_CHECKING, List, Literal, Optional, Set
 
 from Harpocrates.core.detector import detect_file, detect_file_with_ml
 from Harpocrates.core.result import Finding, ScanResult
 
 if TYPE_CHECKING:
+    from Harpocrates.core.rust_backend import RustScannerBackend
     from Harpocrates.ml.verifier import Verifier
+
+ScanEngine = Literal["auto", "python", "rust"]
 
 DEFAULT_IGNORE_PATTERNS = {
     # Version control
@@ -74,6 +77,7 @@ def scan_directory(
     ignore_patterns: Optional[Set[str]] = None,
     verifier: Optional["Verifier"] = None,
     ml_threshold: float = 0.5,
+    engine: ScanEngine = "auto",
 ) -> ScanResult:
     """
     Scan a directory for secrets.
@@ -85,6 +89,8 @@ def scan_directory(
         ignore_patterns: Additional patterns to ignore (merged with defaults)
         verifier: Optional ML verifier for false positive filtering
         ml_threshold: ML confidence threshold when verifier is enabled
+        engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it,
+            and ``python`` uses the original detector
 
     Returns:
         ScanResult containing all findings
@@ -114,6 +120,14 @@ def scan_directory(
     if ignore_patterns:
         ignore.update(ignore_patterns)
 
+    try:
+        native_backend = _resolve_native_backend(engine)
+    except (RuntimeError, ValueError) as exc:
+        return ScanResult(
+            findings=[],
+            duration_ms=(time.time() - start_time) * 1000,
+            errors=[str(exc)],
+        )
     all_findings: List[Finding] = []
     scanned_files = 0
     total_lines = 0
@@ -139,7 +153,16 @@ def scan_directory(
 
         try:
             # Use ML verification if verifier is provided
-            if verifier is not None:
+            if native_backend is not None and verifier is not None:
+                findings = native_backend.scan_file_with_ml(
+                    file_path,
+                    verifier=verifier,
+                    max_bytes=max_file_size,
+                    ml_threshold=ml_threshold,
+                )
+            elif native_backend is not None:
+                findings = native_backend.scan_file(file_path, max_bytes=max_file_size)
+            elif verifier is not None:
                 findings = detect_file_with_ml(
                     file_path,
                     verifier=verifier,
@@ -178,6 +201,7 @@ def scan_file(
     max_file_size: int = 10 * 1024 * 1024,
     verifier: Optional["Verifier"] = None,
     ml_threshold: float = 0.5,
+    engine: ScanEngine = "auto",
 ) -> ScanResult:
     """
     Scan a single file for secrets.
@@ -187,6 +211,8 @@ def scan_file(
         max_file_size: Maximum file size to scan
         verifier: Optional ML verifier for false positive filtering
         ml_threshold: ML confidence threshold when verifier is enabled
+        engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it,
+            and ``python`` uses the original detector
 
     Returns:
         ScanResult containing findings from this file
@@ -206,8 +232,17 @@ def scan_file(
         )
 
     try:
-        # Use ML verification if verifier is provided
-        if verifier is not None:
+        native_backend = _resolve_native_backend(engine)
+        if native_backend is not None and verifier is not None:
+            findings = native_backend.scan_file_with_ml(
+                file_path,
+                verifier=verifier,
+                max_bytes=max_file_size,
+                ml_threshold=ml_threshold,
+            )
+        elif native_backend is not None:
+            findings = native_backend.scan_file(file_path, max_bytes=max_file_size)
+        elif verifier is not None:
             findings = detect_file_with_ml(
                 file_path,
                 verifier=verifier,
@@ -242,4 +277,16 @@ def scan_file(
         )
 
 
-__all__ = ["scan_directory", "scan_file", "ScanResult"]
+def _resolve_native_backend(engine: ScanEngine) -> Optional["RustScannerBackend"]:
+    """Return a native backend for auto/rust, or None for Python."""
+    if engine not in {"auto", "python", "rust"}:
+        raise ValueError(f"Unknown scan engine: {engine}")
+    if engine == "python":
+        return None
+
+    from Harpocrates.core.rust_backend import RustScannerBackend
+
+    return RustScannerBackend.discover(required=engine == "rust")
+
+
+__all__ = ["scan_directory", "scan_file", "ScanEngine", "ScanResult"]
