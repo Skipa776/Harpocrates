@@ -30,3 +30,17 @@ def test_holdout_reproduces_recorded_recall():
         pytest.skip("holdout is local-only (gitignored, unknown provenance)")
     recorded = json.loads(CONFIG.read_text())["golden_metrics"]["recall"]
     assert run([HOLDOUT])["recall"] == pytest.approx(recorded, abs=1e-4)
+
+
+def test_pipeline_counts_only_the_record_line():
+    pytest.importorskip("onnxruntime")
+    from bench.eval_detector import _pipeline_predictor
+
+    predict = _pipeline_predictor(0.19)
+    flagged = {"token": "PurpleDog197!", "line_content": 'password = "PurpleDog197!"',
+               "context_before": ["a = 1"], "context_after": ["b = 2"]}
+    # Same secret on a neighbouring line must not count as a hit for this record.
+    neighbour = {"token": "PurpleDog197!", "line_content": "b = 2",
+                 "context_before": ['password = "PurpleDog197!"'], "context_after": []}
+    assert predict(flagged) is True
+    assert predict(neighbour) is False
