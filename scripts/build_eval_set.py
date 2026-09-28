@@ -153,8 +153,10 @@ def _real_negatives(path, repo_dir, repo, flagged, review, seed):
         if (rel, lineno) in flagged or finding.evidence.value == "regex":
             review.append({"repo": repo, "file_path": rel, "line": lineno})
             continue
-        out.append(_record(token, 0, "real_code_candidate", "real_code", lines, lineno - 1,
-                           lines[lineno - 1], rel, repo, language, "existing", "existing", seed))
+        rec = _record(token, 0, "real_code_candidate", "real_code", lines, lineno - 1,
+                      lines[lineno - 1], rel, repo, language, "existing", "existing", seed)
+        # The token's own line is line_content, so context starts after it (as for inserted records).
+        out.append({**rec, "context_after": lines[lineno:lineno + 3]})
     return out
 
 
