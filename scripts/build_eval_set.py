@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT / "cli"))
 from Harpocrates.core.detector import _collect_text_findings
 from Harpocrates.training.generators import secret_templates as t
 
-GENERATOR_VERSION = "1"
+GENERATOR_VERSION = "2"
 CORPUS = ROOT / "data" / "oss"
 OUT = ROOT / "data" / "eval"
 MAX_FILE_BYTES = 200_000
@@ -65,11 +65,16 @@ POSITIVES = {
     "twilio_sid": lambda: t.generate_twilio_credentials()[0],
     "azure_connection_string": t.generate_azure_connection_string,
     "generic_random": t.generate_random_secret, "password": t.generate_human_password,
+    "connection_uri": t.generate_connection_uri, "ado_connection_string": t.generate_ado_connection_string,
+    "jdbc_url": t.generate_jdbc_url, "token_url": t.generate_token_url,
 }
 NEGATIVES = {
     "git_sha": t.generate_git_sha, "uuid": t.generate_uuid, "checksum": t.generate_checksum,
     "base64_data": t.generate_base64_data, "doc_example": lambda: t.generate_documentation_example()[0],
     "encoded_non_secret": lambda: t.generate_encoded_non_secret()[0],
+    "connection_placeholder": t.generate_connection_placeholder, "identifier": t.generate_identifier,
+    "file_path": t.generate_file_path, "template_placeholder": t.generate_template_placeholder,
+    "public_key": t.generate_public_key, "integrity_hash": t.generate_integrity_hash,
 }
 SECRET_NAMES = ["api_key", "secret_key", "access_token", "db_password", "auth_token", "client_secret"]
 NEUTRAL_NAMES = ["value", "data", "config_value", "entry", "ref", "item_id"]

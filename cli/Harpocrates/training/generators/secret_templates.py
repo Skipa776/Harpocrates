@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import random
+import re
 import string
 from typing import Tuple
 
@@ -441,6 +442,125 @@ def generate_human_password() -> str:
     if not number and not symbol:  # a bare word is too ambiguous to label a secret
         number = str(random.randint(1, 999))
     return "".join(words) + number + symbol + tail
+
+
+_DB_USERS = ("app", "admin", "svc_orders", "root", "postgres", "reporting", "etl_user", "api")
+_DB_NAMES = ("orders", "users", "analytics", "billing", "inventory", "app_db", "prod")
+_SCHEMES = (("postgresql", 5432), ("postgres", 5432), ("mysql", 3306), ("mongodb", 27017),
+            ("mongodb+srv", None), ("redis", 6379), ("amqp", 5672), ("mssql", 1433))
+
+
+def _host() -> str:
+    return random.choice((
+        f"db-{random.choice(_PASSWORD_WORDS)}.internal",
+        f"{random.choice(_DB_NAMES)}-prod.{random.choice(('us-east-1.rds.amazonaws.com', 'postgres.database.azure.com', 'c.example.net'))}",
+        f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}",
+        f"cluster{random.randint(0, 9)}.{_random_string(5).lower()}.mongodb.net",
+    ))
+
+
+def _uri_safe_password() -> str:
+    """A password that can sit inside a URI or key=value string without escaping."""
+    if random.random() < 0.5:
+        raw = generate_human_password()
+    else:
+        raw = _random_string(random.randint(12, 28), ALPHANUMERIC + "._-!")  # no "*": "***" reads as a mask
+    return re.sub(r"[@:/?#$&%;]", lambda _: str(random.randint(0, 9)), raw)
+
+
+def generate_connection_uri() -> str:
+    """Database/broker URI with an embedded password, e.g. postgresql://app:pw@host:5432/orders."""
+    scheme, port = random.choice(_SCHEMES)
+    port_part = f":{port}" if port and random.random() < 0.7 else ""
+    query = random.choice(("", "?sslmode=require", "?retryWrites=true&w=majority", "?ssl=true"))
+    return (f"{scheme}://{random.choice(_DB_USERS)}:{_uri_safe_password()}@{_host()}"
+            f"{port_part}/{random.choice(_DB_NAMES)}{query}")
+
+
+def generate_ado_connection_string() -> str:
+    """ADO.NET-style connection string with a Password field."""
+    fields = [f"Server={_host()},1433", f"Database={random.choice(_DB_NAMES)}",
+              f"User Id={random.choice(_DB_USERS)}", f"Password={_uri_safe_password()}"]
+    return ";".join(fields + random.sample(["Encrypt=True", "TrustServerCertificate=False",
+                                            "Connection Timeout=30"], random.randint(0, 2))) + ";"
+
+
+def generate_jdbc_url() -> str:
+    """JDBC URL with user and password parameters."""
+    engine, port = random.choice((("postgresql", 5432), ("mysql", 3306), ("sqlserver", 1433)))
+    return (f"jdbc:{engine}://{_host()}:{port}/{random.choice(_DB_NAMES)}"
+            f"?user={random.choice(_DB_USERS)}&password={_uri_safe_password()}")
+
+
+def generate_token_url() -> str:
+    """HTTPS URL carrying a credential in its query string."""
+    token = generate_github_token() if random.random() < 0.3 else _random_string(
+        random.randint(20, 40), ALPHANUMERIC + "_-")
+    param = random.choice(("token", "access_token", "api_key", "key", "sig"))
+    host = random.choice(("api.github.com/repos/acme/app", "hooks.example.com/v1/notify",
+                          "storage.example.net/exports/report.csv", "api.partner.io/v2/orders"))
+    return f"https://{host}?{param}={token}"
+
+
+def generate_connection_placeholder() -> str:
+    """Connection strings/URLs that look credentialed but hold no real secret."""
+    scheme, port = random.choice(_SCHEMES)
+    host, db, user = _host(), random.choice(_DB_NAMES), random.choice(_DB_USERS)
+    return random.choice((
+        f"{scheme}://{user}:${{DB_PASSWORD}}@{host}/{db}",
+        f"{scheme}://{user}:<password>@{host}/{db}",
+        f"{scheme}://{user}:{{{{ db_password }}}}@{host}/{db}",
+        f"{scheme}://{host}:{port or 443}/{db}",
+        f"Server={host},1433;Database={db};Integrated Security=true;",
+        f"Server={host};Database={db};User Id={user};Password=${{SQL_PASSWORD}};",
+        f"jdbc:postgresql://{host}:5432/{db}?ssl=true",
+        "https://api.example.com/v1/items?token=${API_TOKEN}",
+        f"https://{host}/health?verbose=true",
+    ))
+
+
+_ID_PARTS = ("user", "profile", "tab", "layout", "handler", "request", "cache", "token", "secret",
+             "session", "config", "builder", "event", "selection", "changed", "manager", "key")
+
+
+def generate_identifier() -> str:
+    """Code identifier that can look secret-ish (TextEditorCore_OnSelectionChanged, API_KEY_HEADER)."""
+    parts = [random.choice(_ID_PARTS) for _ in range(random.randint(2, 5))]
+    style = random.choice(("camel", "pascal", "snake", "upper", "mixed"))
+    if style == "camel":
+        return parts[0] + "".join(p.capitalize() for p in parts[1:])
+    if style == "pascal":
+        return "".join(p.capitalize() for p in parts)
+    if style == "snake":
+        return "_".join(parts)
+    if style == "upper":
+        return "_".join(parts).upper()
+    return "".join(p.capitalize() for p in parts[:2]) + "_" + "".join(p.capitalize() for p in parts[2:])
+
+
+def generate_file_path() -> str:
+    parts = [random.choice(_ID_PARTS) for _ in range(random.randint(1, 3))]
+    ext = random.choice((".ts", ".py", ".go", ".yaml", ".json", ".pem", ".key", ".tsx", ".conf"))
+    root = random.choice(("src/", "./config/", "/etc/app/", "lib/", "internal/", "~/.ssh/"))
+    return root + "/".join(parts) + random.choice(("", "_" + random.choice(_ID_PARTS))) + ext
+
+
+def generate_template_placeholder() -> str:
+    name = "_".join(random.choice(_ID_PARTS) for _ in range(2)).upper()
+    return random.choice((f"${{{name}}}", f"{{{{ .Values.{name.lower()} }}}}", f"<YOUR_{name}>",
+                          f"%({name.lower()})s", "changeme", "REPLACE_ME", f"${{env:{name}}}", "xxxxxxxx"))
+
+
+def generate_public_key() -> str:
+    """SSH public key line: public by definition, but long, base64 and key-named."""
+    body = base64.b64encode(bytes(random.getrandbits(8) for _ in range(32))).decode().rstrip("=")
+    return f"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI{body} {random.choice(_DB_USERS)}@{random.choice(_ID_PARTS)}-host"
+
+
+def generate_integrity_hash() -> str:
+    """Subresource/lockfile integrity value (sha512-..., sha1-...)."""
+    algo, size = random.choice((("sha512", 64), ("sha384", 48), ("sha256", 32), ("sha1", 20)))
+    return f"{algo}-" + base64.b64encode(bytes(random.getrandbits(8) for _ in range(size))).decode()
 
 
 def generate_git_sha() -> str:
