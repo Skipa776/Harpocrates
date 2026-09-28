@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from Harpocrates.core.result import ScanResult, Severity
-from Harpocrates.core.scanner import ScanEngine, scan_directory, scan_file
+from Harpocrates.core.scanner import ScanEngine, scan_directory, scan_file, scan_git_history
 
 app = typer.Typer(
     name="harpocrates",
@@ -126,6 +126,9 @@ def scan(
         ),
         callback=_fail_on_callback,
     ),
+    history: bool = typer.Option(
+        False, "--history", help="Scan lines added in every git commit instead of files on disk"
+    ),
     explain: bool = typer.Option(
         False, "--explain",
         help=(
@@ -166,6 +169,9 @@ def scan(
 
         # Display full token values (NOT recommended outside local debugging)
         harpocrates scan config.env --show-secrets
+
+        # Scan every commit in git history (finds secrets deleted from disk)
+        harpocrates scan . --history
 
         # Only fail CI on high or critical findings
         harpocrates scan ./my_project --fail-on high
@@ -252,7 +258,13 @@ def scan(
             error_console.print(f"[yellow]⚠[/yellow] Path not found, skipping: {path}")
             continue
 
-        if path.is_dir():
+        if history:
+            try:
+                r = scan_git_history(path)
+            except ValueError as e:
+                error_console.print(f"[red]✗[/red] {e}")
+                raise typer.Exit(code=2) from e
+        elif path.is_dir():
             r = scan_directory(
                 path,
                 recursive=recursive,
