@@ -113,7 +113,7 @@ pip install harpocrates
 harpocrates scan .
 ```
 
-With ML verification (recommended — 87% precision, 97% recall on held-out real-world set):
+With ML verification (recommended — v0.4 model: 94.1% precision, 98.9% recall on its synthetic test split; 97.3% recall on a 300-secret hand-curated holdout, see `cli/Harpocrates/ml/models/model_config.json`):
 
 ```bash
 pip install "harpocrates[ml]"
