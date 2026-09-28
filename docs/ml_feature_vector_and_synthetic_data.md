@@ -1,10 +1,10 @@
 # Harpocrates ML Feature Vector and Synthetic Data Generator — State Report
 
-**As of commit `aeafc0c` (Phase 7.0 complete). Model not yet retrained; the shipped ONNX was trained on the 65-feature vector. This report describes the 67-feature vector that the next retrain will consume.**
+**Updated 2026-08-09. The extractor, model configuration, bundled XGBoost artifact, and shipped ONNX model all use the same 64-feature schema. The ONNX artifact was regenerated from the bundled 64-feature XGBoost model.**
 
 ---
 
-## Part 1: The 67-Feature Vector
+## Part 1: The 64-Feature Vector
 
 The feature vector is defined in `Harpocrates/ml/features.py` as `FEATURE_NAMES: Tuple[str, ...]` (the canonical ordering) and materialized by `FeatureVector.to_array()`. The two must stay in sync; `get_feature_names()` is implemented as `return list(FEATURE_NAMES)` to guarantee they cannot drift.
 
@@ -63,7 +63,7 @@ Properties of the variable or key name on the left-hand side of the assignment.
 
 ---
 
-### Group 3 — Context Features (17 features)
+### Group 3 — Context Features (16 features)
 
 Properties of the surrounding code window (3 lines before and after).
 
@@ -85,13 +85,13 @@ Properties of the surrounding code window (3 lines before and after).
 | `key_value_distance` | int | Character distance between the variable name and the token (−1 if no variable found) |
 | `json_path_hint` | int | Estimated nesting depth in a JSON/YAML structure |
 | `adjacency_ngram_score` | float | Sum of N-gram secret scores from variable names on adjacent lines |
-| `cross_line_entropy` | float | Average Shannon entropy across the ±3 line window |
 
-**Dropped:** `line_position_ratio` — in synthetic training data this was always approximately 0.5 (derived from the context window size), but in production it varies 0.0–1.0 based on actual file length. This created train/serve skew.
+**Dropped:** `line_position_ratio` because it created train/serve skew, and
+`cross_line_entropy` because it was collinear with `surrounding_entropy_avg`.
 
 ---
 
-### Group 4 — Stage B Precision Features (7 features)
+### Group 4 — Stage B Precision Features (6 features)
 
 Targeted FP suppression features added to address observed false-positive patterns at that phase.
 
@@ -100,24 +100,28 @@ Targeted FP suppression features added to address observed false-positive patter
 | `is_hex_len_40` | bool | Exactly 40 hex chars — git SHA1 signature |
 | `is_hex_len_64` | bool | Exactly 64 hex chars — SHA256 hash signature |
 | `is_test_token` | bool | Token contains `_test_`, `_staging_`, or `test_` prefix — Stripe/Twilio test mode keys |
-| `contains_example_keyword` | bool | Token contains EXAMPLE, xxxx, demo, or placeholder |
 | `file_is_git_related` | bool | File path is inside `.git/`, or references hash or commit |
 | `file_is_build` | bool | File path is inside `build/`, `dist/`, `node_modules/`, or similar artifact dirs |
 | `file_is_example` | bool | File path is inside `example/`, `docs/`, or `demo/` |
 
 ---
 
-### Group 5 — Stage B Generalization Features (5 features)
+`contains_example_keyword` was dropped because it overlapped with
+`context_mentions_test`.
+
+### Group 5 — Stage B Generalization Features (4 features)
 
 Hex disambiguation features to separate hex-encoded secrets from hex-encoded checksums and git objects.
 
 | Feature | Type | What it measures |
 |---|---|---|
-| `hex_context_git_keywords` | bool | Context contains git, commit, merge, branch, rebase |
 | `hex_context_crypto_keywords` | bool | Context contains encrypt, sign, key, secret — favors treating hex as a credential |
 | `hex_adjacent_assignment_pattern` | int | 0 = unknown, 1 = env-var style, 2 = config style, 3 = function argument |
 | `hex_in_url_or_dsn` | bool | Token is embedded inside a URL or DSN string |
 | `hex_file_suggests_secret` | bool | File path contains `secrets/`, `.env`, or `credentials/` |
+
+`hex_context_git_keywords` was dropped because it overlapped with
+`context_mentions_git`.
 
 ---
 
@@ -258,9 +262,9 @@ The negative LLM prompt independently samples from:
 - Commented-out secrets in 5 comment styles
 - Cross-language coverage for most patterns (15 languages in the LLM matrix)
 
-**What is not yet covered and causes false positives until retrained:**
-- File paths, enum constants, host bindings, and template placeholders at the ML layer — Phase 7.1 generators are written but not yet run
-- APIM/MGMT/SVC prefix-suffix variable names — `_pos_apim_style_var_names` is written but not yet run
-- Adversarial positives whose values share shape with the new negative classes — `_pos_value_shape_adversarial` is written but not yet run
-
-**The current shipped ONNX** was trained on the 65-feature vector without any Phase 7.1 or 7.2 data. The v0.3.2 severity calibration and lexicon expansion (Phases 6.1–6.4) partially compensate at the heuristic layer, but the underlying model still produces false positives on file paths, enum constants, and host configs at the detection stage. The full fix requires running the generators, re-extracting features with the 67-feature extractor (`scripts/regenerate_features.py --expected-feature-count 67`), and retraining.
+**Current artifact invariant:** `FEATURE_NAMES`, `FeatureVector.to_array()`,
+`model_config.json`, the bundled XGBoost model, and the ONNX input width are all
+64. `OnnxVerifier` validates this invariant at load time and fails loudly on a
+schema mismatch. Future retraining or feature changes must update all five
+artifacts together and regenerate the ONNX hash manifest. The manifest covers
+both the ONNX model bytes and `model_config.json` routing policy.

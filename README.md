@@ -152,6 +152,9 @@ harpocrates scan ./my_project --json
 # Enable ML verification to suppress false positives
 harpocrates scan ./my_project --ml
 
+# Use the Rust regex/entropy engine and the existing Python ML verifier
+harpocrates scan ./my_project --engine rust --ml
+
 # Only fail CI on high or critical findings
 harpocrates scan ./my_project --fail-on high
 
@@ -183,6 +186,7 @@ Add to `.pre-commit-config.yaml`, then run `pre-commit install`. Harpocrates sca
 |------|---------|-------------|
 | `--ml` | off | Enable ML verification to reduce false positives |
 | `--ml-threshold FLOAT` | `0.19` | ML confidence threshold `0.0–1.0`. Lower = more recall, higher = more precision |
+| `--engine ENGINE` | `auto` | `auto` prefers an available Rust binary; `rust` requires it; `python` uses the original engine |
 | `--fail-on LEVEL` | `medium` | Severity that triggers exit code `1`: `critical` \| `high` \| `medium` \| `low` \| `info` \| `none` |
 | `--json` | off | Output results as JSON instead of a table |
 | `--show-secrets` | off | Print full token values instead of redacted previews |
@@ -219,6 +223,58 @@ Harpocrates runs a three-phase pipeline on every line of every file:
 2. **Entropy analysis** — Shannon entropy flags high-randomness tokens that don't match any known pattern. Catches credentials stored under ambiguous variable names (`my_key`, `token`, `secret`) that regex scanners miss entirely.
 
 3. **ML verification** (opt-in via `--ml`) — a single-stage XGBoost classifier extracts 64 features from the token, its variable name, and the surrounding code context. It learns to distinguish `api_secret = "AKIA..."` (secret) from `commit_sha = "a1b2c..."` (Git SHA) without relying on the variable name alone. Inference runs via ONNX Runtime when available, with native XGBoost as fallback.
+
+### Native Rust scanner
+
+The optional `rust_scanner` crate owns file reading, binary-file rejection,
+comment handling, regex matching, entropy calculation, and candidate generation.
+Directory scans use one versioned batch subprocess, native traversal with early
+ignore-directory pruning, bounded file reads, and deterministic bounded worker
+threads. Rust returns a compact JSON candidate stream to Python. Python remains
+responsible for violation classification, context extraction, and the existing
+batched ML verifier; known regex hits still bypass ML.
+
+Build it from a source checkout:
+
+```bash
+cargo build --release --manifest-path rust_scanner/Cargo.toml
+harpocrates scan ./my_project --engine rust
+harpocrates scan ./my_project --engine rust --ml
+```
+
+`--engine auto` (the default) finds release/debug binaries in the source tree or
+an installed `harpocrates-rust-scanner` on `PATH`. Set
+`HARPOCRATES_RUST_SCANNER=/absolute/path/to/harpocrates-rust-scanner` to use a
+custom build. Use `--engine python` to force the original implementation.
+Set `HARPOCRATES_RUST_WORKERS` to control native directory-scan parallelism; the
+default is the available CPU count capped at 8. Native directory subprocesses
+have a 300-second watchdog; set `HARPOCRATES_RUST_TIMEOUT_SECONDS` to tune it.
+
+### Scanner performance
+
+The old "2ms" figure is not a valid repository-scan claim. On an Apple M3 Pro
+(12 cores, 18 GB, macOS 26.5.1), the source-view benchmark on 2026-08-09 scanned
+164 files / 46,982 lines and produced the same 580 token-level detections with
+both engines:
+
+| Stage | p50 | p95 |
+|---|---:|---:|
+| Rust directory scan, 8 workers | 32.473 ms | 34.934 ms |
+| Python directory scan | 1908.268 ms | 1929.185 ms |
+| ONNX verification, 64 candidates including feature extraction | 6.802 ms | 16.907 ms |
+
+That is a 58.76x end-to-end speedup for the regex and entropy source scan on
+this workload. It is not a universal per-file guarantee. Reproduce it with:
+
+```bash
+cargo build --release --manifest-path rust_scanner/Cargo.toml
+HARPOCRATES_RUST_WORKERS=8 python scripts/benchmark_scanner.py . \
+  --iterations 20 --warmups 3
+```
+
+The benchmark's default source view excludes generated data, model artifacts,
+coverage output, and repository metadata. Pass `--full-tree` to disable those
+benchmark-only exclusions; the scanner's normal ignore policy still applies.
 
 **Ships pre-trained. No user training required.**
 
