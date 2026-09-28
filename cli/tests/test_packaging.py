@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).parent.parent
-FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "test_tokens.py"
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+FIXTURE = PROJECT_ROOT / "cli" / "tests" / "fixtures" / "test_tokens.py"
 
 
 @pytest.mark.integration

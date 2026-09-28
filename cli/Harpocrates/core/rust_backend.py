@@ -96,9 +96,9 @@ class RustScannerBackend:
         if installed:
             candidates.append(Path(installed))
 
-        repository_root = Path(__file__).resolve().parents[2]
+        repository_root = Path(__file__).resolve().parents[3]
         candidates.extend(
-            repository_root / "rust_scanner" / "target" / profile / _BINARY_NAME
+            repository_root / "core" / "target" / profile / _BINARY_NAME
             for profile in ("release", "debug")
         )
 
@@ -109,7 +109,7 @@ class RustScannerBackend:
         if required:
             raise RustScannerError(
                 "Rust scanner binary not found. Run "
-                "'cargo build --release --manifest-path rust_scanner/Cargo.toml' "
+                "'cargo build --release --manifest-path core/Cargo.toml' "
                 f"or set {_BINARY_ENV}."
             )
         return None

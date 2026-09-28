@@ -42,7 +42,7 @@ jobs:
       - name: Smoke test — install from wheel, verify CLI runs clean
         run: |
           pip install "$(ls dist/*.whl)[ml]"
-          harpocrates scan tests/fixtures/safe_file.txt --engine python --ml
+          harpocrates scan cli/tests/fixtures/safe_file.txt --engine python --ml
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

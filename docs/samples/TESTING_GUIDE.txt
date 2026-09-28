@@ -7,14 +7,14 @@ SETUP
   pip install harpocrates[ml,mcp]          # installs all required extras
   harpocrates --version                    # must print 0.4.0
 
-Sample files live in user_test/samples/ and span multiple languages to
+Sample files live in docs/samples/samples/ and span multiple languages to
 reflect real-world use cases. Harpocrates scans any file regardless of
 extension. Run any sample with:
 
-  harpocrates scan user_test/samples/<file>
-  harpocrates scan --ml user_test/samples/<file>      # adds ML verification pass
-  harpocrates scan --json user_test/samples/<file>    # machine-readable output
-  harpocrates scan --explain user_test/samples/<file> # XAI contributions (requires [ml])
+  harpocrates scan docs/samples/samples/<file>
+  harpocrates scan --ml docs/samples/samples/<file>      # adds ML verification pass
+  harpocrates scan --json docs/samples/samples/<file>    # machine-readable output
+  harpocrates scan --explain docs/samples/samples/<file> # XAI contributions (requires [ml])
 
 Sample files and their languages:
   01_severity_calibration.env     — dotenv / deployment config
@@ -43,7 +43,7 @@ WHAT CHANGED:
   (e.g., a full AWS access key or GitHub PAT in exact format).
 
 WHAT TO VERIFY:
-  harpocrates scan --ml user_test/samples/01_severity_calibration.env
+  harpocrates scan --ml docs/samples/samples/01_severity_calibration.env
 
   EXPECTED FINDINGS:
     Line 14  APIM_CLIENT_KEY   → severity: MEDIUM, category: api_token
@@ -76,7 +76,7 @@ WHAT CHANGED:
     3. Value structure (eyJ...  → jwt, confidence 0.95)
 
 WHAT TO VERIFY:
-  harpocrates scan --json user_test/samples/02_violation_categories.js | python -m json.tool
+  harpocrates scan --json docs/samples/samples/02_violation_categories.js | python -m json.tool
 
   EXPECTED (each finding in the JSON array):
     Line 16  DB_PASSWORD          category: "password"
@@ -118,7 +118,7 @@ WHAT CHANGED:
   preserve the 2ms per-file budget.
 
 WHAT TO VERIFY:
-  harpocrates scan user_test/samples/03_commented_secrets.go
+  harpocrates scan docs/samples/samples/03_commented_secrets.go
 
   EXPECTED FINDINGS:
     Line 11  commented // DB_PASSWORD  → found (in_comment: true in --json output)
@@ -147,7 +147,7 @@ WHAT CHANGED:
   false-positive potential than the strict 48-char form.
 
 WHAT TO VERIFY:
-  harpocrates scan user_test/samples/04_openai_keys.sh
+  harpocrates scan docs/samples/samples/04_openai_keys.sh
 
   EXPECTED FINDINGS:
     Line 15  current-format key  → severity: CRITICAL, category: openai_key
@@ -180,7 +180,7 @@ WHAT CHANGED:
   These features feed the ML model, suppressing false positives at inference.
 
 WHAT TO VERIFY:
-  harpocrates scan --ml user_test/samples/05_false_positive_suppression.yml
+  harpocrates scan --ml docs/samples/samples/05_false_positive_suppression.yml
 
   EXPECTED (with --ml flag for full ML verification pass):
     Line  3  key_path = "/etc/ssl/server.key"     → INFO  (file path)
@@ -237,7 +237,7 @@ WHAT CHANGED:
   Requires: pip install harpocrates[ml]
 
 WHAT TO VERIFY:
-  harpocrates scan --explain user_test/samples/06_explain_demo.java
+  harpocrates scan --explain docs/samples/samples/06_explain_demo.java
 
   EXPECTED:
     - Output is valid JSON (pipe to | python -m json.tool to confirm)
@@ -249,10 +249,10 @@ WHAT TO VERIFY:
     - "predicted_probability" is a float between 0 and 1
 
   VERIFY THAT:
-    harpocrates scan --explain user_test/samples/06_explain_demo.java \
+    harpocrates scan --explain docs/samples/samples/06_explain_demo.java \
       | python -m json.tool > /dev/null && echo "valid JSON"
 
-    harpocrates scan --explain user_test/samples/06_explain_demo.java \
+    harpocrates scan --explain docs/samples/samples/06_explain_demo.java \
       | python -c "
     import json, sys
     data = json.load(sys.stdin)
@@ -322,7 +322,7 @@ WHAT THIS DEMONSTRATES:
   signatures. No --ml flag needed — regex runs on every scan unconditionally.
 
 WHAT TO VERIFY:
-  harpocrates scan user_test/samples/07_regex_priority.py
+  harpocrates scan docs/samples/samples/07_regex_priority.py
 
   EXPECTED FINDINGS — all with evidence: "regex":
     AWS_ACCESS_KEY_ID   → CRITICAL, category: aws_key
@@ -341,7 +341,7 @@ WHAT TO VERIFY:
     VAULT_SERVICE_TOKEN → HIGH,     category: vault_token
 
   VERIFY THAT (machine-readable check):
-    harpocrates scan --json user_test/samples/07_regex_priority.py \
+    harpocrates scan --json docs/samples/samples/07_regex_priority.py \
       | python -c "
     import json, sys
     data = json.load(sys.stdin)

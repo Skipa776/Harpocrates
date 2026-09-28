@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shell deployment script — OpenAI key format coverage
-# Run: harpocrates scan user_test/samples/04_openai_keys.sh
+# Run: harpocrates scan docs/samples/samples/04_openai_keys.sh
 #
 # Three formats are now detected:
 #
