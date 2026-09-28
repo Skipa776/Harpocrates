@@ -26,5 +26,7 @@ def test_evaluate_precision_undefined_without_negatives():
 
 def test_holdout_reproduces_recorded_recall():
     pytest.importorskip("onnxruntime")
+    if not HOLDOUT.exists():
+        pytest.skip("holdout is local-only (gitignored, unknown provenance)")
     recorded = json.loads(CONFIG.read_text())["golden_metrics"]["recall"]
     assert run([HOLDOUT])["recall"] == pytest.approx(recorded, abs=1e-4)
