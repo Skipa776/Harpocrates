@@ -1,5 +1,5 @@
 // Go source file — commented-out secret detection across comment styles
-// Run: harpocrates scan user_test/samples/03_commented_secrets.go
+// Run: harpocrates scan docs/samples/samples/03_commented_secrets.go
 // Use --json to see the "in_comment": true field on each finding.
 //
 // Before v0.4.0 every commented line was silently skipped.

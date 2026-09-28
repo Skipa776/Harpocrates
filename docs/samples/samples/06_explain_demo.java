@@ -1,5 +1,5 @@
 // Java Spring Boot config class — explainability demo
-// Run: harpocrates scan --explain user_test/samples/06_explain_demo.java
+// Run: harpocrates scan --explain docs/samples/samples/06_explain_demo.java
 // Requires: pip install harpocrates[ml]
 //
 // --explain outputs JSON with per-feature TreeSHAP contributions showing
@@ -8,10 +8,10 @@
 // Useful one-liners:
 //
 //   Pretty-print the full output:
-//     harpocrates scan --explain user_test/samples/06_explain_demo.java | python -m json.tool
+//     harpocrates scan --explain docs/samples/samples/06_explain_demo.java | python -m json.tool
 //
 //   Show only the top features per finding:
-//     harpocrates scan --explain user_test/samples/06_explain_demo.java | python -c "
+//     harpocrates scan --explain docs/samples/samples/06_explain_demo.java | python -c "
 //     import json, sys
 //     data = json.load(sys.stdin)
 //     for item in data['findings']:

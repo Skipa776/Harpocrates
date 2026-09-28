@@ -1,5 +1,5 @@
 # Python config — regex-tier priority demo
-# Run: harpocrates scan user_test/samples/07_regex_priority.py
+# Run: harpocrates scan docs/samples/samples/07_regex_priority.py
 #
 # Harpocrates runs three detection passes in priority order:
 #   1. CRITICAL_SIGNATURES regex  — fires first, no ML involved

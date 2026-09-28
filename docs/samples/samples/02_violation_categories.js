@@ -1,5 +1,5 @@
 // JavaScript/Node.js config — violation category inference across secret types
-// Run: harpocrates scan --json user_test/samples/02_violation_categories.js | python -m json.tool
+// Run: harpocrates scan --json docs/samples/samples/02_violation_categories.js | python -m json.tool
 //
 // Every finding includes "category" and "category_reason" in the JSON output.
 // Three inference layers: regex signature → var-name lexicon → value structure.

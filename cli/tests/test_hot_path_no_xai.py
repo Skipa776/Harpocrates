@@ -25,16 +25,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).parent.parent
+_REPO_ROOT = Path(__file__).parent.parent.parent
 _FORBIDDEN_MODULES = {"xgboost", "Harpocrates.ml.explain", "shap", "lime"}
 
 # Directories whose source files must never import forbidden modules.
 # explain.py itself is excluded — it IS allowed to lazily import xgboost.
 _HOT_PATH_DIRS = [
-    _REPO_ROOT / "Harpocrates" / "core",
-    _REPO_ROOT / "Harpocrates" / "mcp",
+    _REPO_ROOT / "cli" / "Harpocrates" / "core",
+    _REPO_ROOT / "cli" / "Harpocrates" / "mcp",
 ]
-_EXPLAIN_PATH = _REPO_ROOT / "Harpocrates" / "ml" / "explain.py"
+_EXPLAIN_PATH = _REPO_ROOT / "cli" / "Harpocrates" / "ml" / "explain.py"
 
 
 # ---------------------------------------------------------------------------

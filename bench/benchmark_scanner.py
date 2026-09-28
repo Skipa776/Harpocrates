@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "cli"))
 
 from Harpocrates.core.result import EvidenceType, Finding
 from Harpocrates.core.scanner import (

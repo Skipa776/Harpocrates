@@ -10,7 +10,7 @@ Pick one for the top of your README.
 
 **A · Classic Parchment**
 ```md
-![Harpocrates](images/banner-a-classic-parchment.png)
+![Harpocrates](banner-a-classic-parchment.png)
 ```
 ![Harpocrates](banner-a-classic-parchment.png)
 
@@ -18,7 +18,7 @@ Pick one for the top of your README.
 
 **B · Dark + Stars**
 ```md
-![Harpocrates](images/banner-b-dark-stars.png)
+![Harpocrates](banner-b-dark-stars.png)
 ```
 ![Harpocrates](banner-b-dark-stars.png)
 
@@ -26,7 +26,7 @@ Pick one for the top of your README.
 
 **C · Tondo Medallion**
 ```md
-![Harpocrates](images/banner-c-tondo-medallion.png)
+![Harpocrates](banner-c-tondo-medallion.png)
 ```
 ![Harpocrates](banner-c-tondo-medallion.png)
 
@@ -34,7 +34,7 @@ Pick one for the top of your README.
 
 **D · Illuminated Manuscript**
 ```md
-![Harpocrates](images/banner-d-illuminated.png)
+![Harpocrates](banner-d-illuminated.png)
 ```
 ![Harpocrates](banner-d-illuminated.png)
 
@@ -42,7 +42,7 @@ Pick one for the top of your README.
 
 **E · Type Poster**
 ```md
-![Harpocrates](images/banner-e-type-poster.png)
+![Harpocrates](banner-e-type-poster.png)
 ```
 ![Harpocrates](banner-e-type-poster.png)
 
@@ -54,7 +54,7 @@ Use these anywhere a "logo" is needed — pure-type, no external assets required
 
 **Horizontal**
 ```md
-![Harpocrates](images/lockup-horizontal.png)
+![Harpocrates](lockup-horizontal.png)
 ```
 ![Harpocrates](lockup-horizontal.png)
 
@@ -62,7 +62,7 @@ Use these anywhere a "logo" is needed — pure-type, no external assets required
 
 **Stacked Medallion**
 ```md
-![Harpocrates](images/lockup-stacked-medallion.png)
+![Harpocrates](lockup-stacked-medallion.png)
 ```
 ![Harpocrates](lockup-stacked-medallion.png)
 
@@ -70,7 +70,7 @@ Use these anywhere a "logo" is needed — pure-type, no external assets required
 
 **Wordmark Only**
 ```md
-![Harpocrates](images/lockup-wordmark.png)
+![Harpocrates](lockup-wordmark.png)
 ```
 ![Harpocrates](lockup-wordmark.png)
 
@@ -78,7 +78,7 @@ Use these anywhere a "logo" is needed — pure-type, no external assets required
 
 **Terminal**
 ```md
-![Harpocrates](images/lockup-terminal.png)
+![Harpocrates](lockup-terminal.png)
 ```
 ![Harpocrates](lockup-terminal.png)
 
@@ -86,7 +86,7 @@ Use these anywhere a "logo" is needed — pure-type, no external assets required
 
 **Badge**
 ```md
-![Harpocrates](images/lockup-badge.png)
+![Harpocrates](lockup-badge.png)
 ```
 ![Harpocrates](lockup-badge.png)
 
@@ -98,49 +98,49 @@ Drop these between README sections. Light and dark variants available.
 
 **Installation**
 ```md
-![Installation](images/divider-installation.png)
+![Installation](divider-installation.png)
 ```
 ![Installation](divider-installation.png)
 
 **Usage**
 ```md
-![Usage](images/divider-usage.png)
+![Usage](divider-usage.png)
 ```
 ![Usage](divider-usage.png)
 
 **Configuration**
 ```md
-![Configuration](images/divider-configuration.png)
+![Configuration](divider-configuration.png)
 ```
 ![Configuration](divider-configuration.png)
 
 **How it scans**
 ```md
-![How it scans](images/divider-how-it-scans.png)
+![How it scans](divider-how-it-scans.png)
 ```
 ![How it scans](divider-how-it-scans.png)
 
 **Contributing**
 ```md
-![Contributing](images/divider-contributing.png)
+![Contributing](divider-contributing.png)
 ```
 ![Contributing](divider-contributing.png)
 
 **License**
 ```md
-![License](images/divider-license.png)
+![License](divider-license.png)
 ```
 ![License](divider-license.png)
 
 **Installation · Dark**
 ```md
-![Installation](images/divider-installation-dark.png)
+![Installation](divider-installation-dark.png)
 ```
 ![Installation](divider-installation-dark.png)
 
 **Usage · Dark**
 ```md
-![Usage](images/divider-usage-dark.png)
+![Usage](divider-usage-dark.png)
 ```
 ![Usage](divider-usage-dark.png)
 
@@ -152,13 +152,13 @@ For GitHub social preview (`Settings → Social preview`) or Twitter/LinkedIn sh
 
 **Parchment**
 ```md
-![Harpocrates](images/og-parchment.png)
+![Harpocrates](og-parchment.png)
 ```
 ![Harpocrates](og-parchment.png)
 
 **Dark**
 ```md
-![Harpocrates](images/og-dark.png)
+![Harpocrates](og-dark.png)
 ```
 ![Harpocrates](og-dark.png)
 
@@ -167,7 +167,7 @@ For GitHub social preview (`Settings → Social preview`) or Twitter/LinkedIn sh
 ## Color Palette
 
 ```md
-![Color palette](images/palette.png)
+![Color palette](palette.png)
 ```
 ![Color palette](palette.png)
 

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import scripts.benchmark_scanner as benchmark
-from scripts.benchmark_scanner import (
+import bench.benchmark_scanner as benchmark
+from bench.benchmark_scanner import (
     benchmark_directory,
     benchmark_onnx,
     summarize,
