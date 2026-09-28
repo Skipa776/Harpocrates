@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import dataclasses
 import fnmatch
+import re
+import subprocess
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Literal, Optional, Set
 
-from Harpocrates.core.detector import detect_file, detect_file_with_ml
+from Harpocrates.core.detector import detect_file, detect_file_with_ml, detect_text
 from Harpocrates.core.result import Finding, ScanResult
 from Harpocrates.utils.file_utils import iter_text_lines
 
@@ -391,3 +394,59 @@ def _resolve_native_backend(engine: ScanEngine) -> Optional["RustScannerBackend"
 
 
 __all__ = ["scan_directory", "scan_file", "ScanEngine", "ScanResult"]
+
+
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def scan_git_history(repo: Path) -> ScanResult:
+    """Scan lines added in every commit of *repo* (FR-COMMIT-01).
+
+    Findings carry ``file="<sha12>:<path>"`` and the line number in that commit.
+    Merge commits are diffed against their first parent so conflict resolutions
+    are covered. Regex + entropy only; the ML stage is not applied to history.
+    """
+    start = time.perf_counter()
+    cmd = [
+        "git", "-C", str(repo), "-c", "core.quotePath=false", "log", "-p", "--all",
+        "-U0", "--no-color", "--no-ext-diff", "--diff-merges=first-parent",
+        "--format=commit %H",
+    ]
+    findings: List[Finding] = []
+    files: Set[str] = set()
+    sha, path, lineno, added, remaining = "", None, 0, 0, 0
+    with subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace"
+    ) as proc:
+        assert proc.stdout is not None
+        for raw in proc.stdout:
+            line = raw.rstrip("\n")
+            # Inside a hunk the header counts say how many -/+ lines follow, so
+            # content like "++ b/x" is never mistaken for a file header.
+            if remaining > 0 and line[:1] in "+-":
+                remaining -= 1
+                if line[0] == "+" and path is not None:
+                    location = f"{sha[:12]}:{path}"
+                    files.add(location)
+                    added += 1
+                    findings.extend(
+                        dataclasses.replace(f, file=location, line=lineno)
+                        for f in detect_text(line[1:])
+                    )
+                    lineno += 1
+            elif line.startswith("commit "):
+                sha, remaining = line[7:], 0
+            elif line.startswith("+++ "):
+                path = line[6:] if line.startswith("+++ b/") else None
+            elif hunk := _HUNK_RE.match(line):
+                old_count, new_start, new_count = hunk.groups()
+                lineno = int(new_start)
+                remaining = int(old_count or 1) + int(new_count or 1)
+    if proc.returncode != 0:
+        raise ValueError(f"not a git repository: {repo}")
+    return ScanResult(
+        findings=findings,
+        scanned_files=len(files),
+        total_lines=added,
+        duration_ms=(time.perf_counter() - start) * 1000,
+    )
