@@ -415,6 +415,34 @@ def generate_password(complexity: str = "high") -> str:
     return _random_string(length, charset)
 
 
+_PASSWORD_WORDS = (
+    "purple", "dragon", "summer", "winter", "monkey", "sunshine", "falcon", "tiger",
+    "ocean", "coffee", "rocket", "shadow", "silver", "maple", "thunder", "pepper",
+    "admin", "welcome", "company", "spring", "autumn", "galaxy", "orange", "hunter",
+)
+_PASSWORD_SYMBOLS = "!@#$%&*._-"
+
+
+def generate_human_password() -> str:
+    """Generate a password following human patterns (DATA-03).
+
+    Word(s), optionally capitalized, then a mix of year/number and symbol suffixes,
+    e.g. ``PurpleDog197!`` or ``winter2024#sales``. Uses the global ``random``
+    module so callers control reproducibility with ``random.seed``.
+    """
+    words = [random.choice(_PASSWORD_WORDS) for _ in range(random.choice((1, 1, 2)))]
+    if random.random() < 0.6:
+        words = [w.capitalize() for w in words]
+    number = random.choice((
+        "", str(random.randint(1, 99)), str(random.randint(100, 999)), str(random.randint(1990, 2026)),
+    ))
+    symbol = random.choice(("", "", random.choice(_PASSWORD_SYMBOLS)))
+    tail = random.choice(("", "", random.choice(_PASSWORD_WORDS)))
+    if not number and not symbol:  # a bare word is too ambiguous to label a secret
+        number = str(random.randint(1, 999))
+    return "".join(words) + number + symbol + tail
+
+
 def generate_git_sha() -> str:
     """
     Generate fake Git SHA (40 hex characters).

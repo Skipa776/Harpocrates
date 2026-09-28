@@ -129,3 +129,6 @@ comparison/
 
 # graphify code graph (regenerate with `graphify update .`)
 graphify-out/
+
+# OSS corpus for data generation (DATA-04); only scripts/oss_repos.tsv is committed
+data/oss/
