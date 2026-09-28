@@ -3,7 +3,8 @@
 
     python scripts/generate_llm_slots.py --model deepseek-coder-6.7b-instruct --count 1000
     python scripts/generate_llm_slots.py --cli codex --model gpt-6-luna --count 1000
-    python scripts/generate_llm_slots.py --cli claude --model claude-opus-5-5 --effort low --count 500
+    python scripts/generate_llm_slots.py --cli claude --model claude-sonnet-5-5 --effort low --count 500
+    python scripts/generate_llm_slots.py --cli agy --model gemini-3.8-flash-low --count 500
     python scripts/generate_llm_slots.py --cli opencode --model tritonai/deepseek-v4-flash --count 500
 
 Files land in data/llm_slots/<model>/ with a manifest.jsonl. Then:
@@ -96,22 +97,43 @@ def _filename(job: dict) -> str:
     return f"{job['id']:05d}_{suffix}" if not suffix.startswith(".") else f"{job['id']:05d}{suffix}"
 
 
+# opencode's default agent can write files, run shell commands, and use the user's MCP servers
+# (e.g. Playwright); an unrestricted run once wrote ~90 files into this repo. Generation must be
+# text-only, so every tool and MCP server is disabled via an inline config.
+_OPENCODE_TEXT_ONLY = json.dumps({
+    "permission": {"edit": "deny", "bash": "deny", "webfetch": "deny"},
+    "tools": {t: False for t in ("write", "edit", "bash", "patch", "apply_patch", "webfetch", "websearch",
+                                 "read", "glob", "grep", "list", "todowrite", "task", "skill", "question")},
+    "mcp": {"playwright": {"type": "local", "command": ["true"], "enabled": False}},
+})
+
+
 def _cli_command(args, prompt: str, out_file: Path) -> list[str]:
+    # Each CLI must run text-only: no built-in tools, no user MCP servers, plugins, or hooks.
     if args.cli == "codex":
-        return ["codex", "exec", "-m", args.model, "--sandbox", "read-only", "--skip-git-repo-check",
-                "--ephemeral", "-o", str(out_file), prompt]
+        return ["codex", "exec", "-m", args.model, "--ignore-user-config", "--sandbox", "read-only",
+                "--skip-git-repo-check", "--ephemeral", "-o", str(out_file), prompt]
     if args.cli == "claude":
+        # --tools "" removes built-ins only; user MCP servers need --strict-mcp-config + empty config.
         return ["claude", "-p", "--model", args.model, "--effort", args.effort, "--tools", "",
+                "--strict-mcp-config", "--mcp-config", '{"mcpServers": {}}',
                 "--settings", '{"disableAllHooks": true}', "--no-session-persistence", prompt]
-    return ["opencode", "run", "-m", args.model, prompt]
+    if args.cli == "agy":
+        # Headless agy auto-denies write tools; plan mode + sandbox restrict it further.
+        return ["agy", "--model", args.model, "--mode", "plan", "--sandbox",
+                "--print-timeout", f"{args.timeout}s", "--print", prompt]
+    return ["opencode", "run", "--pure", "--dir", str(out_file.parent), "-m", args.model, prompt]
 
 
 async def _ask_cli(args, prompt: str) -> str:
     # Empty working dir: no project CLAUDE.md/AGENTS.md or repo files leak into the prompt.
     with tempfile.TemporaryDirectory() as cwd:
         out_file = Path(cwd) / "last_message.txt"
+        env = {**os.environ, "OPENCODE_CONFIG_CONTENT": _OPENCODE_TEXT_ONLY}
         proc = await asyncio.create_subprocess_exec(
-            *_cli_command(args, prompt, out_file), cwd=cwd,
+            *_cli_command(args, prompt, out_file), cwd=cwd, env=env,
+            # Empty stdin: codex/opencode wait on an inherited stdin when launched in the background.
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=args.timeout)
@@ -174,10 +196,10 @@ async def _main(args) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--cli", choices=["codex", "claude", "opencode"],
+    parser.add_argument("--cli", choices=["codex", "claude", "opencode", "agy"],
                         help="run a headless CLI instead of calling an OpenAI-compatible HTTP API")
     parser.add_argument("--model", required=True)
-    parser.add_argument("--effort", default="low", help="claude --effort level (low = Opus 5.5 Light)")
+    parser.add_argument("--effort", default="low", help="claude --effort level")
     parser.add_argument("--timeout", type=int, default=300, help="seconds per CLI call")
     parser.add_argument("--base-url", default="http://localhost:1234/v1")
     parser.add_argument("--api-key-env", help="name of the env var holding the API key (never the key itself)")

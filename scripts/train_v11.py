@@ -59,17 +59,17 @@ def scores(y: np.ndarray, p: np.ndarray, threshold: float) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--train", nargs="+", type=Path, required=True)
-    parser.add_argument("--val", type=Path, default=ROOT / "data/eval/val_v1.jsonl")
+    parser.add_argument("--val", type=Path, default=ROOT / "data/eval/val_v2.jsonl")
     parser.add_argument("--test", nargs="*", type=Path,
-                        default=[ROOT / "data/eval/test_v1.jsonl", ROOT / "data/trufflehog_golden.jsonl"])
+                        default=[ROOT / "data/eval/test_v2.jsonl", ROOT / "data/trufflehog_golden.jsonl"])
     parser.add_argument("--out", type=Path, default=ROOT / "data/models/v11_candidate.json")
     args = parser.parse_args()
 
     train, val = [], load(args.val)
     for path in args.train:
         for r in load(path):
-            # train_v1's own val split is val_v1; other files donate a fixed 10% holdout.
-            (val if path.name != "train_v1.jsonl" and is_holdout(r) else train).append(r)
+            # train_vN is repo-split (its val is val_vN); other files donate a fixed 10% holdout.
+            (val if not path.name.startswith("train_v") and is_holdout(r) else train).append(r)
     # The same (token, line) can recur across repos; never score a row the model trained on.
     train_keys = {(r["token"], r["line_content"]) for r in train}
     unseen = lambda rs: [r for r in rs if (r["token"], r["line_content"]) not in train_keys]  # noqa: E731
