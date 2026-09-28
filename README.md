@@ -1,4 +1,4 @@
-![Harpocrates](images/banner-a-classic-parchment.png)
+![Harpocrates](docs/assets/banner-a-classic-parchment.png)
 
 <h1 align="center">Harpocrates</h1>
 
@@ -104,7 +104,7 @@ The same ML model covers Python, JavaScript/TypeScript, Go, Java, Ruby, YAML, Do
 
 ---
 
-![Installation](images/divider-installation.png)
+![Installation](docs/assets/divider-installation.png)
 
 ## Install
 
@@ -113,7 +113,7 @@ pip install harpocrates
 harpocrates scan .
 ```
 
-With ML verification (recommended — 87% precision, 97% recall on held-out real-world set):
+With ML verification (recommended — v0.4 model: 94.1% precision, 98.9% recall on its synthetic test split; 97.3% recall on a 300-record holdout, measured with `bench/eval_detector.py`; that holdout is not yet published and is being rebuilt):
 
 ```bash
 pip install "harpocrates[ml]"
@@ -135,7 +135,7 @@ pip install "harpocrates[all]"
 
 ---
 
-![Usage](images/divider-usage.png)
+![Usage](docs/assets/divider-usage.png)
 
 ## Usage
 
@@ -176,7 +176,7 @@ Add to `.pre-commit-config.yaml`, then run `pre-commit install`. Harpocrates sca
 
 ---
 
-![Configuration](images/divider-configuration.png)
+![Configuration](docs/assets/divider-configuration.png)
 
 ## Configuration
 
@@ -212,7 +212,7 @@ harpocrates --help           # Full command list
 
 ---
 
-![How it scans](images/divider-how-it-scans.png)
+![How it scans](docs/assets/divider-how-it-scans.png)
 
 ## How it scans
 
@@ -226,7 +226,7 @@ Harpocrates runs a three-phase pipeline on every line of every file:
 
 ### Native Rust scanner
 
-The optional `rust_scanner` crate owns file reading, binary-file rejection,
+The optional `core` crate owns file reading, binary-file rejection,
 comment handling, regex matching, entropy calculation, and candidate generation.
 Directory scans use one versioned batch subprocess, native traversal with early
 ignore-directory pruning, bounded file reads, and deterministic bounded worker
@@ -237,7 +237,7 @@ batched ML verifier; known regex hits still bypass ML.
 Build it from a source checkout:
 
 ```bash
-cargo build --release --manifest-path rust_scanner/Cargo.toml
+cargo build --release --manifest-path core/Cargo.toml
 harpocrates scan ./my_project --engine rust
 harpocrates scan ./my_project --engine rust --ml
 ```
@@ -267,8 +267,8 @@ That is a 58.76x end-to-end speedup for the regex and entropy source scan on
 this workload. It is not a universal per-file guarantee. Reproduce it with:
 
 ```bash
-cargo build --release --manifest-path rust_scanner/Cargo.toml
-HARPOCRATES_RUST_WORKERS=8 python scripts/benchmark_scanner.py . \
+cargo build --release --manifest-path core/Cargo.toml
+HARPOCRATES_RUST_WORKERS=8 python bench/benchmark_scanner.py . \
   --iterations 20 --warmups 3
 ```
 
@@ -370,7 +370,7 @@ harpocrates scan ./my_project --explain | jq '.findings[0].explanation.top_posit
 - Retrained on ~40k samples (v4 corpus) with the redesigned 64-feature vector.
 - New negative-class generators covering the four v0.3.0 FP classes: file-path values, enum constants (lowercase words), host/port configs, template placeholders (`${...}`, `{{...}}`, `__X__`), file-extension values (`.pem`, `.jks`, `.p12`).
 - New positive-class generators: APIM-style compound var names (`APIM_CLIENT_KEY`, `APIM_SECRET_KEY`), multiline structures (PEM blocks, YAML pipe-block secrets, k8s `Secret` manifests, `.env` multikey blocks, JSON arrays of keys, Terraform `for_each` secret maps) encoded via `context_before`/`context_after`.
-- 300-sample hand-curated positive holdout fixture (`tests/fixtures/positive_holdout_v4.jsonl`); golden OOD recall **97.33%** (gate: ≥97%).
+- 300-sample hand-curated positive holdout fixture (`cli/tests/fixtures/positive_holdout_v4.jsonl`); golden OOD recall **97.33%** (gate: ≥97%).
 
 **Opt-in explainability (Phase 8):**
 
@@ -378,7 +378,7 @@ harpocrates scan ./my_project --explain | jq '.findings[0].explanation.top_posit
 - `include_contributions=True` on MCP `scan_text`/`scan_file` tools adds an `explanation` key to each finding dict.
 - All float outputs rounded to 3 decimal places. Token-derived feature values (`token_entropy`, `token_length`, `char_class_count`, `digit_ratio`, `special_char_ratio`) suppressed to `null` in JSON output to prevent token reconstruction.
 - Booster cached per process (first `--explain` call ~30ms; subsequent calls ~0.2ms each).
-- Hot-path invariant enforced by `tests/test_hot_path_no_xai.py` (subprocess isolation + AST static analysis).
+- Hot-path invariant enforced by `cli/tests/test_hot_path_no_xai.py` (subprocess isolation + AST static analysis).
 
 **Severity calibration (v0.3.2, folded into this release train):**
 
@@ -448,7 +448,7 @@ Threshold high (precision gate): `0.85` — anything above this is reported as a
 
 ---
 
-![Contributing](images/divider-contributing.png)
+![Contributing](docs/assets/divider-contributing.png)
 
 ## Contributing
 
@@ -458,7 +458,7 @@ For bugs, feature requests, and false positives, open an issue at [github.com/Sk
 
 ---
 
-![License](images/divider-license.png)
+![License](docs/assets/divider-license.png)
 
 ## License
 

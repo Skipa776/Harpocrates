@@ -1,0 +1,392 @@
+HARPOCRATES v0.4.0 — TESTER GUIDE
+===================================
+What changed, how to verify it, and what output to expect.
+
+SETUP
+-----
+  pip install harpocrates[ml,mcp]          # installs all required extras
+  harpocrates --version                    # must print 0.4.0
+
+Sample files live in docs/samples/samples/ and span multiple languages to
+reflect real-world use cases. Harpocrates scans any file regardless of
+extension. Run any sample with:
+
+  harpocrates scan docs/samples/samples/<file>
+  harpocrates scan --ml docs/samples/samples/<file>      # adds ML verification pass
+  harpocrates scan --json docs/samples/samples/<file>    # machine-readable output
+  harpocrates scan --explain docs/samples/samples/<file> # XAI contributions (requires [ml])
+
+Sample files and their languages:
+  01_severity_calibration.env     — dotenv / deployment config
+  02_violation_categories.js      — JavaScript / Node.js
+  03_commented_secrets.go         — Go
+  04_openai_keys.sh               — Bash / shell script
+  05_false_positive_suppression.yml — Kubernetes / Helm YAML
+  06_explain_demo.java            — Java / Spring Boot
+  07_regex_priority.py            — Python (regex-tier priority demo)
+
+
+=======================================================================
+FEATURE 1 — SEVERITY CALIBRATION
+File: samples/01_severity_calibration.env  (dotenv)
+=======================================================================
+WHAT CHANGED:
+  Before v0.4.0, every finding produced by the entropy/ML stage showed
+  severity: INFO regardless of the variable name or value. A confirmed
+  APIM_SECRET_KEY appeared at the same severity as a false positive.
+
+  Now the detector maps classification confidence to severity:
+    - GENERIC_SECRET, low confidence      → INFO
+    - Specific category, moderate signal  → MEDIUM
+    - Specific category, strong signal    → HIGH
+  CRITICAL is reserved exclusively for regex-tier deterministic matches
+  (e.g., a full AWS access key or GitHub PAT in exact format).
+
+WHAT TO VERIFY:
+  harpocrates scan --ml docs/samples/samples/01_severity_calibration.env
+
+  EXPECTED FINDINGS:
+    Line 14  APIM_CLIENT_KEY   → severity: MEDIUM, category: api_token
+    Line 15  APIM_SECRET_KEY   → severity: MEDIUM, category: api_token
+    Line 16  DB_PASSWORD       → severity: HIGH,   category: password
+    Line 17  JWT_BEARER_TOKEN  → severity: HIGH,   category: jwt
+    Line 18  GENERIC_VAL       → severity: INFO    (low-signal var name)
+
+  VERIFY THAT:
+    - None of the above appear as CRITICAL (that would be a regression)
+    - DB_PASSWORD and jwt_bearer_token are HIGH, not INFO (pre-v0.4 bug)
+    - APIM keys are MEDIUM, not INFO (pre-v0.4 bug)
+
+
+=======================================================================
+FEATURE 2 — VIOLATION CATEGORIES
+File: samples/02_violation_categories.js  (JavaScript)
+=======================================================================
+WHAT CHANGED:
+  All findings now include two new fields:
+    category        — what kind of secret was detected
+                      (password, api_token, connection_string, jwt,
+                       private_key, oauth_secret, crypto_key,
+                       session_token, webhook_url, generic_secret, ...)
+    category_reason — which heuristic fired and why (developer debugging)
+
+  Categories are inferred from three layers, in order:
+    1. Regex signature name (GITHUB_PAT → github_token, confidence 1.0)
+    2. Variable name lexicon (DB_PASSWORD → password, confidence 0.90)
+    3. Value structure (eyJ...  → jwt, confidence 0.95)
+
+WHAT TO VERIFY:
+  harpocrates scan --json docs/samples/samples/02_violation_categories.js | python -m json.tool
+
+  EXPECTED (each finding in the JSON array):
+    Line 16  DB_PASSWORD          category: "password"
+    Line 17  clientSecret         category: "oauth_secret"
+    Line 18  hmacSigningKey       category: "crypto_key"
+    Line 19  sessionIdToken       category: "session_token"
+    Line 22  token (eyJ...)       category: "jwt"     (value-structure: eyJ prefix)
+    Line 25  dbUrl                category: "connection_string"
+    Line 28  NONDESCRIPT_VALUE    category: "generic_secret"
+
+  VERIFY THAT:
+    - category field is present on every finding (not null)
+    - category_reason field is present and non-empty
+    - The JWT line is classified via value structure even though
+      the variable name is just "token"
+
+
+=======================================================================
+FEATURE 3 — COMMENTED-OUT SECRET DETECTION
+File: samples/03_commented_secrets.go  (Go)
+=======================================================================
+WHAT CHANGED:
+  Before v0.4.0, any line starting with # (or //, /*, --, <!--) was
+  silently skipped. A committed secret that was later commented out
+  remained in git history undetected.
+
+  Now all comment styles are scanned. A new field in_comment: true is
+  set on findings from commented lines. Severity is NOT downgraded —
+  a commented-out AWS key is still a leaked AWS key.
+
+  Comment styles covered:
+    #  (Python, shell, Ruby, YAML)
+    // (JS, TS, Go, Java, C, Rust, Swift)
+    /* (JS, C, Java, CSS)
+    -- (SQL, Lua)
+    <!-- (HTML, XML)
+
+  Pure prose comments (no = : or quote chars) are fast-skipped to
+  preserve the 2ms per-file budget.
+
+WHAT TO VERIFY:
+  harpocrates scan docs/samples/samples/03_commented_secrets.go
+
+  EXPECTED FINDINGS:
+    Line 11  commented // DB_PASSWORD  → found (in_comment: true in --json output)
+    Line 12  commented // apiKey       → found (in_comment: true)
+    Line 15  block /* clientSecret */  → found (in_comment: true)
+
+  VERIFY THAT:
+    - Findings ARE produced for commented lines (pre-v0.4 these were missed)
+    - in_comment: true appears in --json output
+    - Line 20 (pure prose comment, no = or ") produces NO finding
+
+
+=======================================================================
+FEATURE 4 — OPENAI LEGACY KEY DETECTION
+File: samples/04_openai_keys.sh  (Bash)
+=======================================================================
+WHAT CHANGED:
+  The existing OpenAI pattern only matched the current 48-char format
+  (sk-[alphanumeric]{48}) and the project-scoped sk-proj-... format.
+  Legacy and short OpenAI keys like sk-RQMJj8ELDjv7TRc-dS9sSw were
+  silently missed.
+
+  A new pattern OPENAI_API_KEY_LEGACY was added to HIGH_SIGNATURES:
+    sk-[A-Za-z0-9_-]{16,}
+  It is HIGH (not CRITICAL) because the broader pattern has higher
+  false-positive potential than the strict 48-char form.
+
+WHAT TO VERIFY:
+  harpocrates scan docs/samples/samples/04_openai_keys.sh
+
+  EXPECTED FINDINGS:
+    Line 15  current-format key  → severity: CRITICAL, category: openai_key
+    Line 18  legacy/short key    → severity: HIGH,     category: openai_key
+    Line 21  proj-scoped key     → severity: CRITICAL, category: openai_key
+
+  VERIFY THAT:
+    - The legacy key on line 6 IS detected (it was missed before v0.4)
+    - Legacy key severity is HIGH not CRITICAL (broader pattern = lower confidence)
+    - Current-format keys remain CRITICAL
+
+
+=======================================================================
+FEATURE 5 — FALSE POSITIVE SUPPRESSION (VALUE-SHAPE FEATURES)
+File: samples/05_false_positive_suppression.yml  (Kubernetes / Helm YAML)
+=======================================================================
+WHAT CHANGED:
+  The v0.3.0 model had no features distinguishing a credential from a
+  file path, enum constant, host literal, or template placeholder.
+  Real scan output showed file paths and enum strings flagged as CRITICAL.
+
+  Six new value-shape binary features were added to the ML feature vector:
+    value_starts_with_slash       → file paths (/etc/ssl/key.pem)
+    value_contains_path_separator → Windows + UNIX paths
+    value_ends_with_known_ext     → .pem .key .crt .jks .p12 filenames
+    value_is_lowercase_word       → enum strings ("authenticated", "admin")
+    value_is_dotted_quad_or_host  → IP addresses, localhost, 0.0.0.0
+    value_is_template_syntax      → ${...} {{...}} __X__ <<...>>
+
+  These features feed the ML model, suppressing false positives at inference.
+
+WHAT TO VERIFY:
+  harpocrates scan --ml docs/samples/samples/05_false_positive_suppression.yml
+
+  EXPECTED (with --ml flag for full ML verification pass):
+    Line  3  key_path = "/etc/ssl/server.key"     → INFO  (file path)
+    Line  4  AUTHENTICATED = "authenticated"       → INFO  (lowercase word)
+    Line  5  host = "0.0.0.0"                     → INFO  (host literal)
+    Line  6  api_key = "${API_KEY}"                → INFO  (template syntax)
+    Line  7  keystore = "truststore.jks"           → INFO  (known extension)
+
+  VERIFY THAT:
+    - None of the above appear as HIGH or CRITICAL (pre-v0.4 regression)
+    - They may still appear at INFO (tool is conservative — surfaces then
+      lets the user decide) but must not be elevated incorrectly
+
+  NOTE: Without --ml the regex and entropy stages still run; some of these
+  may appear at INFO from the entropy gate. The ML verification pass is
+  what suppresses them to INFO from the pre-v0.4 CRITICAL/HIGH.
+
+
+=======================================================================
+FEATURE 6 — EXPLAINABILITY (--explain flag)
+File: samples/06_explain_demo.java  (Java / Spring Boot)
+=======================================================================
+WHAT CHANGED:
+  A new --explain CLI flag generates JSON output with per-feature
+  TreeSHAP contributions for every ML-stage finding. This explains
+  WHICH model features drove the detection decision.
+
+  Output format:
+    {
+      "findings": [
+        {
+          "finding": { ...standard finding fields... },
+          "explanation": {
+            "base_log_odds": -1.4,
+            "raw_log_odds": 2.8,
+            "predicted_probability": 0.943,
+            "top_positive": [
+              { "name": "var_ngram_secret_score", "contribution": 1.85, ... },
+              { "name": "token_entropy",          "contribution": 1.10, ... }
+            ],
+            "top_negative": [ ... ],
+            "contributions": [ ...all 64 features... ]
+          }
+        }
+      ]
+    }
+
+  Regex-tier findings (CRITICAL) have "explanation": null — they need
+  no model explanation because the pattern match is deterministic.
+
+  Token-derived feature values (token_length, token_entropy, etc.) are
+  serialized as null to prevent reconstruction of the redacted token.
+
+  Requires: pip install harpocrates[ml]
+
+WHAT TO VERIFY:
+  harpocrates scan --explain docs/samples/samples/06_explain_demo.java
+
+  EXPECTED:
+    - Output is valid JSON (pipe to | python -m json.tool to confirm)
+    - Each finding has an "explanation" key
+    - ML-stage findings have non-null explanation with top_positive /
+      top_negative arrays (up to 5 entries each)
+    - Regex-stage findings (CRITICAL) have "explanation": null
+    - Token-derived feature values appear as null in contributions array
+    - "predicted_probability" is a float between 0 and 1
+
+  VERIFY THAT:
+    harpocrates scan --explain docs/samples/samples/06_explain_demo.java \
+      | python -m json.tool > /dev/null && echo "valid JSON"
+
+    harpocrates scan --explain docs/samples/samples/06_explain_demo.java \
+      | python -c "
+    import json, sys
+    data = json.load(sys.stdin)
+    for item in data['findings']:
+        f = item['finding']
+        e = item['explanation']
+        if f['evidence'] == 'ml' and e is None:
+            print('FAIL: ML finding missing explanation')
+        elif f['evidence'] == 'regex' and e is not None:
+            print('FAIL: regex finding has unexpected explanation')
+    print('explanation structure OK')
+    "
+
+
+=======================================================================
+FEATURE 7 — MCP SERVER (include_contributions)
+=======================================================================
+WHAT CHANGED:
+  Both MCP tools gained a new optional parameter:
+    include_contributions: bool = False
+
+  When True, each finding in the response gains an "explanation" key
+  with the same TreeSHAP structure as the --explain CLI flag.
+  Lazy-imported — xgboost is only loaded when include_contributions=True.
+
+WHAT TO VERIFY:
+  Start the MCP server in one terminal:
+    harpocrates-mcp
+
+  In a second terminal, send a JSON-RPC call (or use any MCP client):
+    echo '{
+      "jsonrpc":"2.0","id":1,
+      "method":"tools/call",
+      "params":{
+        "name":"scan_text",
+        "arguments":{
+          "text":"APIM_SECRET_KEY = \"eDRlUVQ7dt5nKmP9rS2tV8wY1zA5cE0g\"",
+          "include_contributions":true
+        }
+      }
+    }' | harpocrates-mcp
+
+  VERIFY THAT:
+    - Response contains findings array
+    - Each finding has an "explanation" field when include_contributions=true
+    - Server does not crash on the request
+    - Without include_contributions (or false), "explanation" is absent
+
+
+=======================================================================
+FEATURE 8 — REGEX-TIER PRIORITY (CRITICAL / HIGH before ML)
+File: samples/07_regex_priority.py  (Python)
+=======================================================================
+WHAT THIS DEMONSTRATES:
+  Harpocrates runs three detection passes in priority order:
+    1. CRITICAL_SIGNATURES regex  — fires first, no ML needed
+    2. HIGH_SIGNATURES regex      — fires second, no ML needed
+    3. Shannon entropy + XGBoost  — fires last, only for unknowns
+
+  When a line matches a regex pattern the finding carries:
+    evidence: "regex"        (never "entropy" or "ml")
+    severity: "critical"     for CRITICAL_SIGNATURES
+           or "high"         for HIGH_SIGNATURES
+  The ML model is NOT involved at all for these lines.
+
+  This file covers all 14 built-in patterns across 9 CRITICAL and 5 HIGH
+  signatures. No --ml flag needed — regex runs on every scan unconditionally.
+
+WHAT TO VERIFY:
+  harpocrates scan docs/samples/samples/07_regex_priority.py
+
+  EXPECTED FINDINGS — all with evidence: "regex":
+    AWS_ACCESS_KEY_ID   → CRITICAL, category: aws_key
+    GITHUB_TOKEN        → CRITICAL, category: github_token
+    SLACK_BOT_TOKEN     → CRITICAL, category: slack_token
+    STRIPE_LIVE_KEY     → CRITICAL, category: stripe_key
+    OPENAI_STRICT_KEY   → CRITICAL, category: openai_key
+    ANTHROPIC_API_KEY   → CRITICAL, category: anthropic_key
+    GCP_API_KEY         → CRITICAL, category: gcp_key
+    NPM_TOKEN           → CRITICAL, category: npm_token
+    PYPI_API_TOKEN      → CRITICAL, category: pypi_token
+    private_key_pem     → HIGH,     category: private_key
+    SENDGRID_API_KEY    → HIGH,     category: sendgrid_key
+    TWILIO_API_KEY      → HIGH,     category: twilio_key
+    DATABRICKS_TOKEN    → HIGH,     category: databricks_token
+    VAULT_SERVICE_TOKEN → HIGH,     category: vault_token
+
+  VERIFY THAT (machine-readable check):
+    harpocrates scan --json docs/samples/samples/07_regex_priority.py \
+      | python -c "
+    import json, sys
+    data = json.load(sys.stdin)
+    findings = data['findings']
+    bad = [f for f in findings if f['evidence'] != 'regex']
+    if bad:
+        for f in bad:
+            print(f'FAIL: {f[\"snippet\"][:60]} has evidence={f[\"evidence\"]}')
+    else:
+        print(f'OK: all {len(findings)} findings have evidence=regex')
+    critical = sum(1 for f in findings if f['severity'] == 'critical')
+    high     = sum(1 for f in findings if f['severity'] == 'high')
+    print(f'  CRITICAL: {critical} (expected 9)')
+    print(f'  HIGH:     {high} (expected 6)')
+    "
+
+  VERIFY THAT:
+    - ALL findings have evidence: "regex" (none should be "entropy" or "ml")
+    - 9 findings are CRITICAL (one per CRITICAL signature)
+    - 6 findings are HIGH (5 HIGH signatures + 1 overlap — see note below)
+    - No --ml flag was needed to produce these findings
+
+  NOTE ON FINDING COUNT:
+    The Anthropic key (sk-ant-api03-...) produces TWO findings:
+      1. ANTHROPIC_API_KEY  → CRITICAL (precise Anthropic-format match)
+      2. OPENAI_API_KEY_LEGACY → HIGH  (sk- prefix is shared; legacy pattern
+         is intentionally broad to catch historical OpenAI keys with hyphens)
+    Both detections are correct behavior. When two patterns overlap on one
+    line, both findings are emitted independently. The CRITICAL finding is
+    what matters for triage; the HIGH is additional signal, not noise.
+
+
+=======================================================================
+KNOWN LIMITATIONS (not bugs)
+=======================================================================
+- File paths and enum values may still appear at INFO severity without
+  the --ml flag, because the regex/entropy stages don't use value-shape
+  features. Always use --ml for production scans.
+
+- The --explain flag bypasses the standard table output and emits JSON
+  only. It cannot be combined with --json or --output flags.
+
+- Explanation is only available for ML-stage findings. Regex-tier
+  CRITICAL findings always have "explanation": null.
+
+- The xgboost[ml] extra is required for --explain and
+  include_contributions=True. Running without it gives a clear error:
+    "✗ --explain requires XGBoost. Install with: pip install harpocrates[ml]"
