@@ -86,6 +86,7 @@ Issues = "https://github.com/Skipa776/Harpocrates/issues"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+src = [".", "cli"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
@@ -96,20 +97,21 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # N803/N806: uppercase X_train/X_val follow sklearn/numpy ML convention
-"Harpocrates/training/train_model.py" = ["N803", "N806"]
-"Harpocrates/training/train_two_stage.py" = ["N803", "N806"]
-"Harpocrates/training/cross_validation.py" = ["N803", "N806"]
-"Harpocrates/training/train.py" = ["N806"]
-"Harpocrates/training/evaluate.py" = ["N806"]
-"Harpocrates/training/generators/generate_data.py" = ["N806"]
-# scripts/ are dev-only exploratory tools — ML naming conventions and late imports expected
+"cli/Harpocrates/training/train_model.py" = ["N803", "N806"]
+"cli/Harpocrates/training/train_two_stage.py" = ["N803", "N806"]
+"cli/Harpocrates/training/cross_validation.py" = ["N803", "N806"]
+"cli/Harpocrates/training/train.py" = ["N806"]
+"cli/Harpocrates/training/evaluate.py" = ["N806"]
+"cli/Harpocrates/training/generators/generate_data.py" = ["N806"]
+# scripts/ and bench/ are dev-only exploratory tools — ML naming conventions and late imports expected
 "scripts/*.py" = ["N803", "N806", "E402", "F841"]
+"bench/*.py" = ["N803", "N806", "E402", "F841"]
 # E402: intentional late import (optional heavy deps loaded after availability check)
-"Harpocrates/api/main.py" = ["E402"]
-"Harpocrates/ml/ensemble.py" = ["E402"]
+"cli/Harpocrates/api/main.py" = ["E402"]
+"cli/Harpocrates/ml/ensemble.py" = ["E402"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["cli/tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
@@ -118,6 +120,7 @@ markers = [
 ]
 
 [tool.setuptools.packages.find]
+where = ["cli"]
 include = ["Harpocrates*"]
 exclude = ["tests*", "examples*", "scripts*", "comparison*"]
 
