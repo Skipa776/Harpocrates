@@ -126,3 +126,6 @@ comparison/
 
 # Ruff cache
 .ruff_cache/
+
+# graphify code graph (regenerate with `graphify update .`)
+graphify-out/
