@@ -2,21 +2,40 @@ name: CI
 
 on:
   push:
-    branches: [ "main", "feature/**" ]
+    branches: [ "main", "feature/**", "feat/**" ]
   pull_request:
 
 jobs:
+  rust:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path rust_scanner/Cargo.toml --check
+
+      - name: Run clippy
+        run: cargo clippy --manifest-path rust_scanner/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path rust_scanner/Cargo.toml
+
   lint-and-test:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout (with LFS for model artifacts)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           lfs: true
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -38,12 +57,12 @@ jobs:
 
     steps:
       - name: Checkout (with LFS for model artifacts)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           lfs: true
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 

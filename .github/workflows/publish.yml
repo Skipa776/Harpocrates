@@ -25,9 +25,11 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -40,7 +42,7 @@ jobs:
       - name: Smoke test — install from wheel, verify CLI runs clean
         run: |
           pip install "$(ls dist/*.whl)[ml]"
-          harpocrates scan tests/fixtures/safe_file.txt
+          harpocrates scan tests/fixtures/safe_file.txt --engine python --ml
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

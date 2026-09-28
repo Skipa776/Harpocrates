@@ -9,9 +9,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Pattern, Tuple
+from typing import TYPE_CHECKING, List, Optional, Pattern, Sequence, Tuple
 
 from Harpocrates.ml.tokens import TokenMatch
+
+if TYPE_CHECKING:
+    from Harpocrates.core.result import Finding
 
 # Variable name extraction patterns for different languages/formats
 VAR_ASSIGNMENT_PATTERNS: List[Tuple[str, Pattern[str]]] = [
@@ -245,7 +248,21 @@ def extract_context(
     Returns:
         CodeContext with surrounding code and metadata
     """
-    lines = content.splitlines()
+    return extract_context_from_lines(
+        content.splitlines(),
+        line_number,
+        file_path,
+        context_lines=context_lines,
+    )
+
+
+def extract_context_from_lines(
+    lines: Sequence[str],
+    line_number: int,
+    file_path: Optional[str] = None,
+    context_lines: int = 3,
+) -> CodeContext:
+    """Extract context from lines already split by a batch caller."""
     total_lines = len(lines)
 
     # Adjust to 0-based indexing
@@ -268,8 +285,8 @@ def extract_context(
     start_idx = max(0, line_idx - context_lines)
     end_idx = min(len(lines), line_idx + context_lines + 1)
 
-    lines_before = lines[start_idx:line_idx]
-    lines_after = lines[line_idx + 1 : end_idx]
+    lines_before = list(lines[start_idx:line_idx])
+    lines_after = list(lines[line_idx + 1 : end_idx])
 
     return CodeContext(
         line_content=line_content,
@@ -285,7 +302,7 @@ def extract_context(
 
 
 def extract_context_from_finding(
-    finding: "Finding",  # noqa: F821 - Forward reference
+    finding: Finding,
     full_content: Optional[str] = None,
     context_lines: int = 3,
 ) -> CodeContext:
@@ -330,6 +347,7 @@ def extract_context_from_finding(
 __all__ = [
     "CodeContext",
     "extract_context",
+    "extract_context_from_lines",
     "extract_context_from_finding",
     "extract_var_name",
     "is_comment_line",

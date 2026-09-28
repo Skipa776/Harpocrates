@@ -93,9 +93,10 @@ HIGH_SIGNATURES: Dict[str, Pattern] = {
     # Stripe sk_live_/sk_test_ use underscores not hyphens — no collision.
     # Negative lookaheads exclude forms already owned by CRITICAL_SIGNATURES:
     #   (?!proj-)          — sk-proj- form already covered by CRITICAL
+    #   (?!ant-api03-)     — Anthropic form already covered by CRITICAL
     #   (?![a-zA-Z0-9]{48}\b) — exact 48-char pure-alphanum sk- already CRITICAL
     "OPENAI_API_KEY_LEGACY": re.compile(
-        r"\bsk-(?!proj-)(?![a-zA-Z0-9]{48}\b)[A-Za-z0-9_-]{16,}\b"
+        r"\bsk-(?!proj-)(?!ant-api03-)(?![a-zA-Z0-9]{48}\b)[A-Za-z0-9_-]{16,}\b"
     ),
 }
 

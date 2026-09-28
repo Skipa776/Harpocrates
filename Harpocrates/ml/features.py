@@ -350,7 +350,7 @@ class FeatureVector:
     env_loader_in_context: bool = False  # Context contains env-loading pattern
     is_env_fallback_value: bool = False  # Token is the fallback/default arg in env-loader call
 
-    # Phase 7.0: value-shape features for FP suppression (67-feature vector)
+    # Phase 7.0: value-shape features for FP suppression (64-feature vector)
     value_starts_with_slash: bool = False        # "/" or "~" or "./" prefix → file path
     value_contains_path_separator: bool = False  # "/" or "\" in value (non-URL) → path
     value_ends_with_known_ext: bool = False      # .pem/.key/.crt/.jks/.p12/.json/.yaml/.txt
@@ -780,7 +780,7 @@ def _calculate_entropy_charset_mismatch(token: str) -> float:
         # High entropy with limited charset - likely hash/UUID
         # Scale from 0.3 at entropy=3.5 to 0.8 at entropy=4.5+
         mismatch = 0.3 + min(0.5, (entropy - 3.5) / 2.0)
-        return min(1.0, mismatch)
+        return float(min(1.0, mismatch))
 
     # If we have low entropy with high charset, it's structured text (not concerning)
     if entropy < 3.0 and char_classes >= 3:
@@ -1835,4 +1835,3 @@ __all__ = [
     "SECRET_VAR_PATTERNS",
     "SAFE_VAR_PATTERNS",
 ]
-

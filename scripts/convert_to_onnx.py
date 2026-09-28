@@ -2,7 +2,7 @@
 """
 Offline ONNX model conversion script (v2.1.0).
 
-Converts the trained XGBoost (65 features) model to ONNX format
+Converts the trained XGBoost model to ONNX using the live feature contract
 for lightweight runtime inference.
 
 Outputs:
@@ -16,6 +16,7 @@ Usage:
 Requirements (pip install harpocrates[ml]):
     xgboost>=2.0.0, onnxmltools>=1.12.0, skl2onnx>=0.5.0
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,7 +30,9 @@ sys.path.insert(0, str(ROOT))
 
 DEFAULT_MODEL_DIR = ROOT / "Harpocrates" / "ml" / "models"
 
-N_FEATURES = 65
+from Harpocrates.ml.features import FEATURE_NAMES
+
+N_FEATURES = len(FEATURE_NAMES)
 
 
 def _sha256(path: Path) -> str:
@@ -45,8 +48,10 @@ def convert_xgboost(model_path: Path, output_path: Path, n_features: int) -> Non
     print(f"Converting XGBoost: {model_path.name} -> {output_path.name}")
 
     try:
-        import onnxmltools
-        from onnxmltools.convert.common.data_types import FloatTensorType
+        import onnxmltools  # type: ignore[import-untyped]
+        from onnxmltools.convert.common.data_types import (  # type: ignore[import-untyped]
+            FloatTensorType,
+        )
         from xgboost import XGBClassifier
     except ImportError as e:
         print(f"ERROR: {e}\nInstall: pip install 'harpocrates[ml]' onnxmltools skl2onnx")
@@ -71,14 +76,12 @@ def smoke_test(model_path: Path) -> None:
     print("\nRunning smoke test...")
     try:
         import numpy as np
-        import onnxruntime as ort
+        import onnxruntime as ort  # type: ignore[import-untyped]
 
         session = ort.InferenceSession(str(model_path))
         dummy = np.zeros((1, N_FEATURES), dtype=np.float32)
         result = session.run(None, {session.get_inputs()[0].name: dummy})
-        shapes = [
-            r.shape if hasattr(r, "shape") else type(r).__name__ for r in result
-        ]
+        shapes = [r.shape if hasattr(r, "shape") else type(r).__name__ for r in result]
         print(f"  {model_path.name}: OK (output shapes: {shapes})")
     except Exception as e:
         print(f"  [WARN] Smoke test failed: {e}")
@@ -117,6 +120,7 @@ def main() -> None:
     model_dir: Path = args.model_dir
     model_in = args.input or model_dir / "xgboost_model.json"
     model_out = model_dir / "model.onnx"
+    config_path = model_dir / "model_config.json"
     manifest_path = model_dir / "onnx_model_hashes.json"
 
     if not model_in.exists():
@@ -129,6 +133,8 @@ def main() -> None:
         smoke_test(model_out)
 
     hashes = {model_out.name: _sha256(model_out)}
+    if config_path.exists():
+        hashes[config_path.name] = _sha256(config_path)
     write_hash_manifest(hashes, manifest_path)
 
     print("\nConversion complete.")

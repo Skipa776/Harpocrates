@@ -193,6 +193,12 @@ def test_openai_legacy_does_not_fire_on_proj_key() -> None:
     assert not pattern.search("sk-proj-" + "a" * 20 + "T3" + "b" * 20)
 
 
+def test_openai_legacy_does_not_fire_on_anthropic_key() -> None:
+    """The broader OpenAI pattern must not duplicate Anthropic findings."""
+    pattern = HIGH_SIGNATURES["OPENAI_API_KEY_LEGACY"]
+    assert not pattern.search("sk-ant-api03-" + "a" * 93)
+
+
 def test_openai_legacy_fires_on_47_char_key() -> None:
     """47-char pure-alphanum key is NOT owned by CRITICAL — LEGACY should catch it."""
     pattern = HIGH_SIGNATURES["OPENAI_API_KEY_LEGACY"]

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harpocrates"
-version = "0.4.2"
+version = "0.4.3"
 description = "ML-powered secrets detection tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,7 +51,7 @@ api = [
     "python-multipart>=0.0.6",
 ]
 mcp = [
-    "mcp>=1.0.0",
+    "mcp>=1.27,<2",
 ]
 llm = [
     # LLM providers use standard library (urllib) for HTTP
@@ -71,7 +71,7 @@ all = [
     "uvicorn[standard]>=0.27.0",
     "pydantic-settings>=2.1.0",
     "python-multipart>=0.0.6",
-    "mcp>=1.0.0",
+    "mcp>=1.27,<2",
 ]
 
 [project.scripts]
@@ -124,7 +124,9 @@ exclude = ["tests*", "examples*", "scripts*", "comparison*"]
 [tool.setuptools.package-data]
 "Harpocrates.ml.models" = [
     "stageA_xgboost.json",
+    "model.onnx",
     "model_config.json",
+    "onnx_model_hashes.json",
 ]
 
 [tool.mypy]
