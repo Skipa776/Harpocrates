@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reproduce the shipped ML model's precision and recall on labeled JSONL.
 
-    python bench/eval_detector.py                    # committed 300-secret holdout
+    python bench/eval_detector.py                    # local 300-record holdout (gitignored)
     python bench/eval_detector.py data/labeled.jsonl # any file with "label" 0/1
 
 A record counts as flagged when the model routes it to "review" or "blocked"
