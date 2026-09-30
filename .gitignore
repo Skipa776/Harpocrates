@@ -134,3 +134,5 @@ graphify-out/
 data/oss/
 data/models/
 data/llm_slots/
+# Alarm audits hold real strings from the OSS corpus; local only
+data/audit/

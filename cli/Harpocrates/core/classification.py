@@ -60,6 +60,27 @@ class ViolationCategory(Enum):
     GENERIC_SECRET = "generic_secret"
 
 
+# FR-CORE-02: the six secret types every layer reports (placeholders, logs, blocks).
+SECRET_TYPES = ("cloud_key", "api_token", "db_credential", "private_key", "password", "generic")
+_SECRET_TYPE_BY_CATEGORY = {
+    "aws_key": "cloud_key", "gcp_key": "cloud_key", "databricks_token": "cloud_key",
+    "connection_string": "db_credential",
+    "private_key": "private_key", "ssh_key": "private_key", "crypto_key": "private_key",
+    "password": "password",
+    "generic_secret": "generic",
+}
+
+
+def secret_type(category: Optional[str]) -> str:
+    """Coarse FR-CORE-02 type for a ViolationCategory value; unknown or None -> generic.
+    Every provider token, webhook, JWT, OAuth and session secret is an api_token."""
+    if category is None:
+        return "generic"
+    if category in _SECRET_TYPE_BY_CATEGORY:
+        return _SECRET_TYPE_BY_CATEGORY[category]
+    return "api_token" if category in {c.value for c in ViolationCategory} else "generic"
+
+
 # Structured reason string — stable format for log parsing.
 # Format: "layer=<l> matched=<m> [var_name='<v>'] confidence=<c>"
 def _reason(layer: str, matched: str, confidence: float,
