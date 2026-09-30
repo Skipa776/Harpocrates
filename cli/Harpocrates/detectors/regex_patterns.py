@@ -28,7 +28,7 @@ CRITICAL_SIGNATURES: Dict[str, Pattern] = {
     ),
     # Slack bot/app/user/workspace/refresh tokens.
     "SLACK_TOKEN": re.compile(
-        r"\bxox[pboar]-[0-9]{10,13}-[a-zA-Z0-9\-]{24,34}\b"
+        r"\bxox[pboar]-[0-9]{10,13}-[a-zA-Z0-9\-]{24,48}\b"  # bot: xoxb-<digits>-<digits>-<24 alnum>
     ),
     # Stripe standard and restricted keys (live and test).
     "STRIPE_KEY": re.compile(
@@ -58,6 +58,8 @@ CRITICAL_SIGNATURES: Dict[str, Pattern] = {
 
 # HIGH: infrastructure credentials — anchored but slightly broader scope.
 HIGH_SIGNATURES: Dict[str, Pattern] = {
+    # Telegram bot token: <bot id>:<35-char secret>
+    "TELEGRAM_BOT_TOKEN": re.compile(r"(?<![0-9])[0-9]{8,10}:[A-Za-z0-9_\-]{35}(?![A-Za-z0-9_\-])"),
     # PEM private key header — RSA/EC/OPENSSH typed or PKCS#8 untyped.
     "PRIVATE_KEY": re.compile(
         r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"

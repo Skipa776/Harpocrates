@@ -23,6 +23,8 @@ from Harpocrates.detectors.regex_patterns import SIGNATURES
 
 SECRET_WORDS = re.compile(r"key|secret|token|passw|pwd|auth|credential|api", re.I)
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z_]*$")          # letters/underscores only
+DOTTED_IDENTIFIER = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)+$")  # signer.verifySignature, com.mysql.cj.Driver
+KEBAB_WORDS = re.compile(r"^[a-z]+(-[a-z]+)+$")                # your-github-client-id
 # URL scheme, leading slash, or a path ending in a file extension / starting at a domain.
 URL_OR_PATH = re.compile(r"^(https?:|//|/|\./)|^[\w.-]+(/[\w.-]+)*\.[a-z]{1,5}$|^[a-z0-9-]+\.[a-z]{2,}/")
 NUMBERISH = re.compile(r"^\+?[\d\s().-]+$")
@@ -52,7 +54,9 @@ def _looks_non_secret(token: str) -> str | None:
         return "url/path"
     if NUMBERISH.match(token):
         return "number/phone"
-    if IDENTIFIER.match(token):
+    dotted_name = (DOTTED_IDENTIFIER.match(token) and not token.startswith("eyJ")  # JWTs are dotted too
+                   and max(len(part) for part in token.split(".")) <= 32)       # long random segments aren't names
+    if IDENTIFIER.match(token) or dotted_name or KEBAB_WORDS.match(token):
         return "identifier/word"
     if len(token) < 8:
         return "too short (<8)"

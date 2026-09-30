@@ -24,3 +24,19 @@ def test_clean_rules():
     assert all(r["original_label"] == 1 for r in relabeled)
     assert out[0]["source"] == "llm_synthetic" and out[2]["source"] == "script"
     assert stats == {"input": 6, "duplicates": 1, "conflicting_dropped": 2, "relabeled": 2, "output": 3}
+
+
+def test_dotted_and_kebab_identifiers_are_relabeled():
+    records = [_rec("signer.verifySignature", 1), _rec("com.mysql.cj.jdbc.Driver", 1),
+               _rec("your-github-client-id", 1), _rec("oauth-client-secret", 1),
+               _rec("z395jy7f4kRm9qwezXb", 1)]  # random value: stays a secret
+    out, _ = clean(records)
+    assert [(r["token"], r["label"]) for r in out] == [
+        ("signer.verifySignature", 0), ("com.mysql.cj.jdbc.Driver", 0),
+        ("your-github-client-id", 0), ("oauth-client-secret", 0), ("z395jy7f4kRm9qwezXb", 1)]
+
+
+def test_jwt_is_not_mistaken_for_a_dotted_identifier():
+    jwt = "eyJhbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiJ1c2VyMTIzIiwiaWF0IjoxNzAwMDAwMDAwfQ" + "." + "Tq9xK2mN8pL4vR7wZ3bY"
+    out, _ = clean([_rec(jwt, 1), _rec("app.config.loader", 1)])
+    assert [(r["token"], r["label"]) for r in out] == [(jwt, 1), ("app.config.loader", 0)]

@@ -121,8 +121,8 @@ def generate_slack_token(token_type: str = "bot") -> str:
         "refresh": "xoxr-",
     }
     prefix = prefixes.get(token_type, "xoxb-")
-    # Slack tokens have dashes in them
-    parts = [_random_string(random.randint(10, 15), string.digits) for _ in range(3)]
+    # Real format: <prefix><10-13 digit workspace>-<10-13 digit id>-<24 alnum secret>
+    parts = [_random_string(random.randint(10, 13), string.digits) for _ in range(2)] + [_random_string(24)]
     return prefix + "-".join(parts)
 
 

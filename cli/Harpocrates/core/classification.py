@@ -43,6 +43,7 @@ class ViolationCategory(Enum):
     TWILIO_KEY = "twilio_key"
     DATABRICKS_TOKEN = "databricks_token"
     VAULT_TOKEN = "vault_token"
+    TELEGRAM_TOKEN = "telegram_token"
 
     # Inferred — heuristic classification for entropy/ML path
     PASSWORD = "password"
@@ -105,6 +106,7 @@ _SIGNATURE_TO_CATEGORY: dict[str, ViolationCategory] = {
     "DISCORD_WEBHOOK":   ViolationCategory.DISCORD_WEBHOOK,
     "SENDGRID_API_KEY":  ViolationCategory.SENDGRID_KEY,
     "TWILIO_API_KEY":    ViolationCategory.TWILIO_KEY,
+    "TELEGRAM_BOT_TOKEN": ViolationCategory.TELEGRAM_TOKEN,
     "DATABRICKS_TOKEN":  ViolationCategory.DATABRICKS_TOKEN,
     "HASHICORP_VAULT_TOKEN": ViolationCategory.VAULT_TOKEN,
     "OPENAI_API_KEY_LEGACY": ViolationCategory.OPENAI_KEY,

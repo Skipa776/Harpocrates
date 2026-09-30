@@ -28,6 +28,7 @@ def _ml_tokens(line: str) -> set[str]:
      "q8Lz0vT3nR7kW2pX9bY4"),
     (f'x = "{HEX32}"', HEX32),  # 32+ hex below the entropy gate, neutral name
     (f'value = "{PW}"', PW),  # password-shaped literal with a neutral name
+    ('value = "hunter4242"', "hunter4242"),  # weak lowercase+digits password
 ])
 def test_credential_shapes_become_ml_candidates(line, expected):
     assert expected in _ml_tokens(line)
