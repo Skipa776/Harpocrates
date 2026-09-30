@@ -33,12 +33,15 @@ from bench.compare_scanners import overlaps  # noqa: E402
 
 ROOT = C.ROOT
 AUDIT = ROOT / "data/audit"
-V16 = (ROOT / "cli/Harpocrates/ml/models/xgboost_model.json", {"commit": 0.8016, "gate": 0.5505})
+V16 = (ROOT / "data/models/v16.json", {"commit": 0.8016, "gate": 0.5505})  # v1.1 as shipped, archived
+
+
+CANDIDATE = "v17"  # model stem under data/models/; `report --candidate v17j` checks the shipped recipe J
 
 
 def _v17() -> tuple[Path, dict]:
-    t = json.loads((ROOT / "data/models/v17.report.json").read_text())["thresholds"]
-    return ROOT / "data/models/v17.json", {"commit": t["commit"], "gate": t["gate"]}
+    t = json.loads((ROOT / f"data/models/{CANDIDATE}.report.json").read_text())["thresholds"]
+    return ROOT / f"data/models/{CANDIDATE}.json", {"commit": t["commit"], "gate": t["gate"]}
 
 
 def _common_val() -> list[dict]:
@@ -136,7 +139,7 @@ def _context(path: str, line: int, token: str, width: int = 3) -> str | None:
 def mined_negative_audit(k: int = 100) -> dict:
     """Train v17's recipe *without* mined negatives, score the mined negatives, write the top k.
     High scores are the unlabeled real-code strings most likely to be hidden secrets."""
-    rep = json.loads((ROOT / "data/models/v17.report.json").read_text())
+    rep = json.loads((ROOT / f"data/models/{CANDIDATE}.report.json").read_text())
     train, _ = C.split([Path(p) if Path(p).is_absolute() else ROOT / p for p in rep["train_files"]])
     d = C.rows(train)
     zero = [C.NAMES.index(n) for n in rep["zeroed_features"]]
@@ -218,16 +221,21 @@ def main() -> None:
     rep = sub.add_parser("report")
     rep.add_argument("old", type=Path)
     rep.add_argument("new", type=Path)
+    rep.add_argument("--candidate", default="v17", help="model stem under data/models/ (v17 = recipe H, v17j = J)")
     args = ap.parse_args()
     if args.cmd == "dump":
         dump(args.out)
         return
+    global CANDIDATE
+    CANDIDATE = args.candidate
     old, new = dict(np.load(args.old)), dict(np.load(args.new))
-    report = {"alarm_rates": {s: alarm_rates(old, new, s) for s in ("val", "test")},
-              "recall_gain": recall_gain(old, new, _common_val()),
-              "mined_negatives": mined_negative_audit(),
-              "blind_sample": blind_sample(old, new, {"v17_only": 80, "v16_only": 40, "both": 80})}
-    (ROOT / "data/models/r2/release_checks.json").write_text(json.dumps(report, indent=1))
+    report = {"candidate": CANDIDATE, "alarm_rates": {s: alarm_rates(old, new, s) for s in ("val", "test")},
+              "recall_gain": recall_gain(old, new, _common_val())}
+    if CANDIDATE == "v17":  # the audit files belong to the H candidate that section 18 examined
+        report["mined_negatives"] = mined_negative_audit()
+        report["blind_sample"] = blind_sample(old, new, {"v17_only": 80, "v16_only": 40, "both": 80})
+    suffix = "" if CANDIDATE == "v17" else f"_{CANDIDATE}"
+    (ROOT / f"data/models/r2/release_checks{suffix}.json").write_text(json.dumps(report, indent=1))
     print(json.dumps({k: v for k, v in report.items() if k != "alarm_rates"}, indent=1))
 
 
