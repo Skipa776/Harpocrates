@@ -16,91 +16,95 @@ Harpocrates catches what slips through.
 
 ---
 
-## Harpocrates vs TruffleHog
+## Harpocrates vs other secret scanners
 
-Benchmarked on a 5,000-line held-out evaluation set, cross-referenced against TruffleHog's output using 1,430 TruffleHog findings as ground truth.
+Five scanners, same files, full scans. Harpocrates results are exactly what `harpocrates scan --ml` runs (regex + entropy + ML). Two held-out test sets, never used for training or tuning:
 
-| | TruffleHog | Harpocrates |
-|---|---|---|
-| Unique lines flagged | 606 | 1,300 |
-| Lines only this tool caught | 449 | **1,143** |
-| Lines both tools caught | 157 | 157 |
-| Recall (held-out set) | — | **97.3%** |
-| Precision (held-out set) | — | **87.1%** |
-| Detection approach | Regex + live API verification | Regex + entropy + ML context |
-| Scans comments | ❌ | ✅ |
-| Catches ambiguous variable names | ❌ | ✅ |
-| Catches env-var fallback leaks | ❌ | ✅ |
-| Catches AI-scaffolded credential patterns | ❌ | ✅ |
-| Classifies secret type (password, api\_token, jwt…) | ❌ | ✅ |
-| Verifies credentials are live via API calls | ✅ | ❌ |
+- **Held-out benchmark:** 4,352 records. The code was written by LLMs (Kimi K2.6, MiniMax M2.5) that generated none of the training data. Half the records carry a secret, half a harmless look-alike.
+- **Open-source code:** 3,000 records from 42 permissively licensed GitHub repos, with fake secrets inserted and real high-entropy strings from the same code as negatives.
 
-**Harpocrates caught 1,143 lines TruffleHog missed. TruffleHog caught 449 Harpocrates missed.**
+Recall and precision columns are held-out benchmark first, then open-source code.
 
-TruffleHog's edge is live credential verification — it calls the AWS, GitHub, and Stripe APIs to confirm a key is still active. Harpocrates doesn't do that. If a key matches a known format and is still live, TruffleHog will catch it. Run both.
+| Scanner | Recall | Precision | False-positive rate | Recall | Precision | AUC (benchmark / OSS) |
+|---|---|---|---|---|---|---|
+| TruffleHog 3.95 | 40.0% | 97.6% | 0.9% | 39.5% | 98.8% | n/a (yes/no only) |
+| gitleaks 8.30 | 52.3% | 89.3% | 5.7% | 48.9% | 100.0% | n/a (yes/no only) |
+| detect-secrets 1.5 ¹ | 55.3% | 63.8% | 28.3% | 74.0% | 78.7% | n/a (yes/no only) |
+| CredSweeper 1.18 | 68.3% | 72.8% | 23.1% | 59.3% | 93.3% | 0.72 / 0.81 |
+| **Harpocrates (gate)** | **93.3%** | **92.5%** | 6.8% | **98.7%** | **93.5%** | **0.984 / 0.998** ² |
+| Harpocrates (commit) | 90.2% | 95.1% | 4.2% | 95.3% | 97.3% | same model |
 
-### What Harpocrates catches that TruffleHog can't
+¹ detect-secrets reports only a hash of each secret, so it is credited for any finding on the right line. That is lenient in its favor.
+² Harpocrates AUC is measured over the candidates the scanner extracts. TruffleHog, gitleaks and detect-secrets output yes/no only, so they have one point on the ROC curve, not a curve. CredSweeper's AUC uses its ML probabilities (`--ml_threshold 0`).
 
-**1. Secrets under ambiguous variable names**
+**Two operating points, one model.** The *gate* threshold favors recall: it is for blocking secrets before they reach an AI model, where a missed secret is the costly mistake. The *commit* threshold favors precision for pre-commit hooks, where false alarms interrupt developers.
 
-TruffleHog requires the variable name to match a known pattern. Harpocrates uses ML to evaluate the token, the variable name, and the surrounding context together.
+**Secrets only one scanner caught** (held-out benchmark): Harpocrates **189**, detect-secrets 24, CredSweeper 15, TruffleHog 4, gitleaks 1.
 
-| Code | TruffleHog | Harpocrates |
-|------|-----------|-------------|
-| `client_secret = "eyJhbGci..."` | ❌ | ✅ JWT (0.97) |
-| `ENCRYPTION_KEY = "AKIAIOSFODNNabcd1234"` | ❌ | ✅ AWS key (0.90) |
-| `API_SECRET = "AKIAJOE7MTPSO7EXAM1E"` | ❌ | ✅ AWS key (0.80) |
-| `ACCESS_KEY = "eyJhbGciOiJSUzI1NiJ9..."` | ❌ | ✅ JWT (0.97) |
-| `my_token = "xoxb-12345-67890-abcdef..."` | ❌ | ✅ Slack token (0.94) |
+### Recall by secret type (held-out benchmark)
 
-**2. Secrets buried in comments**
+Sorted by Harpocrates' lead over the best competitor. **Bold** = Harpocrates is best or tied.
 
-TruffleHog skips comment lines. Harpocrates scans all comment styles — `#`, `//`, `/* */`, `<!--`, `--` — and flags any high-entropy token it finds there.
+| Secret type | TruffleHog | gitleaks | CredSweeper | Harpocrates |
+|---|---|---|---|---|
+| Twilio auth token | 1.4% | 5.7% | 7.1% | **94.3%** |
+| Telegram bot token | 33.7% | 0.0% | 44.2% | **100.0%** |
+| PyPI token | 0.0% | 54.4% | 57.0% | **100.0%** |
+| OpenAI key | 1.1% | 51.6% | 57.0% | **100.0%** |
+| AWS secret key | 0.0% | 49.4% | 56.5% | **97.6%** |
+| Password | 1.8% | 6.3% | 20.7% | **61.3%** |
+| Discord bot token | 0.0% | 34.6% | 53.1% | **90.1%** |
+| DigitalOcean token | 0.0% | 37.6% | 59.1% | **94.6%** |
+| Token in URL query | 26.8% | 63.9% | 62.9% | **95.9%** |
+| Generic random secret | 0.0% | 0.0% | 42.5% | **67.9%** |
+| Database/broker URI with password | 24.2% | 0.0% | 70.7% | **90.9%** |
+| ADO.NET connection string | 78.7% | 3.2% | 58.5% | **89.4%** |
+| AWS access key | 2.6% | 51.9% | 98.7% | **100.0%** |
+| Stripe key | 98.9% | 93.7% | 97.9% | **100.0%** |
+| GCP API key | 0.0% | 89.7% | 100.0% | **100.0%** |
+| GitHub token | 100.0% | 100.0% | 65.0% | **100.0%** |
+| npm token | 100.0% | 96.0% | 50.7% | **100.0%** |
+| SendGrid key | 100.0% | 96.7% | 100.0% | **100.0%** |
+| Slack bot token | 100.0% | 100.0% | 98.9% | **100.0%** |
+| Azure storage connection string | 98.8% | 96.3% | 95.1% | 97.6% |
+| JWT | 0.0% | 93.4% | 98.7% | 94.7% |
+| JDBC URL with password | 100.0% | 3.2% | 66.7% | 95.2% |
+| GitHub fine-grained token | 98.9% | 100.0% | 100.0% | 94.3% |
+| Vault token | 0.0% | 61.6% | 98.6% | 91.8% |
 
-```python
-# old: DB_PASSWORD = "prod_hunter2_xxxSECRET"     ← TruffleHog: skipped. Harpocrates: caught.
-// const apiKey = 'sk_live_NnyQ...';               ← TruffleHog: skipped. Harpocrates: caught.
-TRACE_ID=$(git log) # AKIAMXWCUIXEKLN02TKZ         ← TruffleHog: sees git command. Harpocrates: sees the key in the comment.
-```
+**Where competitors miss the most:** credentials without a provider prefix to anchor a regex on. That covers Twilio auth tokens (bare 32-hex), passwords, generic random secrets, and passwords inside connection strings and URLs. It also covers tokens embedded in larger strings, such as a Telegram token inside a bot URL or a token in a URL query parameter.
 
-**3. Environment variable fallback leaks**
+### Real-world cases none of the others catch
 
-A hardcoded fallback in `os.getenv()` is a secret that ships to production whenever the env var is unset. TruffleHog doesn't model this pattern. Harpocrates does.
+Each case below was scanned by all five tools. Only Harpocrates flagged the secret. Values are fake and shortened here; the exact files and a script that reproduces this table are in `docs/samples/readme_examples.jsonl` and `bench/readme_examples.py`.
 
-```python
-SECRET_KEY = os.getenv("SECRET_KEY", "hardcoded_prod_value_xxx")   # ← caught
-api_key = config("API_KEY", default="sk_live_realkey123456789")     # ← caught
-const key = process.env.KEY ?? "literal_secret_value";             # ← caught
-```
+| Situation | Code | TruffleHog | gitleaks | detect-secrets | CredSweeper | Harpocrates |
+|---|---|---|---|---|---|---|
+| Database password in a YAML config | `pass: "Summer2024!…"` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Password passed as a keyword argument | `psycopg2.connect(…, password="hunter…")` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Postgres URL with a percent-encoded password | `postgresql://orders_app:Wint3r%23…@db.internal/orders` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Twilio auth token passed positionally | `twilio('AC4f2a…', '9f2c4e1a…')` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Random session secret in a Rails config | `config.session_value = "vQ3#kL9$…"` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Telegram bot token inside an API URL | `…api.telegram.org/bot7318849210:AAHx9…/getMe` | ❌ | ❌ | ❌ | ❌ | ✅ |
 
-**4. Dev/prod swap comments**
+Why these slip past the others: none of them has a provider prefix like `AKIA`, `ghp_` or `sk_live_`. Several use neutral names (`pass`, `session_value`, a positional argument), and two are embedded in a URL. Harpocrates extracts candidates from connection strings, URL parameters and password-shaped literals, and an ML model trained on real code decides which are secrets.
 
-Rotating from a test key to a production key and leaving the prod key in a comment is a common pattern. The comment leaks the live credential.
+### Where the others win
 
-```python
-STRIPE_KEY = "sk_test_abc"  # PROD: sk_live_xyz_the_real_one    ← caught
-```
+- **Precision at the extreme:** TruffleHog flags almost nothing that isn't a secret (97.6% precision). It also verifies credentials against provider APIs; Harpocrates never makes network calls.
+- **Specific formats:** CredSweeper catches more JWTs (98.7% vs 94.7%) and Vault tokens (98.6% vs 91.8%); gitleaks and CredSweeper catch every GitHub fine-grained token (100% vs 94.3%); TruffleHog catches every JDBC URL (100% vs 95.2%) and more Azure storage connection strings (98.8% vs 97.6%).
+- **A known miss:** a 64-character hex HMAC signing key (`[]byte("7d4e9a1f…")` in Go) is flagged by detect-secrets and CredSweeper but not by Harpocrates. It is in the reproduce script.
 
-**5. AI-scaffolded code**
+**Recommended setup:** Harpocrates as the pre-commit hook and AI-agent gate (widest coverage), TruffleHog in CI (confirms which leaked credentials are live).
 
-AI coding assistants frequently hardcode credentials when scaffolding integrations. Harpocrates is trained on AI-generated code patterns specifically for this.
+### Methodology and caveats
 
-```python
-# Generated by Copilot:
-client = OpenAI(api_key="sk-proj-xLMN3kJqPv...")    # ← caught
-stripe.api_key = "sk_live_9QnKsF4jQ8M..."           # ← caught
-```
-
-**6. Cross-language coverage**
-
-The same ML model covers Python, JavaScript/TypeScript, Go, Java, Ruby, YAML, Dockerfile, Terraform, and Helm values files. TruffleHog's pattern library varies by detector; Harpocrates's entropy+ML layer is language-agnostic.
-
-### Where TruffleHog has the edge
-
-- **Live verification** — TruffleHog calls provider APIs to confirm a secret is active. Harpocrates never makes network calls.
-- **Format-anchored patterns** — credentials that match a strict format (GitHub PAT prefix `ghp_`, Stripe's `sk_live_`) are caught with zero false positives by TruffleHog's regex. Harpocrates catches these too, but TruffleHog also confirms liveness.
-
-**Recommended setup:** run Harpocrates as a pre-commit hook (catches the full range before anything reaches git) and TruffleHog in CI (confirms active credentials that made it through).
+- Harness: `bench/compare_scanners.py` (needs the scanners on `PATH`). Tool versions: TruffleHog 3.95.2 (`--no-verification`), gitleaks 8.30.1, detect-secrets 1.5.0, CredSweeper 1.18.5 (default `medium` threshold).
+- The benchmark and open-source test files are not published yet (the open-source set contains third-party code; it is rebuilt from a pinned repo list with `scripts/fetch_oss_corpus.py` and `scripts/build_eval_set.py`). The real-world cases above are published and reproducible today with `bench/readme_examples.py`.
+- A scanner is credited only for a finding on the right line whose value overlaps the labeled secret (≥ 4 characters). detect-secrets is the exception noted above.
+- Labels are correct by construction: LLMs wrote code with typed placeholders, and fake values of a known kind were filled in afterwards. The benchmark is still synthetic; real repositories will differ.
+- Harpocrates' recall ceiling (the share of secrets its scanner turns into a candidate at all) is 94.1% on the benchmark and 99.3% on open-source code.
+- These results are for the **v1.1 detector** (model v16, branch `ml/v1.1-data`). The current PyPI release ships the earlier v0.4 model.
 
 ---
 
@@ -113,7 +117,7 @@ pip install harpocrates
 harpocrates scan .
 ```
 
-With ML verification (recommended — v0.4 model: 94.1% precision, 98.9% recall on its synthetic test split; 97.3% recall on a 300-record holdout, measured with `bench/eval_detector.py`; that holdout is not yet published and is being rebuilt):
+With ML verification (recommended; see [Harpocrates vs other secret scanners](#harpocrates-vs-other-secret-scanners) for measured recall and precision):
 
 ```bash
 pip install "harpocrates[ml]"
