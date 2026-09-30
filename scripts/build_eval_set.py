@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT / "cli"))
 from Harpocrates.core.detector import _collect_text_findings
 from Harpocrates.training.generators import secret_templates as t
 
-GENERATOR_VERSION = "2"
+GENERATOR_VERSION = "3"
 CORPUS = ROOT / "data" / "oss"
 OUT = ROOT / "data" / "eval"
 MAX_FILE_BYTES = 200_000
