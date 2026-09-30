@@ -17,6 +17,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -133,6 +134,9 @@ def main() -> None:
     parser.add_argument("--real-negatives", type=int, default=0,
                         help="add every ML candidate from N sampled train-split OSS files as a negative "
                              "(real-code negative mining; needs --pipeline-features)")
+    parser.add_argument("--reliable-below", type=float, default=None,
+                        help="keep only mined negatives that a model fit without them scores below this "
+                             "(positive-unlabeled: drops credential-shaped fixtures; see notebook section 18)")
     parser.add_argument("--alarm-budget", nargs="*", default=[], metavar="LAYER=PER_1K",
                         help="also pick a threshold per layer that raises at most PER_1K ML alarms per 1,000 "
                              "files in the val-split OSS repos, e.g. commit=44.2 gate=139")
@@ -168,6 +172,9 @@ def main() -> None:
     X_train, X_val = np.array(X_train, copy=True), np.array(X_val, copy=True)
     X_train[:, zeroed] = 0.0  # constant in training, so no split uses them at inference
     X_val[:, zeroed] = 0.0
+    extra = {"scale_pos_weight": args.scale_pos_weight, "max_depth": args.max_depth, "n_estimators": args.n_estimators}
+    if args.monotone:
+        extra["monotone_constraints"] = "(" + ",".join(str(MONOTONE.get(n, 0)) for n in names) + ")"
     real_neg = None
     if args.real_negatives:
         if not args.pipeline_features:
@@ -175,11 +182,11 @@ def main() -> None:
         import r2_common
         real_neg = r2_common.oss_rows("train", args.real_negatives)["X"].copy()
         real_neg[:, zeroed] = 0.0
+        if args.reliable_below is not None:
+            probe = xgb.XGBClassifier(**{**PARAMS, **extra}).fit(X_train, y_train)
+            real_neg = real_neg[probe.predict_proba(real_neg)[:, 1] < args.reliable_below]
         X_train = np.vstack([X_train, real_neg])
         y_train = np.r_[y_train, np.zeros(len(real_neg), dtype=y_train.dtype)]
-    extra = {"scale_pos_weight": args.scale_pos_weight, "max_depth": args.max_depth, "n_estimators": args.n_estimators}
-    if args.monotone:
-        extra["monotone_constraints"] = "(" + ",".join(str(MONOTONE.get(n, 0)) for n in names) + ")"
     model = xgb.XGBClassifier(**{**PARAMS, **extra}).fit(X_train, y_train)
     p_val = model.predict_proba(X_val)[:, 1]
     precision, recall, thresholds = precision_recall_curve(y_val, p_val)
@@ -198,7 +205,9 @@ def main() -> None:
         p_oss = model.predict_proba(X_oss)[:, 1]
         for item in args.alarm_budget:
             layer, per_1k = item.split("=")
-            chosen[layer] = r2_common.threshold_for_budget(oss, p_oss, float(per_1k))
+            # Rounded *up* to the 4 decimals the report and config keep: rounding down can admit a
+            # cluster of near-identical scores and overshoot the budget (0.1579 gave 398 alarms, budget 389).
+            chosen[layer] = min(1.0, math.ceil(r2_common.threshold_for_budget(oss, p_oss, float(per_1k)) * 1e4) / 1e4)
             budget_report[layer] = {"per_1k_files": float(per_1k), "files": int(oss["n_files"])}
     threshold = chosen[str(args.target_recall[0])]
 
@@ -206,7 +215,7 @@ def main() -> None:
               "unit": "scanner candidate" if args.pipeline_features else "record", "train_rows": len(y_train),
               "zeroed_features": [names[i] for i in zeroed], "monotone": args.monotone,
               "scale_pos_weight": args.scale_pos_weight, "max_depth": args.max_depth,
-              "n_estimators": args.n_estimators, "real_negative_rows": 0 if real_neg is None else len(real_neg),
+              "n_estimators": args.n_estimators, "reliable_below": args.reliable_below, "real_negative_files": args.real_negatives, "real_negative_rows": 0 if real_neg is None else len(real_neg),
               "alarm_budget": budget_report,
               "note": ("candidate-level recall: secrets the scanner never extracts are not counted; "
                        "end-to-end recall comes from bench/compare_scanners.py") if args.pipeline_features else "",

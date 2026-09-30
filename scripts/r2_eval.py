@@ -52,6 +52,9 @@ def main() -> None:
     ap.add_argument("--trees", type=int, default=300)
     ap.add_argument("--real-negatives", type=int, default=0,
                     help="add ML candidates from N sampled train-split OSS files as negatives")
+    ap.add_argument("--reliable-below", type=float, default=None,
+                    help="keep only mined negatives that a model fit without them scores below this "
+                         "(reliable negatives; refit inside every fold)")
     args = ap.parse_args()
 
     train, val = C.split([DATA[args.data]] + C.TRAIN_FILES[1:])
@@ -62,9 +65,16 @@ def main() -> None:
         neg = C.oss_rows("train", args.real_negatives)
         base_fit = fit
 
+        kept_counts = []
+
         def fit(X, y):  # noqa: F811 - also applied inside every LOLO fold
-            return base_fit(np.vstack([X, neg["X"]]), np.r_[y, np.zeros(len(neg["fid"]), dtype=int)])
-        report_extra = {"real_negative_rows": len(neg["fid"])}
+            mined = neg["X"]
+            if args.reliable_below is not None:  # positive-unlabeled: drop mined rows that look like secrets
+                mined = mined[base_fit(X, y)(mined) < args.reliable_below]
+            kept_counts.append(len(mined))
+            return base_fit(np.vstack([X, mined]), np.r_[y, np.zeros(len(mined), dtype=int)])
+        report_extra = {"real_negative_rows": len(neg["fid"]), "reliable_below": args.reliable_below,
+                        "mined_rows_kept": kept_counts}
     else:
         report_extra = {}
     predict = fit(dtr["X"], dtr["y"])

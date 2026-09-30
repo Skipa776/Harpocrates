@@ -549,7 +549,7 @@ python scripts/train_v11.py --train data/synthetic_v4_clean.jsonl data/eval/trai
 
 **Threshold policy change (working rule 4):** v17's thresholds are chosen to match v16's real-code alarm rate, not a validation recall target:
 - commit: 0.5317
-- gate: 0.1579
+- gate: 0.1579 (0.1580 after the rounding fix in section 18)
 
 Trade-off: noise on real code stays equal to v16 by construction, and recall rises. The numbers are only as representative as the 16 val-split repos.
 
@@ -626,9 +626,82 @@ Secrets that only Harpocrates caught: 203; TruffleHog 3, gitleaks 0, detect-secr
 - **Validation is saturated for clean generators.** Future rounds should keep LOLO plus the real-code budget as the primary yardsticks.
 
 **v17 is a candidate, not shipped.** Shipping would mean:
-- replacing `model.onnx`, `xgboost_model.json` and `model_config.json`, with thresholds commit 0.5317 and gate 0.1579;
+- replacing `model.onnx`, `xgboost_model.json` and `model_config.json`, with thresholds commit 0.5317 and gate 0.1580 (section 18);
 - rerunning the README comparison;
 - updating `docs/data.md` for the round-2 data."""),
+    md("""## 18. Release checks after an external review
+
+An outside review of the v16 → v17 write-up (GPT-6-sol via Codex) agreed that v17 is a sound replacement, with a stronger case at commit than at gate. It asked for four checks before settling the gate policy:
+1. stability by repo, with paired uncertainty;
+2. an audit of mined negatives that look like secrets, plus an ablation without them;
+3. a blinded audit of real-code alarms, reporting *verified* false redactions;
+4. freezing the thresholds and retiring the benchmark for model selection.
+
+All four are below (`scripts/r2_audit.py`). Check 3 needs human labels.
+
+**Found while running them:** the trainer rounded budget thresholds *down* to 4 decimals. v17's gate threshold of 0.1579 admitted a cluster of near-identical scores, giving 398 alarms against a budget of 389. Budget thresholds now round up, so the gate is **0.1580** (386 alarms), and the model is unchanged. The held-out numbers in section 17 were measured at 0.1579. They were not re-scored, because the benchmark is now retired (check 4)."""),
+    code("""rc = json.loads((R2 / "release_checks.json").read_text())
+print("Check 1a: recall gain on validation, paired bootstrap over", rc["recall_gain"]["commit"]["groups"], "repos/files")
+for layer, g in rc["recall_gain"].items():
+    print(f"  {layer:6} v16 {g['v16_recall']:.4f} -> v17 {g['v17_recall']:.4f}  gain {g['gain']:+.4f}  "
+          f"95% CI [{g['ci95'][0]:+.4f}, {g['ci95'][1]:+.4f}]  secrets only v17 catches {g['v17_only']}, only v16 {g['v16_only']}")
+print()
+print("Check 1b: ML alarms per 1,000 real files (thresholds frozen; test-split repos are reported, never used to choose)")
+for split in ("val", "test"):
+    for layer in ("commit", "gate"):
+        a, b = rc["alarm_rates"][split][f"v16_{layer}"], rc["alarm_rates"][split][f"v17_{layer}"]
+        x = np.array([a["per_repo"][k] for k in sorted(a["per_repo"])]); y = np.array([b["per_repo"][k] for k in sorted(b["per_repo"])])
+        print(f"  {split:4} {layer:6} overall v16 {a['overall_per_1k']:6.1f}  v17 {b['overall_per_1k']:6.1f} | per-repo median {np.median(x):5.1f} -> {np.median(y):5.1f}"
+              f", max {x.max():6.1f} -> {y.max():6.1f} | v17 higher in {int((y > x).sum())} of {len(x)} repos")"""),
+    md("""**Check 1, stability:**
+- **Recall.** The gain is well outside noise: commit +3.2 points (CI 2.6 to 4.0), gate +0.8 (CI 0.5 to 1.3). v17 loses almost nothing v16 caught (2 secrets at commit, 0 at gate).
+- **Noise on repos no threshold ever saw.** On the 42 untouched test-split repos, v17 is *quieter*: commit 20.7 → 16.3 and gate 136.7 → 68.6 alarms per 1,000 files. Equal alarms on the 16 validation repos did carry over, and in v17's favor.
+- **Per-repo variation is large.** A few repos hold most of the alarms (up to 950 per 1,000 files for v16), so any single-repo number means little."""),
+    code("""mn = rc["mined_negatives"]
+print(f"Check 2: {mn['mined_rows']} mined real-code negatives; a model fit without them scores "
+      f"{mn['score_ge_0.9']} at >= 0.9 and {mn['score_ge_0.5']} at >= 0.5 (top {mn['top_k_written']} in data/audit/mined_negatives_top.csv)")
+print(f"{'ablation':24}{'mined rows kept':>16}{'LOLO commit':>13}{'LOLO gate':>11}{'val-clean commit':>18}")
+for k in ("H_more_real_negatives", "J_reliable_0.9", "K_reliable_0.5"):
+    r = json.loads((R2 / f"{k}.json").read_text())
+    kept = (r.get("mined_rows_kept") or [r.get("real_negative_rows")])[0]
+    print(f"{k:24}{kept:16}{r['lolo']['R@budget_commit']:13.4f}{r['lolo']['R@budget_gate']:11.4f}{r['val']['clean']['R@budget_commit']:18.4f}")"""),
+    md("""**Check 2, positive–unlabeled risk: real, but not where the gain comes from.**
+
+The mined negatives a model trained without them finds most secret-like (read by hand, not printed here) are almost all **credential-shaped test fixtures and demo values**:
+- the well-known jwt.io example token and other test JWTs;
+- Supabase's public demo anon and service keys in a docker test;
+- keystore salts in local docker volumes;
+- HMAC secrets in test files;
+- `user:pass@` URIs in schema examples.
+
+Probably none are live credentials, but they are exactly what the gate should redact. Mining them teaches "a credential in a fixture is not a secret."
+
+The ablation shows those rows don't drive the gain:
+- **J** keeps only reliable negatives: it drops the 363 rows scoring ≥ 0.9, with the filter model refit inside every fold. It ties v17 (H).
+- **K** drops the 2.6k rows scoring ≥ 0.5 and costs about 0.3 points.
+
+**Recommendation:** J (`train_v11.py ... --reliable-below 0.9`) gives the same performance with less label-policy risk."""),
+    code("""import csv
+blind, key = ROOT / "data/audit/alarms_blind.csv", ROOT / "data/audit/alarms_key.json"
+bs = rc["blind_sample"]
+print(f"Check 3: gate alarms on val-split OSS files: v16 {bs['alarms']['v16']}, v17 {bs['alarms']['v17']}; "
+      f"groups {bs['groups']}; blinded sample {bs['sampled']}")
+labels = {r["id"]: r["label (secret / not_secret / unsure)"].strip() for r in csv.DictReader(open(blind))} if blind.exists() else {}
+done = {k: v for k, v in labels.items() if v in ("secret", "not_secret")}
+if len(done) < len(labels) * 0.9 or not labels:
+    print(f"  labels: {len(done)} of {len(labels)} done - verified false redactions pending human labels")
+else:
+    k = json.loads(key.read_text()); files = int(C.oss_rows("val")["n_files"])
+    fp_rate = {g: np.mean([done[i] == "not_secret" for i in done if k[i]["group"] == g]) for g in bs["sampled"]}
+    est = {"v16": fp_rate["both"] * bs["groups"]["both"] + fp_rate["v16_only"] * bs["groups"]["v16_only"],
+           "v17": fp_rate["both"] * bs["groups"]["both"] + fp_rate["v17_only"] * bs["groups"]["v17_only"]}
+    print("  share not a secret by group:", {g: round(v, 3) for g, v in fp_rate.items()})
+    print("  estimated verified false redactions per 1,000 files:", {m: round(1000 * v / files, 1) for m, v in est.items()})"""),
+    md("""**Check 3, blinded audit (pending labels).** `data/audit/alarms_blind.csv` holds 200 gate alarms sampled from three groups: 80 flagged only by v17, 40 only by v16, and 80 by both. Each is shown with 3 lines of context and its candidate marked `⟦…⟧`. The file shows no model or score; the key is kept separately in `alarms_key.json`. Only 206 of about 390 alarms are shared (matched one-to-one by file, line and overlapping token), so the two models disagree on nearly half their real-code alarms, and that disagreement is what this audit settles.
+
+Label each row `secret`, `not_secret` or `unsure`, then re-run this section. Both files are git-ignored: they hold real strings from the OSS corpus.
+
+**Check 4, holdout reuse.** `benchmark_llm_v5` has been scored for v14, v15, v16 and twice for v17, so it is retired for model selection and kept only as a historical record. The thresholds are frozen at commit 0.5317 and gate 0.1580. Future rounds select on LOLO plus the real-code budget; the next held-out benchmark needs code from an LLM family not used so far."""),
 ]
 
 

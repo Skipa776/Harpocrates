@@ -161,7 +161,7 @@ def oss_rows(split_name: str = "val", max_files: int | None = None) -> dict[str,
     cached = CACHE / f"r2oss_{h.hexdigest()[:24]}.npz"
     if cached.exists():
         return dict(np.load(cached))
-    X, fid, regex = [], [], np.zeros(len(files), dtype=int)
+    X, fid, line, token, regex = [], [], [], [], np.zeros(len(files), dtype=int)
     for i, path in enumerate(files):
         findings = _collect_file_findings(path, None)
         if not findings:
@@ -173,7 +173,12 @@ def oss_rows(split_name: str = "val", max_files: int | None = None) -> dict[str,
             elif f.token:
                 X.append(extract_features(f, _prepare_ml_context_from_lines(f, lines)).to_array())
                 fid.append(i)
+                line.append(f.line)
+                token.append(f.token[:256])  # fixed-width array: one huge minified token would pad every row
+    # path/line/token locate each candidate for audits (local only: they are real strings from the corpus)
     out = {"X": np.array(X, dtype=np.float32).reshape(-1, len(NAMES)), "fid": np.array(fid, dtype=int),
+           "line": np.array(line, dtype=int), "token": np.array(token, dtype=str),
+           "path": np.array([str(p.relative_to(ROOT / "data/oss")) for p in files], dtype=str),
            "regex": regex, "n_files": np.array(len(files))}
     CACHE.mkdir(parents=True, exist_ok=True)
     np.savez(cached, **out)
