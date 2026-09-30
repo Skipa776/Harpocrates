@@ -27,4 +27,4 @@ cargo fmt --manifest-path core/Cargo.toml --check && cargo clippy --manifest-pat
 
 ## Current milestone
 
-**M0: Repo matches resume** (Sep 26 – Oct 5). In progress: FR-CORE-01, FR-COMMIT-01, DOC-02.
+**M1: Read tool** (Oct 6 – Oct 19). In progress: FR-READ-01, FR-READ-02, SEC-02, FR-CORE-02. Next: FR-READ-03, FR-CORE-03, SEC-06, FR-INSTALL-03.

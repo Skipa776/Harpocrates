@@ -67,7 +67,7 @@ _PROSE_FILTER_RE = re.compile(r"[=:'\"]")
 # assigned to clearly credential-named variables directly to ML, skipping the
 # entropy gate. Only fires when regex phases found nothing on the line.
 _SENSITIVE_ASSIGNMENT_RE = re.compile(
-    r"(?i)(?<![a-zA-Z])(?:pass(?:word|wd|w)?|pwd|usr(?:name)?|user|host|conn(?:ection|str)?|secret|token|key|auth|cred)[a-z0-9_]*\s*[:=]\s*['\"]([^'\"]{3,100})['\"]"
+    r"(?i)(?<![a-zA-Z])(?:pass(?:word|wd|w)?|pwd|usr(?:name)?|user|host|conn(?:ection|str)?|secret|token|key|auth|cred)[a-z0-9_]{0,40}\s*[:=]\s*['\"]([^'\"]{3,100})['\"]"
 )
 
 # Phase 2c: unquoted KEY=VALUE for .env-style files. Restricted to
@@ -78,7 +78,7 @@ _SENSITIVE_ASSIGNMENT_RE = re.compile(
 # USER=postgres are standard config, not credentials; quoted variants are still
 # caught by _SENSITIVE_ASSIGNMENT_RE.
 _ENV_ASSIGNMENT_RE = re.compile(
-    r"(?i)(?<![a-zA-Z])(?:pass(?:word|wd|w)?|pwd|conn(?:ection|str)?|secret|token|key|auth|cred|url|endpoint|callback)[a-z0-9_]*\s*=\s*([^\s'\"]{3,200})"
+    r"(?i)(?<![a-zA-Z])(?:pass(?:word|wd|w)?|pwd|conn(?:ection|str)?|secret|token|key|auth|cred|url|endpoint|callback)[a-z0-9_]{0,40}\s*=\s*([^\s'\"]{3,200})"
 )
 
 # Phase 2d: credential shapes the tokenizer cannot see, forwarded to ML as
@@ -90,6 +90,10 @@ _ENV_ASSIGNMENT_RE = re.compile(
 _CONN_URI_RE = re.compile(r"(?<![a-z0-9+.\-])[a-z][a-z0-9+.\-]{0,19}://[^\s:/@'\"]*:[^\s@'\"/]{3,}@[^\s'\"]+")
 # - key=value password fields in ADO/ODBC/JDBC strings (value not quote-delimited)
 _KV_PASSWORD_RE = re.compile(r"(?i)(?:^|[;&?\s'\"])(?:password|pwd|passwd)\s*=\s*([^;&'\"\s]{3,})")
+# - unquoted `name: value` credentials (YAML, compose, properties); value must be password-shaped
+_COLON_CREDENTIAL_RE = re.compile(
+    r"(?i)(?<![a-z])(?:pass(?:word|wd)?|pwd|secret|token|api_?key|auth)[a-z0-9_]{0,40}['\"]?\s*:\s+([^\s'\"#]{6,200})\s*$"
+)
 # - credential query parameters in URLs (run before URL stripping)
 _URL_TOKEN_RE = re.compile(
     r"(?i)[?&](?:token|access_token|api_key|apikey|key|sig|signature|auth|secret|client_secret)=([^&\s'\"#]{8,})"
@@ -119,7 +123,7 @@ def _structured_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
         for m in pattern.finditer(scan_target):
             group = 1 if pattern.groups else 0
             out.append((m.group(group), m.start(group), m.end(group)))
-    for m in _QUOTED_LITERAL_RE.finditer(scan_target):
+    for m in (*_QUOTED_LITERAL_RE.finditer(scan_target), *_COLON_CREDENTIAL_RE.finditer(scan_target)):
         if _password_shaped(m.group(1)):
             out.append((m.group(1), m.start(1), m.end(1)))
     return out
