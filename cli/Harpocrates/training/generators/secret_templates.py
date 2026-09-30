@@ -12,6 +12,7 @@ import random
 import re
 import string
 from typing import Tuple
+from urllib.parse import quote
 
 # Character sets for different secret types
 ALPHANUMERIC = string.ascii_letters + string.digits
@@ -468,19 +469,39 @@ def _uri_safe_password() -> str:
     return re.sub(r"[@:/?#$&%;]", lambda _: str(random.randint(0, 9)), raw)
 
 
+_PASSWORD_SYMBOLS_REAL = "!#$%@^+="  # what real credentials contain; never "{", "<" or "*"
+
+
+def _symbol_password(forbidden: str = "") -> str:
+    """Password with 1-3 real-world symbols, so symbols never signal 'placeholder' on their own."""
+    base = list(generate_human_password() if random.random() < 0.5
+                else _random_string(random.randint(12, 24), ALPHANUMERIC))
+    symbols = [c for c in _PASSWORD_SYMBOLS_REAL if c not in forbidden]
+    for _ in range(random.randint(1, 3)):
+        base.insert(random.randint(1, len(base)), random.choice(symbols))
+    # Never form a template marker the placeholder negatives use (${...}, %s).
+    return re.sub(r"\$\{|%s", lambda m: m.group()[0] + random.choice("0123456789"), "".join(base))
+
+
 def generate_connection_uri() -> str:
     """Database/broker URI with an embedded password, e.g. postgresql://app:pw@host:5432/orders."""
     scheme, port = random.choice(_SCHEMES)
     port_part = f":{port}" if port and random.random() < 0.7 else ""
     query = random.choice(("", "?sslmode=require", "?retryWrites=true&w=majority", "?ssl=true"))
-    return (f"{scheme}://{random.choice(_DB_USERS)}:{_uri_safe_password()}@{_host()}"
+    password = (quote(_symbol_password(), safe="") if random.random() < 0.5 else _uri_safe_password())
+    return (f"{scheme}://{random.choice(_DB_USERS)}:{password}@{_host()}"
             f"{port_part}/{random.choice(_DB_NAMES)}{query}")
 
 
 def generate_ado_connection_string() -> str:
-    """ADO.NET-style connection string with a Password field."""
-    fields = [f"Server={_host()},1433", f"Database={random.choice(_DB_NAMES)}",
-              f"User Id={random.choice(_DB_USERS)}", f"Password={_uri_safe_password()}"]
+    """ADO.NET/ODBC connection string with a password field, in the formats seen in real code."""
+    host, db, user, pw = _host(), random.choice(_DB_NAMES), random.choice(_DB_USERS), _symbol_password(";")
+    fields = random.choice((
+        [f"Server={host},1433", f"Database={db}", f"User Id={user}", f"Password={pw}"],
+        [f"Data Source={host}", f"Initial Catalog={db}", f"User Id={user}", f"Password={pw}"],
+        ["Driver={ODBC Driver 18 for SQL Server}", f"Server={host}", f"Database={db}", f"Uid={user}", f"Pwd={pw}"],
+        [f"Server=tcp:{host},1433", f"Database={db}", f"User ID={user}", f"Password={pw}"],
+    ))
     return ";".join(fields + random.sample(["Encrypt=True", "TrustServerCertificate=False",
                                             "Connection Timeout=30"], random.randint(0, 2))) + ";"
 
@@ -489,17 +510,21 @@ def generate_jdbc_url() -> str:
     """JDBC URL with user and password parameters."""
     engine, port = random.choice((("postgresql", 5432), ("mysql", 3306), ("sqlserver", 1433)))
     return (f"jdbc:{engine}://{_host()}:{port}/{random.choice(_DB_NAMES)}"
-            f"?user={random.choice(_DB_USERS)}&password={_uri_safe_password()}")
+            f"?user={random.choice(_DB_USERS)}&password={_symbol_password('&;')}")
 
 
 def generate_token_url() -> str:
-    """HTTPS URL carrying a credential in its query string."""
+    """HTTPS URL carrying a credential in its query string, among other parameters."""
     token = generate_github_token() if random.random() < 0.3 else _random_string(
         random.randint(20, 40), ALPHANUMERIC + "_-")
-    param = random.choice(("token", "access_token", "api_key", "key", "sig"))
+    param = random.choice(("token", "access_token", "api_key", "key", "sig", "auth"))
     host = random.choice(("api.github.com/repos/acme/app", "hooks.example.com/v1/notify",
                           "storage.example.net/exports/report.csv", "api.partner.io/v2/orders"))
-    return f"https://{host}?{param}={token}"
+    others = random.sample(["page=2", "format=json", "v=3", "limit=100", "region=us-east-1"], random.randint(0, 2))
+    params = [f"{param}={token}"] + others
+    if others and random.random() < 0.5:
+        params = others + [f"{param}={token}"]  # credential not always first
+    return f"https://{host}?" + "&".join(params)
 
 
 def generate_connection_placeholder() -> str:
@@ -513,6 +538,8 @@ def generate_connection_placeholder() -> str:
         f"{scheme}://{host}:{port or 443}/{db}",
         f"Server={host},1433;Database={db};Integrated Security=true;",
         f"Server={host};Database={db};User Id={user};Password=${{SQL_PASSWORD}};",
+        f"Driver={{ODBC Driver 18 for SQL Server}};Server={host};Database={db};Uid={user};Pwd=${{SQL_PASSWORD}};",
+        f"Driver={{ODBC Driver 18 for SQL Server}};Server={host};Database={db};Trusted_Connection=yes;",
         f"jdbc:postgresql://{host}:5432/{db}?ssl=true",
         "https://api.example.com/v1/items?token=${API_TOKEN}",
         f"https://{host}/health?verbose=true",

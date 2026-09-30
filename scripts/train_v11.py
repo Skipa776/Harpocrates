@@ -59,9 +59,9 @@ def scores(y: np.ndarray, p: np.ndarray, threshold: float) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--train", nargs="+", type=Path, required=True)
-    parser.add_argument("--val", type=Path, default=ROOT / "data/eval/val_v2.jsonl")
+    parser.add_argument("--val", type=Path, default=ROOT / "data/eval/val_v3.jsonl")
     parser.add_argument("--test", nargs="*", type=Path,
-                        default=[ROOT / "data/eval/test_v2.jsonl", ROOT / "data/trufflehog_golden.jsonl"])
+                        default=[ROOT / "data/eval/test_v3.jsonl", ROOT / "data/trufflehog_golden.jsonl"])
     parser.add_argument("--out", type=Path, default=ROOT / "data/models/v11_candidate.json")
     args = parser.parse_args()
 
