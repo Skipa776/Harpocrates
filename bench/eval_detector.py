@@ -3,6 +3,7 @@
 
     python bench/eval_detector.py                    # local 300-record holdout (gitignored)
     python bench/eval_detector.py data/labeled.jsonl # any file with "label" 0/1
+    python bench/eval_detector.py --pipeline data/eval/test_v1.jsonl  # full scan, not just ML
 
 A record counts as flagged when the model routes it to "review" or "blocked"
 (probability >= threshold_low), matching golden_metrics in model_config.json.
@@ -46,21 +47,71 @@ def evaluate(records: Iterable[dict], predict: Callable[[dict], bool]) -> dict:
     }
 
 
-def run(paths: list[Path]) -> dict:
-    from Harpocrates.ml.features import extract_features_from_record
+SLICE_FIELDS = ("secret_type", "name_style", "insertion_style", "source")
+
+
+def _onnx_verifier(model_dir: Optional[Path]):
     from Harpocrates.ml.onnx_verifier import OnnxVerifier
 
-    verifier = OnnxVerifier()  # loading verifies the model's SHA-256 manifest
+    if model_dir is None:
+        # Shipped ONNX model (hash-verified at load). Unlike the CLI's get_verifier("auto"), there is
+        # no XGBoost fallback: the benchmark always measures the ONNX model that ships.
+        return OnnxVerifier()
+    return OnnxVerifier(model_path=model_dir / "model.onnx", hashes_path=model_dir / "onnx_model_hashes.json",
+                        config_path=model_dir / "model_config.json")
+
+
+def _pipeline_predictor(ml_threshold: float, model_dir: Optional[Path] = None) -> Callable[[dict], bool]:
+    from Harpocrates.core.detector import detect_text_with_ml
+
+    verifier = _onnx_verifier(model_dir)
+
+    def predict(record: dict) -> bool:
+        before = record.get("context_before", [])
+        text = "\n".join([*before, record["line_content"], *record.get("context_after", [])])
+        target_line, token = len(before) + 1, record["token"]
+        # Only findings on the record's own line count; the scanner already decided to flag them.
+        return any(
+            f.line == target_line and f.token and (token in f.token or f.token in token)
+            for f in detect_text_with_ml(text, verifier, ml_threshold=ml_threshold)
+        )
+
+    return predict
+
+
+def _ml_predictor(model_dir: Optional[Path] = None) -> Callable[[dict], bool]:
+    from Harpocrates.ml.features import extract_features_from_record
+
+    verifier = _onnx_verifier(model_dir)
     verifier._ensure_loaded()
+    return lambda r: verifier._route(extract_features_from_record(r))[0]
+
+
+def run(paths: list[Path], pipeline: bool = False, ml_threshold: float = 0.19,
+        model_dir: Optional[Path] = None) -> dict:
+    predict = _pipeline_predictor(ml_threshold, model_dir) if pipeline else _ml_predictor(model_dir)
     records = [json.loads(line) for p in paths for line in p.read_text().splitlines() if line.strip()]
-    metrics = evaluate(records, lambda r: verifier._route(extract_features_from_record(r))[0])
-    return {"data": [str(p) for p in paths], **metrics}
+    flagged = {id(r): predict(r) for r in records}
+    lookup = lambda r: flagged[id(r)]  # noqa: E731
+    slices = {
+        field: {value: evaluate([r for r in records if r.get(field) == value], lookup)
+                for value in sorted({r[field] for r in records if field in r})}
+        for field in SLICE_FIELDS if any(field in r for r in records)
+    }
+    return {"data": [str(p) for p in paths], "stage": "pipeline" if pipeline else "ml",
+            **evaluate(records, lookup), "slices": slices}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("paths", nargs="*", type=Path, default=[HOLDOUT])
-    print(json.dumps(run(parser.parse_args().paths), indent=2))
+    parser.add_argument("--pipeline", action="store_true",
+                        help="score the full scan (regex + entropy + ML) instead of the ML stage alone")
+    parser.add_argument("--ml-threshold", type=float, default=0.19, help="pipeline ML threshold (CLI default)")
+    parser.add_argument("--model-dir", type=Path,
+                        help="candidate model dir (model.onnx, model_config.json, onnx_model_hashes.json)")
+    args = parser.parse_args()
+    print(json.dumps(run(args.paths, args.pipeline, args.ml_threshold, args.model_dir), indent=2))
 
 
 if __name__ == "__main__":

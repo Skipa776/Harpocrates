@@ -9,8 +9,10 @@ from __future__ import annotations
 import base64
 import json
 import random
+import re
 import string
 from typing import Tuple
+from urllib.parse import quote
 
 # Character sets for different secret types
 ALPHANUMERIC = string.ascii_letters + string.digits
@@ -119,8 +121,8 @@ def generate_slack_token(token_type: str = "bot") -> str:
         "refresh": "xoxr-",
     }
     prefix = prefixes.get(token_type, "xoxb-")
-    # Slack tokens have dashes in them
-    parts = [_random_string(random.randint(10, 15), string.digits) for _ in range(3)]
+    # Real format: <prefix><10-13 digit workspace>-<10-13 digit id>-<24 alnum secret>
+    parts = [_random_string(random.randint(10, 13), string.digits) for _ in range(2)] + [_random_string(24)]
     return prefix + "-".join(parts)
 
 
@@ -413,6 +415,179 @@ def generate_password(complexity: str = "high") -> str:
         charset = ALPHANUMERIC + "!@#$%^&*"
 
     return _random_string(length, charset)
+
+
+_PASSWORD_WORDS = (
+    "purple", "dragon", "summer", "winter", "monkey", "sunshine", "falcon", "tiger",
+    "ocean", "coffee", "rocket", "shadow", "silver", "maple", "thunder", "pepper",
+    "admin", "welcome", "company", "spring", "autumn", "galaxy", "orange", "hunter",
+)
+_PASSWORD_SYMBOLS = "!@#$%&*._-"
+
+
+def generate_human_password() -> str:
+    """Generate a password following human patterns (DATA-03).
+
+    Word(s), optionally capitalized, then a mix of year/number and symbol suffixes,
+    e.g. ``PurpleDog197!`` or ``winter2024#sales``. Uses the global ``random``
+    module so callers control reproducibility with ``random.seed``.
+    """
+    words = [random.choice(_PASSWORD_WORDS) for _ in range(random.choice((1, 1, 2)))]
+    if random.random() < 0.6:
+        words = [w.capitalize() for w in words]
+    number = random.choice((
+        "", str(random.randint(1, 99)), str(random.randint(100, 999)), str(random.randint(1990, 2026)),
+    ))
+    symbol = random.choice(("", "", random.choice(_PASSWORD_SYMBOLS)))
+    tail = random.choice(("", "", random.choice(_PASSWORD_WORDS)))
+    if not number and not symbol:  # a bare word is too ambiguous to label a secret
+        number = str(random.randint(1, 999))
+    return "".join(words) + number + symbol + tail
+
+
+_DB_USERS = ("app", "admin", "svc_orders", "root", "postgres", "reporting", "etl_user", "api")
+_DB_NAMES = ("orders", "users", "analytics", "billing", "inventory", "app_db", "prod")
+_SCHEMES = (("postgresql", 5432), ("postgres", 5432), ("mysql", 3306), ("mongodb", 27017),
+            ("mongodb+srv", None), ("redis", 6379), ("amqp", 5672), ("mssql", 1433))
+
+
+def _host() -> str:
+    return random.choice((
+        f"db-{random.choice(_PASSWORD_WORDS)}.internal",
+        f"{random.choice(_DB_NAMES)}-prod.{random.choice(('us-east-1.rds.amazonaws.com', 'postgres.database.azure.com', 'c.example.net'))}",
+        f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}",
+        f"cluster{random.randint(0, 9)}.{_random_string(5).lower()}.mongodb.net",
+    ))
+
+
+def _uri_safe_password() -> str:
+    """A password that can sit inside a URI or key=value string without escaping."""
+    if random.random() < 0.5:
+        raw = generate_human_password()
+    else:
+        raw = _random_string(random.randint(12, 28), ALPHANUMERIC + "._-!")  # no "*": "***" reads as a mask
+    return re.sub(r"[@:/?#$&%;]", lambda _: str(random.randint(0, 9)), raw)
+
+
+_PASSWORD_SYMBOLS_REAL = "!#$%@^+="  # what real credentials contain; never "{", "<" or "*"
+
+
+def _symbol_password(forbidden: str = "") -> str:
+    """Password with 1-3 real-world symbols, so symbols never signal 'placeholder' on their own."""
+    base = list(generate_human_password() if random.random() < 0.5
+                else _random_string(random.randint(12, 24), ALPHANUMERIC))
+    symbols = [c for c in _PASSWORD_SYMBOLS_REAL if c not in forbidden]
+    for _ in range(random.randint(1, 3)):
+        base.insert(random.randint(1, len(base)), random.choice(symbols))
+    # Never form a template marker the placeholder negatives use (${...}, %s).
+    return re.sub(r"\$\{|%s", lambda m: m.group()[0] + random.choice("0123456789"), "".join(base))
+
+
+def generate_connection_uri() -> str:
+    """Database/broker URI with an embedded password, e.g. postgresql://app:pw@host:5432/orders."""
+    scheme, port = random.choice(_SCHEMES)
+    port_part = f":{port}" if port and random.random() < 0.7 else ""
+    query = random.choice(("", "?sslmode=require", "?retryWrites=true&w=majority", "?ssl=true"))
+    password = (quote(_symbol_password(), safe="") if random.random() < 0.5 else _uri_safe_password())
+    return (f"{scheme}://{random.choice(_DB_USERS)}:{password}@{_host()}"
+            f"{port_part}/{random.choice(_DB_NAMES)}{query}")
+
+
+def generate_ado_connection_string() -> str:
+    """ADO.NET/ODBC connection string with a password field, in the formats seen in real code."""
+    host, db, user, pw = _host(), random.choice(_DB_NAMES), random.choice(_DB_USERS), _symbol_password(";")
+    fields = random.choice((
+        [f"Server={host},1433", f"Database={db}", f"User Id={user}", f"Password={pw}"],
+        [f"Data Source={host}", f"Initial Catalog={db}", f"User Id={user}", f"Password={pw}"],
+        ["Driver={ODBC Driver 18 for SQL Server}", f"Server={host}", f"Database={db}", f"Uid={user}", f"Pwd={pw}"],
+        [f"Server=tcp:{host},1433", f"Database={db}", f"User ID={user}", f"Password={pw}"],
+    ))
+    return ";".join(fields + random.sample(["Encrypt=True", "TrustServerCertificate=False",
+                                            "Connection Timeout=30"], random.randint(0, 2))) + ";"
+
+
+def generate_jdbc_url() -> str:
+    """JDBC URL with user and password parameters."""
+    engine, port = random.choice((("postgresql", 5432), ("mysql", 3306), ("sqlserver", 1433)))
+    return (f"jdbc:{engine}://{_host()}:{port}/{random.choice(_DB_NAMES)}"
+            f"?user={random.choice(_DB_USERS)}&password={_symbol_password('&;')}")
+
+
+def generate_token_url() -> str:
+    """HTTPS URL carrying a credential in its query string, among other parameters."""
+    token = generate_github_token() if random.random() < 0.3 else _random_string(
+        random.randint(20, 40), ALPHANUMERIC + "_-")
+    param = random.choice(("token", "access_token", "api_key", "key", "sig", "auth"))
+    host = random.choice(("api.github.com/repos/acme/app", "hooks.example.com/v1/notify",
+                          "storage.example.net/exports/report.csv", "api.partner.io/v2/orders"))
+    others = random.sample(["page=2", "format=json", "v=3", "limit=100", "region=us-east-1"], random.randint(0, 2))
+    params = [f"{param}={token}"] + others
+    if others and random.random() < 0.5:
+        params = others + [f"{param}={token}"]  # credential not always first
+    return f"https://{host}?" + "&".join(params)
+
+
+def generate_connection_placeholder() -> str:
+    """Connection strings/URLs that look credentialed but hold no real secret."""
+    scheme, port = random.choice(_SCHEMES)
+    host, db, user = _host(), random.choice(_DB_NAMES), random.choice(_DB_USERS)
+    return random.choice((
+        f"{scheme}://{user}:${{DB_PASSWORD}}@{host}/{db}",
+        f"{scheme}://{user}:<password>@{host}/{db}",
+        f"{scheme}://{user}:{{{{ db_password }}}}@{host}/{db}",
+        f"{scheme}://{host}:{port or 443}/{db}",
+        f"Server={host},1433;Database={db};Integrated Security=true;",
+        f"Server={host};Database={db};User Id={user};Password=${{SQL_PASSWORD}};",
+        f"Driver={{ODBC Driver 18 for SQL Server}};Server={host};Database={db};Uid={user};Pwd=${{SQL_PASSWORD}};",
+        f"Driver={{ODBC Driver 18 for SQL Server}};Server={host};Database={db};Trusted_Connection=yes;",
+        f"jdbc:postgresql://{host}:5432/{db}?ssl=true",
+        "https://api.example.com/v1/items?token=${API_TOKEN}",
+        f"https://{host}/health?verbose=true",
+    ))
+
+
+_ID_PARTS = ("user", "profile", "tab", "layout", "handler", "request", "cache", "token", "secret",
+             "session", "config", "builder", "event", "selection", "changed", "manager", "key")
+
+
+def generate_identifier() -> str:
+    """Code identifier that can look secret-ish (TextEditorCore_OnSelectionChanged, API_KEY_HEADER)."""
+    parts = [random.choice(_ID_PARTS) for _ in range(random.randint(2, 5))]
+    style = random.choice(("camel", "pascal", "snake", "upper", "mixed"))
+    if style == "camel":
+        return parts[0] + "".join(p.capitalize() for p in parts[1:])
+    if style == "pascal":
+        return "".join(p.capitalize() for p in parts)
+    if style == "snake":
+        return "_".join(parts)
+    if style == "upper":
+        return "_".join(parts).upper()
+    return "".join(p.capitalize() for p in parts[:2]) + "_" + "".join(p.capitalize() for p in parts[2:])
+
+
+def generate_file_path() -> str:
+    parts = [random.choice(_ID_PARTS) for _ in range(random.randint(1, 3))]
+    ext = random.choice((".ts", ".py", ".go", ".yaml", ".json", ".pem", ".key", ".tsx", ".conf"))
+    root = random.choice(("src/", "./config/", "/etc/app/", "lib/", "internal/", "~/.ssh/"))
+    return root + "/".join(parts) + random.choice(("", "_" + random.choice(_ID_PARTS))) + ext
+
+
+def generate_template_placeholder() -> str:
+    name = "_".join(random.choice(_ID_PARTS) for _ in range(2)).upper()
+    return random.choice((f"${{{name}}}", f"{{{{ .Values.{name.lower()} }}}}", f"<YOUR_{name}>",
+                          f"%({name.lower()})s", "changeme", "REPLACE_ME", f"${{env:{name}}}", "xxxxxxxx"))
+
+
+def generate_public_key() -> str:
+    """SSH public key line: public by definition, but long, base64 and key-named."""
+    body = base64.b64encode(bytes(random.getrandbits(8) for _ in range(32))).decode().rstrip("=")
+    return f"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI{body} {random.choice(_DB_USERS)}@{random.choice(_ID_PARTS)}-host"
+
+
+def generate_integrity_hash() -> str:
+    """Subresource/lockfile integrity value (sha512-..., sha1-...)."""
+    algo, size = random.choice((("sha512", 64), ("sha384", 48), ("sha256", 32), ("sha1", 20)))
+    return f"{algo}-" + base64.b64encode(bytes(random.getrandbits(8) for _ in range(size))).decode()
 
 
 def generate_git_sha() -> str:
