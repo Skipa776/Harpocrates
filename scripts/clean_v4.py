@@ -9,11 +9,16 @@ Rules, in order:
    numbers) as negatives; they become hard negatives. Marked relabeled/original_label.
 3. Drop every record whose token still appears with both labels (we can't tell which is right).
 4. Tag LLM rows as llm_synthetic (DATA-08).
+
+Round 2 (2026-09-30, bench/model_improvement.ipynb section 12): also relabel word paths
+(America/New_York, actions/checkout) and function names in call position, and drop hex/base64
+positives in hash-named variables, which may be content hashes or HMAC keys.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -21,6 +26,35 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from eda_datasets import _looks_non_secret
+
+# Word path: every /-separated segment is words or numbers joined by _ - . (no random mixed-case runs).
+_WORD_PIECE = re.compile(r"(?:[a-z]+|[A-Z]+|[A-Z][a-z]+)\d*|\d+")
+
+
+def _word_path(token: str) -> bool:
+    segments = token.split("/")
+    return len(segments) > 1 and all(
+        seg and all(_WORD_PIECE.fullmatch(piece) for piece in re.split(r"[_.-]", seg)) for seg in segments)
+
+
+HASH_NAME = re.compile(r"(?i)hash|checksum|digest|integrity|\bsri\b|sha\d*\b")
+HEX_OR_B64 = re.compile(r"^(?:[0-9a-fA-F]{16,}|[A-Za-z0-9+/_-]{16,}={0,2})$")
+
+
+def _context_non_secret(record: dict) -> str | None:
+    token, line = record["token"], record["line_content"]
+    if _word_path(token):
+        return "word path"
+    if re.fullmatch(r"[A-Za-z_][\w:]*", token) and re.search(rf"(?<![\w'\"]){re.escape(token)}\s*(?:\(|->)", line):
+        return "function call"
+    return None
+
+
+def _ambiguous(record: dict) -> bool:
+    """Hex/base64 positive assigned to a hash-named identifier (only the name it's assigned to counts)."""
+    before = record["line_content"].split(record["token"])[0]
+    name = re.search(r"([\w.$-]+)[\"'\]]*\s*(?::=|=>|->|[:=(,])\s*[\"'`]?\s*$", before)
+    return bool(name and HEX_OR_B64.match(record["token"]) and HASH_NAME.search(name.group(1)))
 
 
 def clean(records: list[dict]) -> tuple[list[dict], dict]:
@@ -33,7 +67,7 @@ def clean(records: list[dict]) -> tuple[list[dict], dict]:
 
     relabeled_records, relabeled = [], 0
     for r in unique:
-        reason = _looks_non_secret(r["token"]) if r["label"] == 1 else None
+        reason = (_looks_non_secret(r["token"]) or _context_non_secret(r)) if r["label"] == 1 else None
         source = "llm_synthetic" if r.get("source") == "llm" else r.get("source")
         extra = {"relabeled": True, "original_label": 1, "relabel_reason": reason, "label": 0} if reason else {}
         relabeled += bool(reason)
@@ -43,10 +77,12 @@ def clean(records: list[dict]) -> tuple[list[dict], dict]:
     labels = defaultdict(set)
     for r in relabeled_records:
         labels[r["token"]].add(r["label"])
-    out = [r for r in relabeled_records if len(labels[r["token"]]) == 1]
+    consistent = [r for r in relabeled_records if len(labels[r["token"]]) == 1]
+    out = [r for r in consistent if not (r["label"] == 1 and _ambiguous(r))]
 
     stats = {"input": len(records), "duplicates": len(records) - len(unique),
-             "conflicting_dropped": len(unique) - len(out), "relabeled": relabeled,
+             "conflicting_dropped": len(unique) - len(consistent),
+             "ambiguous_dropped": len(consistent) - len(out), "relabeled": relabeled,
              "output": len(out)}
     return out, stats
 

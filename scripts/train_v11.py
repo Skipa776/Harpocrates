@@ -128,6 +128,14 @@ def main() -> None:
     parser.add_argument("--monotone", action="store_true",
                         help="monotonic constraints: entropy/vendor prefix/JWT up; template/UUID/version down")
     parser.add_argument("--scale-pos-weight", type=float, default=1.0, help="weight on positives (recall-first gate)")
+    parser.add_argument("--max-depth", type=int, default=PARAMS["max_depth"])
+    parser.add_argument("--n-estimators", type=int, default=PARAMS["n_estimators"])
+    parser.add_argument("--real-negatives", type=int, default=0,
+                        help="add every ML candidate from N sampled train-split OSS files as a negative "
+                             "(real-code negative mining; needs --pipeline-features)")
+    parser.add_argument("--alarm-budget", nargs="*", default=[], metavar="LAYER=PER_1K",
+                        help="also pick a threshold per layer that raises at most PER_1K ML alarms per 1,000 "
+                             "files in the val-split OSS repos, e.g. commit=44.2 gate=139")
     parser.add_argument("--target-recall", type=float, nargs="+", default=[TARGET_RECALL],
                         help="val recall(s) a threshold must reach (candidate-level with --pipeline-features); "
                              "one model, one threshold per value, e.g. 0.97 (gate) 0.90 (commit)")
@@ -160,10 +168,19 @@ def main() -> None:
     X_train, X_val = np.array(X_train, copy=True), np.array(X_val, copy=True)
     X_train[:, zeroed] = 0.0  # constant in training, so no split uses them at inference
     X_val[:, zeroed] = 0.0
-    extra = {"scale_pos_weight": args.scale_pos_weight}
+    real_neg = None
+    if args.real_negatives:
+        if not args.pipeline_features:
+            sys.exit("--real-negatives needs --pipeline-features")
+        import r2_common
+        real_neg = r2_common.oss_rows("train", args.real_negatives)["X"].copy()
+        real_neg[:, zeroed] = 0.0
+        X_train = np.vstack([X_train, real_neg])
+        y_train = np.r_[y_train, np.zeros(len(real_neg), dtype=y_train.dtype)]
+    extra = {"scale_pos_weight": args.scale_pos_weight, "max_depth": args.max_depth, "n_estimators": args.n_estimators}
     if args.monotone:
         extra["monotone_constraints"] = "(" + ",".join(str(MONOTONE.get(n, 0)) for n in names) + ")"
-    model = xgb.XGBClassifier(**PARAMS, **extra).fit(X_train, y_train)
+    model = xgb.XGBClassifier(**{**PARAMS, **extra}).fit(X_train, y_train)
     p_val = model.predict_proba(X_val)[:, 1]
     precision, recall, thresholds = precision_recall_curve(y_val, p_val)
     chosen = {}
@@ -172,12 +189,25 @@ def main() -> None:
         if reach.size == 0:
             sys.exit(f"no threshold reaches recall >= {target} on val; best is {recall[:-1].max():.3f}")
         chosen[str(target)] = float(thresholds[reach[-1]])  # highest threshold still meeting the target
+    budget_report = {}
+    if args.alarm_budget:
+        import r2_common
+        oss = r2_common.oss_rows("val")
+        X_oss = oss["X"].copy()
+        X_oss[:, zeroed] = 0.0
+        p_oss = model.predict_proba(X_oss)[:, 1]
+        for item in args.alarm_budget:
+            layer, per_1k = item.split("=")
+            chosen[layer] = r2_common.threshold_for_budget(oss, p_oss, float(per_1k))
+            budget_report[layer] = {"per_1k_files": float(per_1k), "files": int(oss["n_files"])}
     threshold = chosen[str(args.target_recall[0])]
 
     report = {"train_files": [str(p) for p in args.train], "train_records": len(train),
               "unit": "scanner candidate" if args.pipeline_features else "record", "train_rows": len(y_train),
               "zeroed_features": [names[i] for i in zeroed], "monotone": args.monotone,
-              "scale_pos_weight": args.scale_pos_weight,
+              "scale_pos_weight": args.scale_pos_weight, "max_depth": args.max_depth,
+              "n_estimators": args.n_estimators, "real_negative_rows": 0 if real_neg is None else len(real_neg),
+              "alarm_budget": budget_report,
               "note": ("candidate-level recall: secrets the scanner never extracts are not counted; "
                        "end-to-end recall comes from bench/compare_scanners.py") if args.pipeline_features else "",
               "train_positive_share": round(float(y_train.mean()), 3),
