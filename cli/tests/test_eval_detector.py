@@ -44,3 +44,16 @@ def test_pipeline_counts_only_the_record_line():
                  "context_before": ['password = "PurpleDog197!"'], "context_after": []}
     assert predict(flagged) is True
     assert predict(neighbour) is False
+
+
+def test_compare_scanners_matching_rules(tmp_path):
+    from bench.compare_scanners import materialize, overlaps
+
+    assert overlaps("Wint3r#Sales9", "postgresql://app:Wint3r#Sales9@db/orders")  # span inside token
+    assert overlaps("postgresql://app:Wint3r#Sales9@db/orders", "Wint3r#Sales9")   # token inside span
+    assert not overlaps("abc", "abcdef")                                           # too short to count
+    assert not overlaps("", "anything")
+    placed = materialize([{"token": "t", "line_content": "x = 1", "context_before": ["a", "b"],
+                           "context_after": ["c"], "file_type": ".py"}], tmp_path)
+    assert placed == [("r000000.py", 3)]
+    assert (tmp_path / "r000000.py").read_text().splitlines()[2] == "x = 1"

@@ -26,7 +26,7 @@ from build_eval_set import NEGATIVES, POSITIVES
 
 SLOT = re.compile(r"\{\{(SECRET|NONSECRET):([a-z0-9_]+)\}\}")
 ANY_MARKER = re.compile(r"\{\{[^}]*\}\}")
-GENERATOR_VERSION = "3"  # tracks build_eval_set.py: slot values come from its generator tables
+GENERATOR_VERSION = "4"  # tracks build_eval_set.py: slot values come from its generator tables
 
 
 def fill_file(path: Path, root: Path, seed: int) -> list[dict]:
