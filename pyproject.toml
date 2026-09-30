@@ -106,6 +106,8 @@ ignore = [
 # scripts/ and bench/ are dev-only exploratory tools — ML naming conventions and late imports expected
 "scripts/*.py" = ["N803", "N806", "E402", "F841"]
 "bench/*.py" = ["N803", "N806", "E402", "F841"]
+# Analysis notebooks: compact exploratory style (setup before imports, one-line statements).
+"bench/*.ipynb" = ["E401", "E402", "E701", "E702", "E731", "E741", "I001", "N803", "N812", "N816"]
 # E402: intentional late import (optional heavy deps loaded after availability check)
 "cli/Harpocrates/api/main.py" = ["E402"]
 "cli/Harpocrates/ml/ensemble.py" = ["E402"]

@@ -43,6 +43,7 @@ class ViolationCategory(Enum):
     TWILIO_KEY = "twilio_key"
     DATABRICKS_TOKEN = "databricks_token"
     VAULT_TOKEN = "vault_token"
+    TELEGRAM_TOKEN = "telegram_token"
 
     # Inferred — heuristic classification for entropy/ML path
     PASSWORD = "password"
@@ -105,6 +106,7 @@ _SIGNATURE_TO_CATEGORY: dict[str, ViolationCategory] = {
     "DISCORD_WEBHOOK":   ViolationCategory.DISCORD_WEBHOOK,
     "SENDGRID_API_KEY":  ViolationCategory.SENDGRID_KEY,
     "TWILIO_API_KEY":    ViolationCategory.TWILIO_KEY,
+    "TELEGRAM_BOT_TOKEN": ViolationCategory.TELEGRAM_TOKEN,
     "DATABRICKS_TOKEN":  ViolationCategory.DATABRICKS_TOKEN,
     "HASHICORP_VAULT_TOKEN": ViolationCategory.VAULT_TOKEN,
     "OPENAI_API_KEY_LEGACY": ViolationCategory.OPENAI_KEY,
@@ -331,6 +333,9 @@ def infer_category(
     )
 
 
+_VAR_NAME_WINDOW = 256  # chars left of a token searched for `name =`; identifiers are far shorter
+
+
 def extract_var_name(line: str, token: str) -> Optional[str]:
     """
     Pull the LHS variable name from a line of the form `var = 'token'`.
@@ -356,7 +361,9 @@ def extract_var_name(line: str, token: str) -> Optional[str]:
             m = re.match(r"([A-Za-z_][A-Za-z0-9_]*)$", candidate)
             return m.group(1) if m else None
         return None
-    lhs = line[:idx]
+    # Only the text just left of the token can hold `name =`. Searching the whole prefix was
+    # quadratic in word-character runs (minified JS, inline base64) and hung on 100k+ char lines.
+    lhs = line[max(0, idx - _VAR_NAME_WINDOW):idx]
     m = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*['\"]?$", lhs)
     return m.group(1) if m else None
 

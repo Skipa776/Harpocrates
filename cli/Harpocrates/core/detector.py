@@ -12,6 +12,8 @@ to the ML verifier. This keeps the fast path deterministic and CPU-free.
 
 from __future__ import annotations
 
+import dataclasses
+import functools
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
@@ -78,6 +80,64 @@ _SENSITIVE_ASSIGNMENT_RE = re.compile(
 _ENV_ASSIGNMENT_RE = re.compile(
     r"(?i)(?<![a-zA-Z])(?:pass(?:word|wd|w)?|pwd|conn(?:ection|str)?|secret|token|key|auth|cred|url|endpoint|callback)[a-z0-9_]*\s*=\s*([^\s'\"]{3,200})"
 )
+
+# Phase 2d: credential shapes the tokenizer cannot see, forwarded to ML as
+# candidates (the verifier decides). Tokens are >=20 chars of [A-Za-z0-9+/=_-]
+# and URLs are stripped, so these never became entropy candidates:
+# - URI with userinfo password (postgres://user:pw@host, redis://:pw@host)
+# Scheme is bounded and must not continue a longer [a-z0-9+.-] run: otherwise a long dotted/hyphenated
+# run with no "://" is rescanned from every boundary (quadratic on minified lines).
+_CONN_URI_RE = re.compile(r"(?<![a-z0-9+.\-])[a-z][a-z0-9+.\-]{0,19}://[^\s:/@'\"]*:[^\s@'\"/]{3,}@[^\s'\"]+")
+# - key=value password fields in ADO/ODBC/JDBC strings (value not quote-delimited)
+_KV_PASSWORD_RE = re.compile(r"(?i)(?:^|[;&?\s'\"])(?:password|pwd|passwd)\s*=\s*([^;&'\"\s]{3,})")
+# - credential query parameters in URLs (run before URL stripping)
+_URL_TOKEN_RE = re.compile(
+    r"(?i)[?&](?:token|access_token|api_key|apikey|key|sig|signature|auth|secret|client_secret)=([^&\s'\"#]{8,})"
+)
+# - long lowercase hex (auth tokens, HMAC keys) that sits below the entropy gate
+_HEX_SECRET_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{32,64}(?![0-9a-f])")
+# - password-shaped quoted literals regardless of variable name: letters + digits
+#   + (uppercase or a password symbol), no spaces/paths
+_QUOTED_LITERAL_RE = re.compile(r"['\"]([^'\"\s/]{8,64})['\"]")
+_PASSWORD_SYMBOLS = set("!@#$%^&*+=")
+
+
+def _password_shaped(value: str) -> bool:
+    letters = sum(c.isalpha() for c in value)
+    digits = sum(c.isdigit() for c in value)
+    if not letters or not digits:
+        return False
+    # Mixed case or a password symbol, or a weak lowercase+digits password like "hunter4242".
+    return (any(c.isupper() for c in value) or bool(_PASSWORD_SYMBOLS & set(value))
+            or (letters >= 3 and digits >= 2))
+
+
+def _structured_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
+    """(value, start, end) for Phase 2d shapes, in scan_target coordinates."""
+    out = [(m.group(), m.start(), m.end()) for m in _CONN_URI_RE.finditer(scan_target)] if "://" in scan_target else []
+    for pattern in (_KV_PASSWORD_RE, _URL_TOKEN_RE, _HEX_SECRET_RE):
+        for m in pattern.finditer(scan_target):
+            group = 1 if pattern.groups else 0
+            out.append((m.group(group), m.start(group), m.end(group)))
+    for m in _QUOTED_LITERAL_RE.finditer(scan_target):
+        if _password_shaped(m.group(1)):
+            out.append((m.group(1), m.start(1), m.end(1)))
+    return out
+
+
+# Characters kept on each side of a token when building ML context (NFR-01 latency bound).
+_CONTEXT_WINDOW = 256
+
+
+@functools.lru_cache(maxsize=512)
+def _file_ext(file: str) -> str:
+    """File extension used for risk routing, computed once per file instead of once per line."""
+    ext = Path(file).suffix.lower()
+    if not ext or ext not in HIGH_RISK_EXTENSIONS:
+        basename = Path(file).name.lower()
+        if basename == ".env" or basename.startswith(".env."):
+            return ".env"
+    return ext
 
 
 def _calculate_entropy_confidence(entropy_val: Optional[float]) -> float:
@@ -160,13 +220,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
     # Determine whether this file belongs to a credential-bearing extension set
     # (.env, .pem, .key, etc.) where URL bodies are credentials, not noise.
     # Also handles dotted-variant names like .env.local and .env.production.
-    file_ext = ""
-    if file is not None:
-        file_ext = Path(file).suffix.lower()
-        if not file_ext or file_ext not in HIGH_RISK_EXTENSIONS:
-            basename = Path(file).name.lower()
-            if basename == ".env" or basename.startswith(".env."):
-                file_ext = ".env"
+    file_ext = _file_ext(file) if file is not None else ""
 
     if not stripped:
         return findings
@@ -321,6 +375,32 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     )
                 )
                 found_tokens.add(value)
+
+        # Phase 2d: structured credential shapes (see _structured_candidates).
+        for value, start, end in _structured_candidates(scan_target):
+            if value in found_tokens:  # exact only: a password inside a whole-string candidate still gets its own
+                continue
+            _vn = extract_var_name(scan_target, value)
+            _inf = infer_category(signature_name=None, var_name=_vn, token=value)
+            findings.append(
+                Finding(
+                    type="ML_CANDIDATE",
+                    file=file,
+                    line=lineno,
+                    snippet=stripped[:200],
+                    entropy=shannon_entropy(value),
+                    evidence=EvidenceType.ML,
+                    severity=_severity_from_entropy(_inf),
+                    confidence=0.5,
+                    token=value,
+                    token_start=start,
+                    token_end=end,
+                    in_comment=in_comment,
+                    category=_inf.category.value,
+                    category_reason=_inf.reason,
+                )
+            )
+            found_tokens.add(value)
 
         # Phase 2c: unquoted KEY=VALUE for .env-style files. Runs on scan_text
         # which equals scan_target for HIGH_RISK files (URL-strip is skipped
@@ -530,17 +610,34 @@ def _prepare_ml_context_from_lines(finding: Finding, lines: Sequence[str]) -> "C
         line_number=finding.line or 1,
         file_path=finding.file,
     )
-    if (
-        finding.token is not None
-        and finding.token_start is not None
-        and finding.token_end is not None
-    ):
-        context.token_match = TokenMatch(
+    start, end = finding.token_start, finding.token_end
+    # NFR-01: features scan the whole line and its neighbours; on minified files that is
+    # ~100k chars per candidate. Keep a window around the token instead (training and
+    # scanning both come through here, so features stay consistent).
+    line = context.line_content
+    if len(line) > 2 * _CONTEXT_WINDOW:
+        at = line.find(finding.token) if finding.token else -1
+        if start is None or line[start:end] != finding.token:
+            start = at if at >= 0 else None
+            end = start + len(finding.token) if start is not None else None
+        center = start if start is not None else 0
+        lo = max(0, center - _CONTEXT_WINDOW)
+        hi = min(len(line), (end or center) + _CONTEXT_WINDOW)
+        line = line[lo:hi]
+        start, end = (start - lo, end - lo) if start is not None else (None, None)
+    context = dataclasses.replace(
+        context,
+        line_content=line,
+        lines_before=[ln[: 2 * _CONTEXT_WINDOW] for ln in context.lines_before],
+        lines_after=[ln[: 2 * _CONTEXT_WINDOW] for ln in context.lines_after],
+    )
+    if finding.token is not None and start is not None and end is not None:
+        context = dataclasses.replace(context, token_match=TokenMatch(
             token=finding.token,
-            start=finding.token_start,
-            end=finding.token_end,
+            start=start,
+            end=end,
             kind=("regex" if finding.evidence == EvidenceType.REGEX else "sensitive_assignment"),
-        )
+        ))
     return context
 
 

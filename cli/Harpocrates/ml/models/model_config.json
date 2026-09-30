@@ -1,56 +1,65 @@
 {
-  "version": "2.1.0",
+  "version": "1.1.0",
   "mode": "single_stage",
   "model_type": "xgboost",
   "feature_count": 64,
-  "threshold_low": 0.15,
-  "threshold_high": 0.85,
-  "optimal_threshold": 0.2824576199054718,
-  "platt_a": -9.900256587575136,
-  "platt_b": 5.104035152422888,
+  "threshold_low": 0.8016,
+  "threshold_high": 0.95,
+  "optimal_threshold": 0.8016,
+  "platt_a": 0.0,
+  "platt_b": 0.0,
+  "thresholds": {
+    "commit": 0.8016,
+    "gate": 0.5505,
+    "note": "commit: precision-first (pre-commit/CLI). gate: recall-first (read tool, egress gate). Both from one model; chosen on validation for 90% / 97% candidate recall."
+  },
   "metrics": {
-    "precision": 0.9412276882890727,
-    "recall": 0.9890210430009149,
-    "f1": 0.9645326790095918,
-    "accuracy": 0.9598991172761665,
-    "auc_roc": 0.9952454348202857,
-    "threshold_low": 0.15,
-    "threshold_high": 0.85,
-    "safe_count": 1668,
-    "secret_count": 2060,
-    "review_count": 237,
-    "review_zone_pct": 5.9773013871374525
+    "unit": "full file scan (bench/compare_scanners.py)",
+    "benchmark_llm_v5_gate": {
+      "recall": 0.9327,
+      "precision": 0.9255
+    },
+    "benchmark_llm_v5_commit": {
+      "recall": 0.9021,
+      "precision": 0.9515
+    },
+    "test_v5_gate": {
+      "recall": 0.9867,
+      "precision": 0.9349
+    },
+    "test_v5_commit": {
+      "recall": 0.9533,
+      "precision": 0.9728
+    },
+    "auc_candidates": {
+      "benchmark_llm_v5": 0.9837,
+      "test_v5": 0.9984
+    }
   },
-  "golden_metrics": {
-    "precision": 1.0,
-    "recall": 0.9733333333333334,
-    "f1": 0.9864864864864865,
-    "accuracy": 0.9733333333333334,
-    "auc_roc": null,
-    "threshold_low": 0.15,
-    "threshold_high": 0.85,
-    "safe_count": 8,
-    "secret_count": 261,
-    "review_count": 31,
-    "review_zone_pct": 10.333333333333334
+  "training": {
+    "data": [
+      "data/synthetic_v4_clean.jsonl",
+      "data/eval/train_v5.jsonl",
+      "data/eval/llm_train_v5.jsonl"
+    ],
+    "unit": "scanner candidates (train_v11 --pipeline-features)",
+    "rows": 86857,
+    "zeroed_features": [
+      "var_name_extracted",
+      "var_contains_safe",
+      "var_name_length",
+      "var_is_uppercase",
+      "var_is_camelcase",
+      "assignment_type",
+      "var_ngram_secret_score",
+      "var_ngram_safe_score",
+      "key_value_distance",
+      "adjacency_ngram_score"
+    ],
+    "monotone": true,
+    "scale_pos_weight": 2.0,
+    "fallback_note": "stageA_xgboost.json (native fallback when ONNX cannot load) is still the v0.4 model"
   },
-  "training_samples": 22856,
-  "validation_samples": 2658,
-  "calibration_samples": 2655,
-  "test_samples": 3965,
-  "golden_samples": 300,
-  "feature_importance_top10": {
-    "file_is_test": 0.14817672967910767,
-    "is_hex_with_no_alpha_mix": 0.11556103825569153,
-    "token_in_multiline_block": 0.04975785315036774,
-    "file_is_git_related": 0.04710213840007782,
-    "file_extension_risk": 0.0459996797144413,
-    "var_ngram_secret_score": 0.04594758525490761,
-    "context_mentions_git": 0.034962672740221024,
-    "value_ends_with_known_ext": 0.03493313491344452,
-    "is_hex_len_40": 0.03184569999575615,
-    "var_contains_safe": 0.027362728491425514
-  },
-  "created_at": "2026-05-10T10:14:35.468114",
+  "created_at": "2026-09-30T12:37:26",
   "seed": 42
 }
