@@ -68,6 +68,14 @@ def _validate_model_config(
     return threshold_low, threshold_high, platt_a, platt_b, feature_count
 
 
+def _layer_threshold(config: dict[str, Any], layer: str, threshold_high: float) -> float:
+    """The per-layer decision threshold; a missing or invalid entry is a config error, never a default."""
+    value = config.get("thresholds", {}).get(layer)
+    if type(value) not in (int, float) or not 0.0 <= value < threshold_high:
+        raise OnnxModelSchemaError(f"model_config.json thresholds.{layer} must be a number in [0, threshold_high)")
+    return float(value)
+
+
 def _verify_file_hash(path: Path, expected: Dict[str, str]) -> bytes:
     """Return verified bytes for one manifest-tracked ML artifact."""
     key = path.name
@@ -174,7 +182,10 @@ class OnnxVerifier(Verifier):
         hashes_path: Optional[Path] = None,
         config_path: Optional[Path] = None,
         lazy_load: bool = True,
+        layer: Optional[str] = None,
     ):
+        # layer: "commit" or "gate" picks threshold_low from config["thresholds"] (FR-CORE-06).
+        self._layer = layer
         self._model_path = model_path or ONNX_MODEL_PATH
         self._hashes_path = hashes_path or ONNX_HASHES_PATH
         self._config_path = config_path or MODEL_CONFIG_PATH
@@ -244,6 +255,8 @@ class OnnxVerifier(Verifier):
             self._platt_b,
             config_width,
         ) = _validate_model_config(config)
+        if self._layer is not None:
+            self._threshold_low = _layer_threshold(config, self._layer, self._threshold_high)
         self._session = ort.InferenceSession(model_bytes)
 
         self._input_feature_count = _validate_model_schema(self._session, config_width)

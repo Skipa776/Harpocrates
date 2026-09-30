@@ -23,6 +23,7 @@ from mcp.server.fastmcp import FastMCP
 
 from Harpocrates.core.detector import detect_file, detect_text
 from Harpocrates.core.result import Finding
+from Harpocrates.read import Redactor
 
 # Defensive: bind logging to stderr BEFORE any import that might emit logs,
 # so log lines never corrupt the JSON-RPC stdio frame stream.
@@ -159,6 +160,37 @@ def scan_file(
         d["explanation"] = explanation.to_dict() if explanation else None
         result.append(d)
     return result
+
+
+# One redactor per server process: the MCP session. Its HMAC key keeps placeholders stable
+# within the session and differs across sessions (FR-READ-02, SEC-02).
+_redactor = Redactor()
+
+
+@mcp.tool()
+def safe_read(path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
+    """
+    Read a text file with every detected secret replaced by <<HARPO:type:hash4>>.
+
+    Use this instead of the built-in file read. Returns numbered lines like `cat -n`;
+    start_line and end_line (1-based, inclusive) select a range. The same secret always
+    gets the same placeholder in this session. Placeholders are not the real values:
+    never write them into files; reference the variable or config key instead.
+    Refuses binary files, special files, and files over 10 MB.
+    """
+    return _redactor.safe_read(path, start_line, end_line)
+
+
+@mcp.tool()
+def safe_grep(pattern: str, path: str = ".", max_matches: int = 200) -> str:
+    """
+    Search files for a Python regex and return `file:line:text` matches with secrets redacted.
+
+    path is a file or directory (searched recursively, skipping .git, node_modules and
+    virtualenvs). Matching runs on redacted text, so searching for a secret's value
+    finds nothing.
+    """
+    return _redactor.safe_grep(pattern, path, max_matches)
 
 
 def main() -> None:
