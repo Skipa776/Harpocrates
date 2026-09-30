@@ -104,7 +104,7 @@ Why these slip past the others: none of them has a provider prefix like `AKIA`, 
 - A scanner is credited only for a finding on the right line whose value overlaps the labeled secret (≥ 4 characters). detect-secrets is the exception noted above.
 - Labels are correct by construction: LLMs wrote code with typed placeholders, and fake values of a known kind were filled in afterwards. The benchmark is still synthetic; real repositories will differ.
 - Harpocrates' recall ceiling (the share of secrets its scanner turns into a candidate at all) is 94.1% on the benchmark and 99.3% on open-source code.
-- These results are for the **v1.1 detector** (model v16, branch `ml/v1.1-data`). The current PyPI release ships the earlier v0.4 model.
+- These results are for the **v1.1 detector** (model v16), shipped in this repository. `harpocrates scan --ml` uses the precision-first *commit* threshold by default; the recall-first *gate* threshold is stored in `model_config.json` for the read tool and egress gate. The current PyPI release still ships the earlier v0.4 model.
 
 ---
 
