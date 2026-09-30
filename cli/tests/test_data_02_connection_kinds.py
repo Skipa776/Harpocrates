@@ -59,3 +59,10 @@ def test_data_02_negative_lookalikes_have_no_real_credential():
         neg = t.generate_connection_placeholder()
         # Either no password at all, or an obvious placeholder.
         assert not URI_WITH_PASSWORD.match(neg) or PLACEHOLDER.search(neg), neg
+
+
+def test_slack_generator_uses_real_bot_format():
+    random.seed(4)
+    for _ in range(50):
+        tok = t.generate_slack_token()
+        assert re.fullmatch(r"xox[bpar]-\d{10,13}-\d{10,13}-[A-Za-z0-9]{24}", tok), tok

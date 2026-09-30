@@ -29,12 +29,15 @@ sys.path.insert(0, str(ROOT / "cli"))
 
 from Harpocrates.core.detector import _collect_text_findings, _prepare_ml_context_from_lines
 from Harpocrates.core.result import EvidenceType
-from Harpocrates.ml.features import extract_features, extract_features_from_record
+from Harpocrates.ml.features import FeatureVector, extract_features, extract_features_from_record
 
 sys.path.insert(0, str(ROOT))
 from bench.compare_scanners import overlaps  # noqa: E402
 
 TARGET_RECALL = 0.90
+# Directions a feature may push the score (bench/model_improvement.ipynb section 6).
+MONOTONE = {"token_entropy": 1, "vendor_prefix_boost": 1, "var_ngram_secret_score": 1, "jwt_structure_valid": 1,
+            "value_is_template_syntax": -1, "is_uuid_v4": -1, "has_version_pattern": -1}
 # Shipped v0.4 hyperparameters (cli/Harpocrates/training/train_model.py) so only data changes.
 PARAMS = dict(max_depth=5, learning_rate=0.05, n_estimators=300, subsample=0.8, colsample_bytree=0.7,
               reg_alpha=0.5, reg_lambda=3.0, random_state=42, eval_metric="logloss")
@@ -120,6 +123,11 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=ROOT / "data/models/v11_candidate.json")
     parser.add_argument("--pipeline-features", action="store_true",
                         help="train/score on the scanner's own ML candidates instead of record features")
+    parser.add_argument("--zero-features", nargs="*", default=[],
+                        help="feature names or prefixes to zero during training (trees then never split on them)")
+    parser.add_argument("--monotone", action="store_true",
+                        help="monotonic constraints: entropy/vendor prefix/JWT up; template/UUID/version down")
+    parser.add_argument("--scale-pos-weight", type=float, default=1.0, help="weight on positives (recall-first gate)")
     parser.add_argument("--target-recall", type=float, nargs="+", default=[TARGET_RECALL],
                         help="val recall(s) a threshold must reach (candidate-level with --pipeline-features); "
                              "one model, one threshold per value, e.g. 0.97 (gate) 0.90 (commit)")
@@ -142,7 +150,20 @@ def main() -> None:
     X_val, y_val = xy(val, args.pipeline_features)
     log("training")
 
-    model = xgb.XGBClassifier(**PARAMS).fit(X_train, y_train)
+    names = FeatureVector.get_feature_names()
+    if any(not z for z in args.zero_features):
+        sys.exit("--zero-features: empty name would zero every feature")
+    unknown = set(MONOTONE) - set(names)
+    if unknown:
+        sys.exit(f"MONOTONE names not in the feature vector: {sorted(unknown)}")
+    zeroed = [i for i, n in enumerate(names) if any(n == z or n.startswith(z) for z in args.zero_features)]
+    X_train, X_val = np.array(X_train, copy=True), np.array(X_val, copy=True)
+    X_train[:, zeroed] = 0.0  # constant in training, so no split uses them at inference
+    X_val[:, zeroed] = 0.0
+    extra = {"scale_pos_weight": args.scale_pos_weight}
+    if args.monotone:
+        extra["monotone_constraints"] = "(" + ",".join(str(MONOTONE.get(n, 0)) for n in names) + ")"
+    model = xgb.XGBClassifier(**PARAMS, **extra).fit(X_train, y_train)
     p_val = model.predict_proba(X_val)[:, 1]
     precision, recall, thresholds = precision_recall_curve(y_val, p_val)
     chosen = {}
@@ -155,6 +176,8 @@ def main() -> None:
 
     report = {"train_files": [str(p) for p in args.train], "train_records": len(train),
               "unit": "scanner candidate" if args.pipeline_features else "record", "train_rows": len(y_train),
+              "zeroed_features": [names[i] for i in zeroed], "monotone": args.monotone,
+              "scale_pos_weight": args.scale_pos_weight,
               "note": ("candidate-level recall: secrets the scanner never extracts are not counted; "
                        "end-to-end recall comes from bench/compare_scanners.py") if args.pipeline_features else "",
               "train_positive_share": round(float(y_train.mean()), 3),

@@ -74,6 +74,34 @@ def run_gitleaks(root: Path, records, placed) -> list[bool]:
     return _hits(found, records, placed)
 
 
+def run_credsweeper(root: Path, records, placed, ml_threshold: str) -> tuple[list[bool], list[float]]:
+    """CredSweeper (Samsung; regex + ML validation). Returns flags and a score per record for ROC/AUC:
+    ml_probability where its ML ran, 1.0 for rule-only findings, 0.0 when nothing overlaps."""
+    with tempfile.TemporaryDirectory() as out_dir:
+        report = Path(out_dir) / "cs.json"
+        subprocess.run(["credsweeper", "--path", str(root), "--save-json", str(report),
+                        "--ml_threshold", ml_threshold], capture_output=True, check=True)
+        results = json.loads(report.read_text() or "[]")
+    found: dict[tuple[str, int], list[tuple[str, float]]] = defaultdict(list)
+    for f in results:
+        prob = f.get("ml_probability")
+        for ld in f.get("line_data_list", []):
+            found[(Path(ld["path"]).name, ld["line_num"])].append((ld.get("value") or "", 1.0 if prob is None else prob))
+    scores = [max((p for v, p in found.get(pl, []) if overlaps(v, r["token"])), default=0.0)
+              for r, pl in zip(records, placed)]
+    return [s > 0 for s in scores], scores
+
+
+def run_detect_secrets(root: Path, records, placed) -> list[bool]:
+    """detect-secrets (Yelp). It reports only a SHA-1 of each secret, so matching is line-level:
+    any finding on the record's line counts (lenient in its favor)."""
+    # Must run from inside the directory: given an absolute path elsewhere it silently scans nothing.
+    out = subprocess.run(["detect-secrets", "scan", "--all-files", "."], cwd=root,
+                         capture_output=True, text=True, check=True).stdout
+    lines_hit = {(Path(fname).name, f["line_number"]) for fname, fs in json.loads(out)["results"].items() for f in fs}
+    return [pl in lines_hit for pl in placed]
+
+
 def run_harpocrates(root: Path, records, placed, model_dir, ml_threshold) -> tuple[list[bool], list[bool]]:
     """Scan each file as `harpocrates scan --ml` does. Also returns candidate coverage: whether any
     raw candidate (before ML) overlaps the labeled token, the recall ceiling for any threshold."""
@@ -112,12 +140,19 @@ def main() -> None:
         placed = materialize(records, root)
         flags = {"trufflehog": run_trufflehog(root, records, placed),
                  "gitleaks": run_gitleaks(root, records, placed)}
+        flags["detect_secrets"] = run_detect_secrets(root, records, placed)
+        flags["credsweeper"], cs_scores = run_credsweeper(root, records, placed, "medium")  # its default
+        _, cs_scores_all = run_credsweeper(root, records, placed, "0")  # every ML candidate, for the ROC curve
         flags["harpocrates"], covered = run_harpocrates(root, records, placed, args.model_dir, args.ml_threshold)
 
     positives = [c for r, c in zip(records, covered) if r["label"] == 1]
     report = {"data": [str(p) for p in args.paths], "model_dir": str(args.model_dir) if args.model_dir else "shipped",
               "harpocrates_candidate_coverage": round(sum(positives) / max(len(positives), 1), 4),
               "scanners": {name: summarize(records, f) for name, f in flags.items()}, "only": {}}
+    y = [r["label"] for r in records]
+    if 0 < sum(y) < len(y):
+        from sklearn.metrics import roc_auc_score
+        report["scanners"]["credsweeper"]["auc_full_curve"] = round(roc_auc_score(y, cs_scores_all), 4)
     for name, f in flags.items():
         others = [g for n, g in flags.items() if n != name]
         only = [r.get("secret_type", "unknown") for i, r in enumerate(records)

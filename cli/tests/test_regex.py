@@ -230,3 +230,16 @@ def test_signatures_merged_view_is_complete() -> None:
         assert name in SIGNATURES
     for name in HIGH_SIGNATURES:
         assert name in SIGNATURES
+
+
+def test_slack_bot_token_real_format_matches():
+    """Real bot tokens are xoxb-<10-13 digits>-<10-13 digits>-<24 alnum>; the 24-34 cap missed them."""
+    token = "xoxb-" + "1234567890123" + "-" + "9876543210987" + "-" + "aB3" * 8
+    assert CRITICAL_SIGNATURES["SLACK_TOKEN"].search(f'SLACK = "{token}"').group() == token
+
+
+def test_telegram_bot_token_matches():
+    from Harpocrates.detectors.regex_patterns import SIGNATURES
+
+    token = "1234567890" + ":" + "AAH" + "x9_Kd-" * 5 + "Qw"  # 35-char secret part
+    assert any(p.search(f"TG = '{token}'") for p in SIGNATURES.values())
