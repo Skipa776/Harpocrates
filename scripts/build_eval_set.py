@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT / "cli"))
 from Harpocrates.core.detector import _collect_text_findings
 from Harpocrates.training.generators import secret_templates as t
 
-GENERATOR_VERSION = "3"
+GENERATOR_VERSION = "4"
 CORPUS = ROOT / "data" / "oss"
 OUT = ROOT / "data" / "eval"
 MAX_FILE_BYTES = 200_000
@@ -62,7 +62,8 @@ POSITIVES = {
     "sendgrid_key": t.generate_sendgrid_key, "discord_token": t.generate_discord_token,
     "telegram_token": t.generate_telegram_token, "jwt": t.generate_jwt_token,
     "npm_token": t.generate_npm_token, "pypi_token": t.generate_pypi_token,
-    "twilio_sid": lambda: t.generate_twilio_credentials()[0],
+    # Kind name kept for existing slot files; the value is the auth token (the AC... SID is public).
+    "twilio_sid": lambda: t.generate_twilio_credentials()[1],
     "azure_connection_string": t.generate_azure_connection_string,
     "generic_random": t.generate_random_secret, "password": t.generate_human_password,
     "connection_uri": t.generate_connection_uri, "ado_connection_string": t.generate_ado_connection_string,

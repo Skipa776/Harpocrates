@@ -79,6 +79,45 @@ _ENV_ASSIGNMENT_RE = re.compile(
     r"(?i)(?<![a-zA-Z])(?:pass(?:word|wd|w)?|pwd|conn(?:ection|str)?|secret|token|key|auth|cred|url|endpoint|callback)[a-z0-9_]*\s*=\s*([^\s'\"]{3,200})"
 )
 
+# Phase 2d: credential shapes the tokenizer cannot see, forwarded to ML as
+# candidates (the verifier decides). Tokens are >=20 chars of [A-Za-z0-9+/=_-]
+# and URLs are stripped, so these never became entropy candidates:
+# - URI with userinfo password (postgres://user:pw@host, redis://:pw@host)
+# Scheme is bounded and must not continue a longer [a-z0-9+.-] run: otherwise a long dotted/hyphenated
+# run with no "://" is rescanned from every boundary (quadratic on minified lines).
+_CONN_URI_RE = re.compile(r"(?<![a-z0-9+.\-])[a-z][a-z0-9+.\-]{0,19}://[^\s:/@'\"]*:[^\s@'\"/]{3,}@[^\s'\"]+")
+# - key=value password fields in ADO/ODBC/JDBC strings (value not quote-delimited)
+_KV_PASSWORD_RE = re.compile(r"(?i)(?:^|[;&?\s'\"])(?:password|pwd|passwd)\s*=\s*([^;&'\"\s]{3,})")
+# - credential query parameters in URLs (run before URL stripping)
+_URL_TOKEN_RE = re.compile(
+    r"(?i)[?&](?:token|access_token|api_key|apikey|key|sig|signature|auth|secret|client_secret)=([^&\s'\"#]{8,})"
+)
+# - long lowercase hex (auth tokens, HMAC keys) that sits below the entropy gate
+_HEX_SECRET_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{32,64}(?![0-9a-f])")
+# - password-shaped quoted literals regardless of variable name: letters + digits
+#   + (uppercase or a password symbol), no spaces/paths
+_QUOTED_LITERAL_RE = re.compile(r"['\"]([^'\"\s/]{8,64})['\"]")
+_PASSWORD_SYMBOLS = set("!@#$%^&*+=")
+
+
+def _password_shaped(value: str) -> bool:
+    has_letter = any(c.isalpha() for c in value)
+    has_digit = any(c.isdigit() for c in value)
+    return has_letter and has_digit and (any(c.isupper() for c in value) or bool(_PASSWORD_SYMBOLS & set(value)))
+
+
+def _structured_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
+    """(value, start, end) for Phase 2d shapes, in scan_target coordinates."""
+    out = [(m.group(), m.start(), m.end()) for m in _CONN_URI_RE.finditer(scan_target)] if "://" in scan_target else []
+    for pattern in (_KV_PASSWORD_RE, _URL_TOKEN_RE, _HEX_SECRET_RE):
+        for m in pattern.finditer(scan_target):
+            group = 1 if pattern.groups else 0
+            out.append((m.group(group), m.start(group), m.end(group)))
+    for m in _QUOTED_LITERAL_RE.finditer(scan_target):
+        if _password_shaped(m.group(1)):
+            out.append((m.group(1), m.start(1), m.end(1)))
+    return out
+
 
 def _calculate_entropy_confidence(entropy_val: Optional[float]) -> float:
     """Map entropy 4.0–5.5 linearly to confidence 0.6–0.8."""
@@ -321,6 +360,32 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     )
                 )
                 found_tokens.add(value)
+
+        # Phase 2d: structured credential shapes (see _structured_candidates).
+        for value, start, end in _structured_candidates(scan_target):
+            if value in found_tokens:  # exact only: a password inside a whole-string candidate still gets its own
+                continue
+            _vn = extract_var_name(scan_target, value)
+            _inf = infer_category(signature_name=None, var_name=_vn, token=value)
+            findings.append(
+                Finding(
+                    type="ML_CANDIDATE",
+                    file=file,
+                    line=lineno,
+                    snippet=stripped[:200],
+                    entropy=shannon_entropy(value),
+                    evidence=EvidenceType.ML,
+                    severity=_severity_from_entropy(_inf),
+                    confidence=0.5,
+                    token=value,
+                    token_start=start,
+                    token_end=end,
+                    in_comment=in_comment,
+                    category=_inf.category.value,
+                    category_reason=_inf.reason,
+                )
+            )
+            found_tokens.add(value)
 
         # Phase 2c: unquoted KEY=VALUE for .env-style files. Runs on scan_text
         # which equals scan_target for HIGH_RISK files (URL-strip is skipped

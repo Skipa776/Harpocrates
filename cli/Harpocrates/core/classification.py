@@ -331,6 +331,9 @@ def infer_category(
     )
 
 
+_VAR_NAME_WINDOW = 256  # chars left of a token searched for `name =`; identifiers are far shorter
+
+
 def extract_var_name(line: str, token: str) -> Optional[str]:
     """
     Pull the LHS variable name from a line of the form `var = 'token'`.
@@ -356,7 +359,9 @@ def extract_var_name(line: str, token: str) -> Optional[str]:
             m = re.match(r"([A-Za-z_][A-Za-z0-9_]*)$", candidate)
             return m.group(1) if m else None
         return None
-    lhs = line[:idx]
+    # Only the text just left of the token can hold `name =`. Searching the whole prefix was
+    # quadratic in word-character runs (minified JS, inline base64) and hung on 100k+ char lines.
+    lhs = line[max(0, idx - _VAR_NAME_WINDOW):idx]
     m = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*['\"]?$", lhs)
     return m.group(1) if m else None
 
