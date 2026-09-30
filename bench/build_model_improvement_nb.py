@@ -478,7 +478,7 @@ These files are unlabeled but close to secret-free, so nearly every alarm is a f
 Why it matters: a deeper model chose a *lower* threshold on validation for the same 95% validation precision, and that lower threshold nearly doubled the alarms on real code. Validation negatives are easier than real code, so thresholds must be set against real code, not against validation precision."""),
     code("""import xgboost as xgb
 before = dict(np.load(R2 / "oss_before.npz"))  # candidates from the pre-round-2 detector
-v16 = xgb.Booster(); v16.load_model(str(ROOT / "cli/Harpocrates/ml/models/xgboost_model.json"))
+v16 = xgb.Booster(); v16.load_model(str(ROOT / "data/models/v16.json"))  # v1.1 as shipped, archived
 p = v16.predict(xgb.DMatrix(before["X"]))
 for layer, t in (("commit", 0.8016), ("gate", 0.5505)):
     print(f"shipped v16 {layer:6} threshold {t}: {C.oss_alarms(before, p, t):5.1f} alarms / 1k files "
@@ -702,6 +702,39 @@ else:
 Label each row `secret`, `not_secret` or `unsure`, then re-run this section. Both files are git-ignored: they hold real strings from the OSS corpus.
 
 **Check 4, holdout reuse.** `benchmark_llm_v5` has been scored for v14, v15, v16 and twice for v17, so it is retired for model selection and kept only as a historical record. The thresholds are frozen at commit 0.5317 and gate 0.1580. Future rounds select on LOLO plus the real-code budget; the next held-out benchmark needs code from an LLM family not used so far."""),
+    md("""## 19. Shipped: detector v1.2 = model v17, recipe J
+
+**Decision:** ship J, which is v17's recipe with reliable-negative mining (`--reliable-below 0.9`). It ties H on every validation yardstick (section 18) and doesn't teach "a credential in a fixture is not a secret."
+
+Command, the same as section 16 plus `--reliable-below 0.9 --out data/models/v17j.json`. The trained model is installed as `cli/Harpocrates/ml/models/xgboost_model.json`, converted to ONNX, and the ONNX predictions were checked identical to the scored candidate.
+
+**Held-out, reported once for the README.** The model choice was already made, and the benchmark is retired for selection, so this is a report, not a selection step. It used the same harness as section 17. The stability checks from section 18 were repeated for J (`r2_audit.py report ... --candidate v17j`)."""),
+    code("""rj = json.loads((R2 / "release_checks_v17j.json").read_text())
+cfg = json.loads((ROOT / "cli/Harpocrates/ml/models/model_config.json").read_text())
+print("shipped:", cfg["version"], "| thresholds", {k: cfg["thresholds"][k] for k in ("commit", "gate")})
+print(f"{'set':18}{'threshold':11}{'v16 recall':>11}{'v17 recall':>11}{'v16 prec':>10}{'v17 prec':>10}")
+for s in ("benchmark_llm_v5", "test_v5"):
+    for layer in ("commit", "gate"):
+        a = json.loads((ROOT / f"data/models/cmp6_{layer}_{s}.json").read_text())["scanners"]["harpocrates"]
+        b = json.loads((ROOT / f"data/models/cmp8_{layer}_{s}.json").read_text())["scanners"]["harpocrates"]
+        print(f"{s:18}{layer:11}{a['recall']:11.3f}{b['recall']:11.3f}{a['precision']:10.3f}{b['precision']:10.3f}")
+print("candidate AUC:", cfg["metrics"]["auc_candidates"])
+for layer, g in rj["recall_gain"].items():
+    print(f"validation recall gain at {layer}: {g['gain']:+.4f} (95% CI {g['ci95'][0]:+.4f} to {g['ci95'][1]:+.4f}), secrets only v16 catches: {g['v16_only']}")
+for split in ("val", "test"):
+    print(f"{split}-split repos, ML alarms per 1k files:",
+          {l: (round(rj['alarm_rates'][split][f'v16_{l}']['overall_per_1k'], 1), round(rj['alarm_rates'][split][f'v17_{l}']['overall_per_1k'], 1)) for l in ("commit", "gate")})"""),
+    md("""**Result:**
+- **Benchmark:** commit 90.2% → 93.9% recall (precision 95.2% → 94.4%); gate 93.3% → 95.0% (92.6% → 90.4%).
+- **OSS test:** commit 95.3% → 98.7% (97.3% → 97.1%); gate 98.7% → 99.3% (93.5% → 94.5%).
+- **Untouched test repos:** gate alarms fall from 136.7 to 62.7 per 1,000 files.
+- **Compared with H:** J's benchmark gate precision is higher (90.4% against 89.6%) at the same recall.
+
+**Still open:**
+- the blinded alarm audit (section 18, check 3);
+- calibration (FR-CORE-03);
+- multi-line extraction (a password on the line after its key);
+- a new held-out benchmark from an unused LLM family."""),
 ]
 
 

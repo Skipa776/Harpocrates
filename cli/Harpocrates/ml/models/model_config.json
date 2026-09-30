@@ -1,65 +1,70 @@
 {
-  "version": "1.1.0",
-  "mode": "single_stage",
-  "model_type": "xgboost",
-  "feature_count": 64,
-  "threshold_low": 0.8016,
-  "threshold_high": 0.95,
-  "optimal_threshold": 0.8016,
-  "platt_a": 0.0,
-  "platt_b": 0.0,
-  "thresholds": {
-    "commit": 0.8016,
-    "gate": 0.5505,
-    "note": "commit: precision-first (pre-commit/CLI). gate: recall-first (read tool, egress gate). Both from one model; chosen on validation for 90% / 97% candidate recall."
+ "version": "1.2.0",
+ "mode": "single_stage",
+ "model_type": "xgboost",
+ "feature_count": 64,
+ "threshold_low": 0.5559,
+ "threshold_high": 0.95,
+ "optimal_threshold": 0.5559,
+ "platt_a": 0.0,
+ "platt_b": 0.0,
+ "thresholds": {
+  "commit": 0.5559,
+  "gate": 0.1904,
+  "note": "commit: precision-first (pre-commit/CLI). gate: recall-first (read tool, egress gate). Both from one model; each set so the model raises v16's ML alarm rate on the val-split OSS repos (14.9 / 56.8 per 1,000 files), rounded up. See bench/model_improvement.ipynb round 2."
+ },
+ "metrics": {
+  "unit": "full file scan (bench/compare_scanners.py)",
+  "benchmark_llm_v5_gate": {
+   "recall": 0.9496,
+   "precision": 0.9041
   },
-  "metrics": {
-    "unit": "full file scan (bench/compare_scanners.py)",
-    "benchmark_llm_v5_gate": {
-      "recall": 0.9327,
-      "precision": 0.9255
-    },
-    "benchmark_llm_v5_commit": {
-      "recall": 0.9021,
-      "precision": 0.9515
-    },
-    "test_v5_gate": {
-      "recall": 0.9867,
-      "precision": 0.9349
-    },
-    "test_v5_commit": {
-      "recall": 0.9533,
-      "precision": 0.9728
-    },
-    "auc_candidates": {
-      "benchmark_llm_v5": 0.9837,
-      "test_v5": 0.9984
-    }
+  "benchmark_llm_v5_commit": {
+   "recall": 0.9394,
+   "precision": 0.9436
   },
-  "training": {
-    "data": [
-      "data/synthetic_v4_clean.jsonl",
-      "data/eval/train_v5.jsonl",
-      "data/eval/llm_train_v5.jsonl"
-    ],
-    "unit": "scanner candidates (train_v11 --pipeline-features)",
-    "rows": 86857,
-    "zeroed_features": [
-      "var_name_extracted",
-      "var_contains_safe",
-      "var_name_length",
-      "var_is_uppercase",
-      "var_is_camelcase",
-      "assignment_type",
-      "var_ngram_secret_score",
-      "var_ngram_safe_score",
-      "key_value_distance",
-      "adjacency_ngram_score"
-    ],
-    "monotone": true,
-    "scale_pos_weight": 2.0,
-    "fallback_note": "stageA_xgboost.json (native fallback when ONNX cannot load) is still the v0.4 model"
+  "test_v5_gate": {
+   "recall": 0.9933,
+   "precision": 0.9454
   },
-  "created_at": "2026-09-30T12:37:26",
-  "seed": 42
+  "test_v5_commit": {
+   "recall": 0.9873,
+   "precision": 0.9711
+  },
+  "auc_candidates": {
+   "benchmark_llm_v5": 0.9856,
+   "test_v5": 0.9996
+  }
+ },
+ "training": {
+  "data": [
+   "data/synthetic_v4_clean.jsonl",
+   "data/eval/train_v5.jsonl",
+   "data/eval/llm_train_v5.jsonl"
+  ],
+  "unit": "scanner candidates (train_v11 --pipeline-features)",
+  "rows": 157066,
+  "real_negative_rows": 62883,
+  "real_negative_files": 30000,
+  "reliable_below": 0.9,
+  "max_depth": 7,
+  "n_estimators": 600,
+  "zeroed_features": [
+   "var_name_extracted",
+   "var_contains_safe",
+   "var_name_length",
+   "var_is_uppercase",
+   "var_is_camelcase",
+   "assignment_type",
+   "var_ngram_secret_score",
+   "var_ngram_safe_score",
+   "key_value_distance",
+   "adjacency_ngram_score"
+  ],
+  "monotone": true,
+  "scale_pos_weight": 2.0,
+  "fallback_note": "stageA_xgboost.json (native fallback when ONNX cannot load) is still the v0.4 model"
+ },
+ "created_at": "2026-09-30T16:24:30",
+ "seed": 42
 }
