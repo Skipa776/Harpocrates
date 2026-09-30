@@ -56,3 +56,36 @@ def test_long_dotted_run_without_scheme_is_fast():
     start = time.perf_counter()
     _collect_text_findings(line)
     assert time.perf_counter() - start < 2.0
+
+
+# Round 2 (bench/model_improvement.ipynb section 14): shapes found uncovered in LLM-written code.
+SOUP = "Qm" + "]a%)A-x;7" + "Kp{9!z"
+TOK59 = "MTk4NjIyNDgzNDcxOTI1MjQ4" + "." + "Cl2FMQ" + "." + "ZGiU5uKqX0vWf7Q2pRt8sLm1nBcD"
+
+
+@pytest.mark.parametrize("line, expected", [
+    ('-H "Authorization: Bearer ab9Kd_Wq2x"', "ab9Kd_Wq2x"),                       # short bearer token
+    ('--header "X-Deploy-Key: Zk2+mQ9vL4xP7wR1tY8n" \\', "Zk2+mQ9vL4xP7wR1tY8n"),  # custom header
+    (f'hook = "https://discord.com/api/webhooks/{TOK59}"', TOK59),                  # token as a URL path segment
+    ('u = "https://api.example.com/v2/stock?session=aZ8kQ2mW9xR4tY7uP1vB3nC6&w=chi3"',
+     "aZ8kQ2mW9xR4tY7uP1vB3nC6"),                                                  # any query parameter name
+    ('dsn = "https://4f9Kx2Qm8vL1pR7tZ3wY@o1.ingest.sentry.io/450"', "4f9Kx2Qm8vL1pR7tZ3wY"),  # key-only userinfo
+    (f"bootstrap_value = {SOUP}", SOUP),                                            # symbol-heavy random value
+    (f'WEEKLY = "{SOUP}"', SOUP),
+    ("x https://h.io/AbC9xYz1QwErTy7uIoPz3K8mN==?a=1", "AbC9xYz1QwErTy7uIoPz3K8mN=="),
+    ("x https://h.io/?key=Zx9Qw7Er5Ty3Ui1Op8As&b=1", "Zx9Qw7Er5Ty3Ui1Op8As"),
+    ("see (https://h.io/p?sess=Zx9Qw7Er5Ty3Ui1Op8As).", "Zx9Qw7Er5Ty3Ui1Op8As"),
+    ("see HTTPS://h.io/v1/Zx9Qw7Er5Ty3Ui1Op8AsLk", "Zx9Qw7Er5Ty3Ui1Op8AsLk"),
+])
+def test_round2_shapes_become_ml_candidates(line, expected):
+    """Also covers review fixes: padded path segments, a query right after the scheme, trailing punctuation."""
+    assert expected in {f.token for f in _collect_text_findings(line) if f.evidence != EvidenceType.REGEX}
+
+
+@pytest.mark.parametrize("line", [
+    'url = "https://github.com/Skipa776/Harpocrates/blob/main/README.md"',  # word path segments
+    'pattern = r"^[a-z]+$"',                                                # short regex
+    'fmt = "%Y-%m-%d %H:%M:%S"',                                            # has spaces
+])
+def test_round2_plain_strings_are_not_candidates(line):
+    assert not {f.token for f in _collect_text_findings(line) if f.evidence != EvidenceType.REGEX}

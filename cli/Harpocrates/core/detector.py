@@ -104,6 +104,56 @@ _HEX_SECRET_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{32,64}(?![0-9a-f])")
 #   + (uppercase or a password symbol), no spaces/paths
 _QUOTED_LITERAL_RE = re.compile(r"['\"]([^'\"\s/]{8,64})['\"]")
 _PASSWORD_SYMBOLS = set("!@#$%^&*+=")
+# Round 2 (bench/model_improvement.ipynb section 14), from uncovered secrets in LLM-written code:
+# - header values: `Bearer <token>` (any length >= 6) and `X-Deploy-Key: <token>`
+_BEARER_RE = re.compile(r"(?i)\bbearer\s+([^\s'\"\\<>`]{6,200})")
+_HEADER_SECRET_RE = re.compile(r"(?i)\b[\w-]{0,40}(?:key|token|sig|signature|secret)[\w-]{0,20}:\s*([^\s'\"\\`]{12,200})")
+# - secrets inside URLs: key-only userinfo (Sentry DSN), random path segments, any query value
+_URL_IN_LINE_RE = re.compile(r"(?i)(?<![a-z0-9+.\-])[a-z][a-z0-9+.\-]{0,19}://[^\s'\"<>`]{1,2000}")
+_URL_TRAILING = ").,;:!?]}"
+_URL_PIECE_RE = re.compile(r"[^/?&#]+")
+_USERINFO_KEY_RE = re.compile(r"[A-Za-z0-9_+\-]{16,200}(?=@)")
+_WORDS_JOINED_RE = re.compile(r"[A-Za-z]+(?:[-_.~][A-Za-z0-9]+)*")
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+# - symbol-heavy random values after = or : (generic random secrets the tokenizer splits apart)
+_ASSIGNED_VALUE_RE = re.compile(r"[=:]\s*[\"']?([^\s'\"`]{12,120})")
+_SOUP_SYMBOLS = set("!@#$%^&*()[]{}<>;,?|~")
+_LETTER_RUN_RE = re.compile(r"[A-Za-z]{5,}")
+
+
+def _random_url_piece(value: str) -> bool:
+    return (len(value) >= 16 and _password_shaped(value) and not _WORDS_JOINED_RE.fullmatch(value)
+            and not _UUID_RE.fullmatch(value))
+
+
+def _symbol_soup(value: str) -> bool:
+    """Random punctuation-heavy secret: >= 3 distinct unusual symbols, letters and digits, and no
+    word-like letter run (code and prose have long letter runs; random strings don't)."""
+    return (len(_SOUP_SYMBOLS & set(value)) >= 3 and sum(c.isalpha() for c in value) >= 3
+            and any(c.isdigit() for c in value) and not _LETTER_RUN_RE.search(value)
+            and "://" not in value)
+
+
+def _url_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
+    out = []
+    for url in _URL_IN_LINE_RE.finditer(scan_target):
+        rest = url.start() + url.group().index("://") + 3
+        end = url.start() + len(url.group().rstrip(_URL_TRAILING))  # "(see https://x/y)." ends before ")."
+        m = _USERINFO_KEY_RE.match(scan_target, rest, end)
+        if m and m.end() < end:
+            out.append((m.group(), m.start(), m.end()))
+        query = scan_target.find("?", rest, end)
+        query = end if query < 0 else query
+        for piece in _URL_PIECE_RE.finditer(scan_target, rest, end):
+            if piece.start() == rest:  # the host
+                continue
+            value, start = piece.group(), piece.start()
+            if start > query and "=" in value:  # name=value only in the query; a path keeps its base64 padding
+                cut = value.index("=") + 1
+                value, start = value[cut:], start + cut
+            if _random_url_piece(value):
+                out.append((value, start, start + len(value)))
+    return out
 
 
 def _password_shaped(value: str) -> bool:
@@ -123,9 +173,15 @@ def _structured_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
         for m in pattern.finditer(scan_target):
             group = 1 if pattern.groups else 0
             out.append((m.group(group), m.start(group), m.end(group)))
-    for m in (*_QUOTED_LITERAL_RE.finditer(scan_target), *_COLON_CREDENTIAL_RE.finditer(scan_target)):
+    for m in (*_QUOTED_LITERAL_RE.finditer(scan_target), *_COLON_CREDENTIAL_RE.finditer(scan_target),
+              *_BEARER_RE.finditer(scan_target), *_HEADER_SECRET_RE.finditer(scan_target)):
         if _password_shaped(m.group(1)):
             out.append((m.group(1), m.start(1), m.end(1)))
+    for m in _ASSIGNED_VALUE_RE.finditer(scan_target):
+        if _symbol_soup(m.group(1)):
+            out.append((m.group(1), m.start(1), m.end(1)))
+    if "://" in scan_target:
+        out += _url_candidates(scan_target)
     return out
 
 
