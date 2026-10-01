@@ -382,7 +382,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
             if looks_like_secret(token):
                 ent = shannon_entropy(token)
                 _vn = extract_var_name(scan_target, token)
-                _inf = infer_category(signature_name=None, var_name=_vn, token=token)
+                _inf = infer_category(signature_name=None, var_name=_vn, token=token, line=scan_target)
                 findings.append(
                     Finding(
                         type="ENTROPY_CANDIDATE",
@@ -415,7 +415,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                 # var name: everything left of the value in the match, stripped
                 _vn = scan_text[: match.start(1)].split("=")[0].split(":")[0].strip()
                 _vn = _vn or None
-                _inf = infer_category(signature_name=None, var_name=_vn, token=value)
+                _inf = infer_category(signature_name=None, var_name=_vn, token=value, line=scan_target)
                 findings.append(
                     Finding(
                         type="ML_CANDIDATE",
@@ -441,7 +441,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
             if value in found_tokens:  # exact only: a password inside a whole-string candidate still gets its own
                 continue
             _vn = extract_var_name(scan_target, value)
-            _inf = infer_category(signature_name=None, var_name=_vn, token=value)
+            _inf = infer_category(signature_name=None, var_name=_vn, token=value, line=scan_target)
             findings.append(
                 Finding(
                     type="ML_CANDIDATE",
@@ -474,7 +474,7 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                     continue
                 _vn = scan_text[: match.start(1)].split("=")[0].split(":")[0].strip()
                 _vn = _vn or None
-                _inf = infer_category(signature_name=None, var_name=_vn, token=value)
+                _inf = infer_category(signature_name=None, var_name=_vn, token=value, line=scan_target)
                 findings.append(
                     Finding(
                         type="ENV_ASSIGNMENT",
@@ -739,7 +739,12 @@ def _apply_ml_verification_with_contexts(
                         entropy=finding.entropy,
                         evidence=EvidenceType.HYBRID,
                         severity=new_severity,
-                        confidence=result.combined_confidence,
+                        # FR-CORE-03: report calibrated P(secret) when the model ships a map.
+                        confidence=(
+                            calibrated
+                            if (calibrated := getattr(result, "calibrated", None)) is not None
+                            else result.combined_confidence
+                        ),
                         token=finding.token,
                         token_start=finding.token_start,
                         token_end=finding.token_end,
