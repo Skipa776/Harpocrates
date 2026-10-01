@@ -27,4 +27,4 @@ cargo fmt --manifest-path core/Cargo.toml --check && cargo clippy --manifest-pat
 
 ## Current milestone
 
-**M1: Read tool** (Oct 6 – Oct 19). Done: FR-READ-01, FR-READ-02, SEC-02, FR-CORE-02, FR-CORE-03, SEC-06, FR-INSTALL-03. FR-READ-03 shipped; its acceptance (fresh-machine setup by someone else) is pending. Next: M2, egress gate.
+**M1: Read tool** (Oct 6 – Oct 19). Done: FR-READ-01, FR-READ-02, SEC-02, FR-CORE-02, FR-CORE-03, SEC-06, FR-INSTALL-03. FR-READ-03 shipped with a content-aware read hook. Exit criterion met live on Claude Code (0/15 canaries); the Codex hook awaits one-time /hooks trust, and the fresh-machine setup by someone else is pending. Next: M2, egress gate.
