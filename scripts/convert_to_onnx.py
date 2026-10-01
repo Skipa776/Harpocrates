@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-DEFAULT_MODEL_DIR = ROOT / "Harpocrates" / "ml" / "models"
+DEFAULT_MODEL_DIR = ROOT / "cli" / "Harpocrates" / "ml" / "models"
 
 from Harpocrates.ml.features import FEATURE_NAMES
 

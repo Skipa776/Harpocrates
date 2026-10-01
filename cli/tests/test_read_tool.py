@@ -120,11 +120,17 @@ def test_fr_core_02_every_category_has_a_secret_type() -> None:
 
 
 def test_fr_core_06_gate_layer_threshold() -> None:
-    from Harpocrates.ml.onnx_verifier import OnnxModelSchemaError, OnnxVerifier
+    import json
 
-    gate = OnnxVerifier(layer="gate")
+    from Harpocrates.ml.onnx_verifier import MODEL_CONFIG_PATH, OnnxModelSchemaError, OnnxVerifier
+
+    thresholds = json.loads(MODEL_CONFIG_PATH.read_text())["thresholds"]
+    gate, commit = OnnxVerifier(layer="gate"), OnnxVerifier()
     gate._ensure_loaded()
-    assert gate._threshold_low == 0.5505
+    commit._ensure_loaded()
+    assert gate._threshold_low == thresholds["gate"]
+    assert commit._threshold_low == thresholds["commit"]
+    assert thresholds["gate"] < thresholds["commit"]  # gate is the recall-first layer
     with pytest.raises(OnnxModelSchemaError, match="thresholds.nope"):
         OnnxVerifier(layer="nope")._ensure_loaded()
 

@@ -109,9 +109,9 @@ def scan(
     ml_threshold: float = typer.Option(
         0.19, "--ml-threshold",
         help=(
-            "ML confidence threshold (0.0-1.0, default: 0.19). The default "
-            "matches the tuned operating point of the shipped two-stage "
-            "ensemble (~95% precision, ~97% recall)."
+            "Extra floor on combined confidence (0.0-1.0, default: 0.19). "
+            "The model's own commit threshold in model_config.json decides "
+            "first; at the default this floor never removes a finding."
         ),
     ),
     show_secrets: bool = typer.Option(
