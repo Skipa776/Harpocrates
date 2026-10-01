@@ -31,15 +31,28 @@ Recall and precision columns are held-out benchmark first, then open-source code
 | gitleaks 8.30 | 52.3% | 89.3% | 5.7% | 48.9% | 100.0% | n/a (yes/no only) |
 | detect-secrets 1.5 ¹ | 55.3% | 63.8% | 28.3% | 74.0% | 78.7% | n/a (yes/no only) |
 | CredSweeper 1.18 | 68.3% | 72.8% | 23.1% | 59.3% | 93.3% | 0.72 / 0.81 |
-| **Harpocrates (gate)** | **93.3%** | **92.5%** | 6.8% | **98.7%** | **93.5%** | **0.984 / 0.998** ² |
-| Harpocrates (commit) | 90.2% | 95.1% | 4.2% | 95.3% | 97.3% | same model |
+| **Harpocrates (gate)** | **95.0%** | **90.4%** | 9.1% | **99.3%** | **94.5%** | **0.986 / 1.000** ² |
+| Harpocrates (commit) | 93.9% | 94.4% | 5.1% | 98.7% | 97.1% | same model |
 
 ¹ detect-secrets reports only a hash of each secret, so it is credited for any finding on the right line. That is lenient in its favor.
 ² Harpocrates AUC is measured over the candidates the scanner extracts. TruffleHog, gitleaks and detect-secrets output yes/no only, so they have one point on the ROC curve, not a curve. CredSweeper's AUC uses its ML probabilities (`--ml_threshold 0`).
 
 **Two operating points, one model.** The *gate* threshold favors recall: it is for blocking secrets before they reach an AI model, where a missed secret is the costly mistake. The *commit* threshold favors precision for pre-commit hooks, where false alarms interrupt developers.
 
-**Secrets only one scanner caught** (held-out benchmark): Harpocrates **189**, detect-secrets 24, CredSweeper 15, TruffleHog 4, gitleaks 1.
+**What changed in v1.2 (model v17), compared with v1.1 (model v16):**
+
+| | Benchmark recall | Benchmark precision | Open-source recall | Open-source precision |
+|---|---|---|---|---|
+| Commit | 90.2% → **93.9%** | 95.1% → 94.4% | 95.3% → **98.7%** | 97.3% → 97.1% |
+| Gate | 93.3% → **95.0%** | 92.5% → 90.4% | 98.7% → **99.3%** | 93.5% → **94.5%** |
+
+- **How the thresholds are set.** Both are chosen so the model raises the same number of alarms on real open-source code as v1.1 did.
+- **Real code got quieter.** On 42 repositories no threshold was tuned on, v1.2 raises less than half as many gate alarms as v1.1 (62.7 against 136.7 per 1,000 files).
+- **Where precision dropped.** Benchmark gate precision fell because the benchmark's non-secrets are LLM-written look-alikes, not real code.
+
+The full analysis is in `bench/model_improvement.ipynb`.
+
+**Secrets only one scanner caught** (held-out benchmark): Harpocrates **202**, detect-secrets 12, CredSweeper 10, TruffleHog 3, gitleaks 0.
 
 ### Recall by secret type (held-out benchmark)
 
@@ -49,16 +62,16 @@ Sorted by Harpocrates' lead over the best competitor. **Bold** = Harpocrates is 
 |---|---|---|---|---|
 | Twilio auth token | 1.4% | 5.7% | 7.1% | **94.3%** |
 | Telegram bot token | 33.7% | 0.0% | 44.2% | **100.0%** |
+| Password | 1.8% | 6.3% | 20.7% | **73.9%** |
+| AWS secret key | 0.0% | 49.4% | 56.5% | **100.0%** |
 | PyPI token | 0.0% | 54.4% | 57.0% | **100.0%** |
 | OpenAI key | 1.1% | 51.6% | 57.0% | **100.0%** |
-| AWS secret key | 0.0% | 49.4% | 56.5% | **97.6%** |
-| Password | 1.8% | 6.3% | 20.7% | **61.3%** |
-| Discord bot token | 0.0% | 34.6% | 53.1% | **90.1%** |
+| Discord bot token | 0.0% | 34.6% | 53.1% | **95.1%** |
+| Generic random secret | 0.0% | 0.0% | 42.5% | **78.3%** |
 | DigitalOcean token | 0.0% | 37.6% | 59.1% | **94.6%** |
 | Token in URL query | 26.8% | 63.9% | 62.9% | **95.9%** |
-| Generic random secret | 0.0% | 0.0% | 42.5% | **67.9%** |
 | Database/broker URI with password | 24.2% | 0.0% | 70.7% | **90.9%** |
-| ADO.NET connection string | 78.7% | 3.2% | 58.5% | **89.4%** |
+| ADO.NET connection string | 78.7% | 3.2% | 58.5% | **91.5%** |
 | AWS access key | 2.6% | 51.9% | 98.7% | **100.0%** |
 | Stripe key | 98.9% | 93.7% | 97.9% | **100.0%** |
 | GCP API key | 0.0% | 89.7% | 100.0% | **100.0%** |
@@ -67,10 +80,10 @@ Sorted by Harpocrates' lead over the best competitor. **Bold** = Harpocrates is 
 | SendGrid key | 100.0% | 96.7% | 100.0% | **100.0%** |
 | Slack bot token | 100.0% | 100.0% | 98.9% | **100.0%** |
 | Azure storage connection string | 98.8% | 96.3% | 95.1% | 97.6% |
+| JDBC URL with password | 100.0% | 3.2% | 66.7% | 96.8% |
 | JWT | 0.0% | 93.4% | 98.7% | 94.7% |
-| JDBC URL with password | 100.0% | 3.2% | 66.7% | 95.2% |
+| Vault token | 0.0% | 61.6% | 98.6% | 93.2% |
 | GitHub fine-grained token | 98.9% | 100.0% | 100.0% | 94.3% |
-| Vault token | 0.0% | 61.6% | 98.6% | 91.8% |
 
 **Where competitors miss the most:** credentials without a provider prefix to anchor a regex on. That covers Twilio auth tokens (bare 32-hex), passwords, generic random secrets, and passwords inside connection strings and URLs. It also covers tokens embedded in larger strings, such as a Telegram token inside a bot URL or a token in a URL query parameter.
 
@@ -92,7 +105,10 @@ Why these slip past the others: none of them has a provider prefix like `AKIA`, 
 ### Where the others win
 
 - **Precision at the extreme:** TruffleHog flags almost nothing that isn't a secret (97.6% precision). It also verifies credentials against provider APIs; Harpocrates never makes network calls.
-- **Specific formats:** CredSweeper catches more JWTs (98.7% vs 94.7%) and Vault tokens (98.6% vs 91.8%); gitleaks and CredSweeper catch every GitHub fine-grained token (100% vs 94.3%); TruffleHog catches every JDBC URL (100% vs 95.2%) and more Azure storage connection strings (98.8% vs 97.6%).
+- **Specific formats:**
+  - CredSweeper catches more JWTs (98.7% vs 94.7%) and Vault tokens (98.6% vs 93.2%).
+  - gitleaks and CredSweeper catch every GitHub fine-grained token (100% vs 94.3%).
+  - TruffleHog catches every JDBC URL (100% vs 96.8%) and more Azure storage connection strings (98.8% vs 97.6%).
 - **A known miss:** a 64-character hex HMAC signing key (`[]byte("7d4e9a1f…")` in Go) is flagged by detect-secrets and CredSweeper but not by Harpocrates. It is in the reproduce script.
 
 **Recommended setup:** Harpocrates as the pre-commit hook and AI-agent gate (widest coverage), TruffleHog in CI (confirms which leaked credentials are live).
@@ -103,8 +119,12 @@ Why these slip past the others: none of them has a provider prefix like `AKIA`, 
 - The benchmark and open-source test files are not published yet (the open-source set contains third-party code; it is rebuilt from a pinned repo list with `scripts/fetch_oss_corpus.py` and `scripts/build_eval_set.py`). The real-world cases above are published and reproducible today with `bench/readme_examples.py`.
 - A scanner is credited only for a finding on the right line whose value overlaps the labeled secret (≥ 4 characters). detect-secrets is the exception noted above.
 - Labels are correct by construction: LLMs wrote code with typed placeholders, and fake values of a known kind were filled in afterwards. The benchmark is still synthetic; real repositories will differ.
-- Harpocrates' recall ceiling (the share of secrets its scanner turns into a candidate at all) is 94.1% on the benchmark and 99.3% on open-source code.
-- These results are for the **v1.1 detector** (model v16), shipped in this repository. `harpocrates scan --ml` uses the precision-first *commit* threshold by default; the recall-first *gate* threshold is stored in `model_config.json` for the read tool and egress gate. The current PyPI release still ships the earlier v0.4 model.
+- Harpocrates' recall ceiling (the share of secrets its scanner turns into a candidate at all) is 95.5% on the benchmark and 99.5% on open-source code.
+- This benchmark has now been scored for several model versions, so it is retired for choosing models. These numbers are a one-time report for v1.2. Future models are selected on leave-one-LLM-family-out validation and real-code alarm rates.
+- These results are for the **v1.2 detector** (model v17), shipped in this repository.
+  - `harpocrates scan --ml` uses the precision-first *commit* threshold (0.5559) by default.
+  - The recall-first *gate* threshold (0.1904) is in `model_config.json`, and the read tool uses it.
+  - The current PyPI release still ships the earlier v0.4 model.
 
 ---
 
@@ -189,7 +209,7 @@ Add to `.pre-commit-config.yaml`, then run `pre-commit install`. Harpocrates sca
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--ml` | off | Enable ML verification to reduce false positives |
-| `--ml-threshold FLOAT` | `0.19` | ML confidence threshold `0.0–1.0`. Lower = more recall, higher = more precision |
+| `--ml-threshold FLOAT` | `0.19` | Extra floor on combined confidence, `0.0–1.0`. The model's commit threshold (`model_config.json`) decides first, so at the default this floor never removes a finding. Raise it for fewer, higher-confidence findings |
 | `--engine ENGINE` | `auto` | `auto` prefers an available Rust binary; `rust` requires it; `python` uses the original engine |
 | `--fail-on LEVEL` | `medium` | Severity that triggers exit code `1`: `critical` \| `high` \| `medium` \| `low` \| `info` \| `none` |
 | `--json` | off | Output results as JSON instead of a table |
