@@ -464,6 +464,7 @@ class RustScannerBackend:
                     signature_name=signature,
                     var_name=str(var_name) if var_name else None,
                     token=token,
+                    line=str(raw.get("snippet") or "") or None,
                 )
 
                 if signature is not None:
