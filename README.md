@@ -125,6 +125,7 @@ Why these slip past the others: none of them has a provider prefix like `AKIA`, 
   - `harpocrates scan --ml` uses the precision-first *commit* threshold (0.5559) by default.
   - The recall-first *gate* threshold (0.1904) is in `model_config.json`, and the read tool uses it.
   - The current PyPI release still ships the earlier v0.4 model.
+- Per-type precision and recall, and how the reported confidence is calibrated, are in [docs/detector-report.md](docs/detector-report.md).
 
 ---
 
@@ -230,6 +231,8 @@ Add to `.pre-commit-config.yaml`, then run `pre-commit install`. Harpocrates sca
 
 ```bash
 harpocrates version          # Print version
+harpocrates setup            # Support tier of each detected agent harness, and what it leaves unprotected
+harpocrates setup codex      # Read-tool setup for Codex (or: claude-code)
 harpocrates serve            # Start the REST API server (requires harpocrates[api])
 harpocrates --help           # Full command list
 ```
@@ -308,7 +311,9 @@ The ML model is bundled with the package. `pip install "harpocrates[ml]"` is all
 
 ## MCP Server
 
-Harpocrates ships an MCP (Model Context Protocol) server that exposes `scan_text` and `scan_file` to compatible agents via stdio transport.
+Harpocrates ships an MCP (Model Context Protocol) server over stdio. It serves two jobs: scanning for an agent (`scan_text`, `scan_file`), and the **read tool** (`safe_read`, `safe_grep`). The read tool hands an agent file contents with every detected secret replaced by a typed placeholder such as `<<HARPO:api_token:3f9a>>`.
+
+To make Claude Code or Codex read secret-bearing files only through the read tool, run `harpocrates setup claude-code` or `harpocrates setup codex` and follow [docs/setup.md](docs/setup.md). What this does and doesn't protect is in [docs/threat-model.md](docs/threat-model.md).
 
 **Install:**
 ```bash
@@ -326,6 +331,13 @@ harpocrates-mcp                  # listens on stdio, speaks JSON-RPC
 |------|-----------|---------|
 | `scan_text` | `text: str`, `include_token: bool = False`, `include_contributions: bool = False` | List of finding dicts |
 | `scan_file` | `path: str`, `include_token: bool = False`, `max_bytes: int\|None = None`, `include_contributions: bool = False` | List of finding dicts |
+| `safe_read` | `path: str`, `start_line: int\|None = None`, `end_line: int\|None = None` | File text with secrets replaced by placeholders, numbered like `cat -n` |
+| `safe_grep` | `pattern: str`, `path: str = "."`, `max_matches: int = 200` | `file:line:text` matches, searched after redaction, so a search can't reveal a secret |
+
+How placeholders work:
+- Each session uses its own random key, and the same secret gets the same placeholder throughout that session.
+- Values are never restored.
+- If the ML verifier fails, every candidate is redacted.
 
 Tokens are redacted by default (`include_token=False`). Pass `include_contributions=True` to receive TreeSHAP explanations (requires `pip install harpocrates[ml]`). The MCP process has the same filesystem read scope as the user who launched it.
 
