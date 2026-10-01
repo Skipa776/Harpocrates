@@ -313,7 +313,7 @@ The ML model is bundled with the package. `pip install "harpocrates[ml]"` is all
 
 Harpocrates ships an MCP (Model Context Protocol) server over stdio. It serves two jobs: scanning for an agent (`scan_text`, `scan_file`), and the **read tool** (`safe_read`, `safe_grep`). The read tool hands an agent file contents with every detected secret replaced by a typed placeholder such as `<<HARPO:api_token:3f9a>>`.
 
-To make Claude Code or Codex read secret-bearing files only through the read tool, run `harpocrates setup claude-code` or `harpocrates setup codex` and follow [docs/setup.md](docs/setup.md). What this does and doesn't protect is in [docs/threat-model.md](docs/threat-model.md).
+To make Claude Code or Codex read secret-bearing files only through the read tool, run `harpocrates setup claude-code` or `harpocrates setup codex` and follow [docs/setup.md](docs/setup.md). The setup has three parts: deny rules for files named like secrets, the MCP registration, and a content-aware hook. The hook refuses built-in and shell reads of any file that holds a secret and points the agent to `safe_read`. In a live Claude Code run, 0 of 15 planted canaries reached the agent; without Harpocrates, 8 of 15 did (`bench/live_canary_check.py`). What this does and doesn't protect is in [docs/threat-model.md](docs/threat-model.md).
 
 **Install:**
 ```bash

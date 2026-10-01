@@ -104,12 +104,17 @@ def claude_code_settings() -> dict:
     """Lines for ~/.claude/settings.json. `//**/` anchors at the filesystem root, so a rule in user
     settings covers every project and any file outside the working directory."""
     deny = [f"Read(//**/{name})" for name in SENSITIVE_FILES] + [f"Read({d}/**)" for d in SENSITIVE_HOME_DIRS]
-    return {"permissions": {"deny": deny, "allow": list(MCP_TOOLS)}}
+    command, _ = mcp_server()
+    # Content-aware: also blocks built-in reads of any other file that holds a secret (Harpocrates/hooks.py).
+    hook = {"type": "command", "command": shlex.join([command, "-m", "Harpocrates.hooks"])}
+    return {"permissions": {"deny": deny, "allow": list(MCP_TOOLS)},
+            "hooks": {"PreToolUse": [{"matcher": "Read|Grep|Bash", "hooks": [hook]}]}}
 
 
 def codex_config() -> str:
     """Lines for ~/.codex/config.toml. The profile limits sandboxed shell commands; Codex doesn't apply
-    profiles to MCP servers, so safe_read still reads these paths."""
+    profiles to MCP servers, so safe_read still reads these paths. The PreToolUse hook is the same
+    content-aware check as Claude Code's: it refuses shell commands that would print a file holding a secret."""
     command, args = mcp_server()
     files = "\n".join(f'"**/{name}" = "deny"' for name in SENSITIVE_FILES)
     dirs = "\n".join(f'"{d}" = "deny"' for d in SENSITIVE_HOME_DIRS)
@@ -129,6 +134,14 @@ glob_scan_max_depth = 8
 
 [permissions.harpocrates.filesystem.":workspace_roots"]
 {files}
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = {json.dumps(shlex.join([command, "-m", "Harpocrates.hooks"]), ensure_ascii=False)}
+statusMessage = "Harpocrates: checking files for secrets"
 """
 
 
@@ -143,7 +156,7 @@ def setup_instructions(harness: str) -> str:
 
    claude mcp add --scope user harpocrates -- {shlex.join([command, *args])}
 
-2. Merge these keys into ~/.claude/settings.json (append to any existing lists):
+2. Merge these keys into ~/.claude/settings.json (append to any existing lists and hooks):
 
 {json.dumps(claude_code_settings(), indent=2)}
 
@@ -154,9 +167,11 @@ def setup_instructions(harness: str) -> str:
 4. Check: start `claude` in a repo with a .env and ask it to show the file. The built-in Read is
    refused, and safe_read returns <<HARPO:...>> placeholders instead of the values.
 
-Limit: these rules also stop `cat`, `head`, and `tail` on these paths, but not `grep -r` or a script
-that opens files itself. To block those too, enable the Bash sandbox and list these paths under
-sandbox.filesystem.denyRead (see docs/setup.md)."""
+The "hooks" entry scans every file before a built-in Read, a content Grep, or a Bash command such as
+`cat` touches it, and refuses the call if the file holds a secret, pointing the agent to safe_read.
+Cost: Claude can't Edit a refused file, since Edit needs a built-in Read first (about 3% of ordinary
+source files, mostly false alarms). Limit: a script that opens files itself gets through; the egress
+gate covers that. For OS-level blocking of the secret paths, see the sandbox step in docs/setup.md."""
     if harness == "codex":
         return f"""Codex CLI: route reads of secret files through safe_read
 
@@ -168,8 +183,12 @@ sandbox.filesystem.denyRead (see docs/setup.md)."""
 
    {AGENT_NOTE}
 
-3. Check: `codex mcp list` shows harpocrates enabled. In a repo with a .env,
-   `codex sandbox -- cat .env` prints "Operation not permitted".
+3. Trust the hook: start `codex`, type /hooks, review the Harpocrates PreToolUse hook and trust it.
+   Codex runs a new or changed hook only after this review.
+
+4. Check: `codex mcp list` shows harpocrates enabled. In a repo with a .env,
+   `codex sandbox -- cat .env` prints "Operation not permitted", and asking Codex to show
+   config files that hold a token gets the hook's refusal and a safe_read retry.
 
 Limit: the profile applies to sandboxed commands only. Running with sandbox_mode = "danger-full-access"
 or --dangerously-bypass-approvals-and-sandbox turns it off."""

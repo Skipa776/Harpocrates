@@ -60,6 +60,10 @@ def test_fr_read_03_claude_code_denies_every_sensitive_path() -> None:
     for d in SENSITIVE_HOME_DIRS:
         assert f"Read({d}/**)" in deny, d
     assert set(cfg["permissions"]["allow"]) == {"mcp__harpocrates__safe_read", "mcp__harpocrates__safe_grep"}
+    (entry,) = cfg["hooks"]["PreToolUse"]
+    assert entry["matcher"] == "Read|Grep|Bash"
+    assert entry["hooks"][0]["command"].endswith("-m Harpocrates.hooks")
+    assert "timeout" not in entry["hooks"][0]  # a timed-out hook allows the call; keep Claude's 600 s
     command, args = mcp_server()
     assert args == ["-m", "Harpocrates.mcp.server"] and Path(command).exists()
 
@@ -74,6 +78,8 @@ def test_fr_read_03_codex_denies_every_sensitive_path() -> None:
     for name in SENSITIVE_FILES:
         assert roots[f"**/{name}"] == "deny", name
     assert cfg["mcp_servers"]["harpocrates"]["args"] == ["-m", "Harpocrates.mcp.server"]
+    (entry,) = cfg["hooks"]["PreToolUse"]
+    assert entry["matcher"] == "^Bash$" and entry["hooks"][0]["command"].endswith("-m Harpocrates.hooks")
 
 
 def test_fr_read_03_cli_prints_setup_and_tiers() -> None:

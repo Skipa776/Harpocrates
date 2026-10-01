@@ -8,11 +8,11 @@ Facts about Claude Code and Codex were checked against their documentation on Se
 
 | Layer | Status | Covers |
 | --- | --- | --- |
-| Read tool (`safe_read`, `safe_grep`) | Shipped (M1) | Files the agent reads through it, once [setup](setup.md) denies the built-in reads |
+| Read tool (`safe_read`, `safe_grep`) | Shipped (M1) | Files the agent reads through it, once [setup](setup.md) denies the built-in reads. A content-aware hook also refuses built-in reads and shell reads of any file holding a secret, on Claude Code, and on Codex once you trust the hook in `/hooks`. |
 | Egress gate | M2 | Every request to the provider, including shell output and tool results |
 | Commit scanner | Shipped | Secrets on their way into git |
 
-Until the gate ships, a secret the agent reaches by any route other than `safe_read` goes to the model. That includes `env`, test output, a stack trace, `git log -p`, or a script that prints a file.
+Until the gate ships, a secret the agent reaches by any route other than `safe_read` goes to the model. That includes a script that opens files itself, a path built from shell variables, and, on Codex before you trust the hook, any ordinarily named file that holds a token. That includes `env`, test output, a stack trace, `git log -p`, or a script that prints a file.
 
 ## Residual risk 1: other exfiltration channels
 
