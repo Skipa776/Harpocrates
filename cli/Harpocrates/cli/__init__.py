@@ -421,6 +421,25 @@ def version() -> None:
 
 
 @app.command()
+def setup(
+    harness: Optional[str] = typer.Argument(
+        None, help="claude-code or codex: print its read-tool setup. Omit to list detected harnesses."
+    ),
+) -> None:
+    """Show each detected agent harness's support tier, or print one harness's setup."""
+    from Harpocrates.harness import detect, setup_instructions, tier_report
+
+    if harness is None:
+        typer.echo(tier_report(detect()))
+        return
+    try:
+        typer.echo(setup_instructions(harness))  # plain echo: rich would eat [toml] tables as markup
+    except ValueError as exc:
+        typer.echo(f"✗ {exc}", err=True)  # plain: the message echoes user input
+        raise typer.Exit(code=2) from exc
+
+
+@app.command()
 def train(
     data: Path = typer.Argument(..., help="Path to training data JSONL file"),
     output: Optional[Path] = typer.Option(

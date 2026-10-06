@@ -37,6 +37,7 @@ class VerificationResult:
     combined_confidence: float  # Weighted combination
     features_used: Optional[Dict[str, float]] = None  # Feature values
     explanation: Optional[str] = None  # Human-readable reason
+    calibrated: Optional[float] = None  # P(secret) after the validation-fit map (FR-CORE-03)
 
     @property
     def confidence_delta(self) -> float:

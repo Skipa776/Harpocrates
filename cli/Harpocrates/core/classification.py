@@ -34,6 +34,7 @@ class ViolationCategory(Enum):
     OPENAI_KEY = "openai_key"
     ANTHROPIC_KEY = "anthropic_key"
     GCP_KEY = "gcp_key"
+    AZURE_KEY = "azure_key"
     NPM_TOKEN = "npm_token"
     PYPI_TOKEN = "pypi_token"
     PRIVATE_KEY = "private_key"
@@ -63,9 +64,10 @@ class ViolationCategory(Enum):
 # FR-CORE-02: the six secret types every layer reports (placeholders, logs, blocks).
 SECRET_TYPES = ("cloud_key", "api_token", "db_credential", "private_key", "password", "generic")
 _SECRET_TYPE_BY_CATEGORY = {
-    "aws_key": "cloud_key", "gcp_key": "cloud_key", "databricks_token": "cloud_key",
+    "aws_key": "cloud_key", "gcp_key": "cloud_key", "azure_key": "cloud_key", "databricks_token": "cloud_key",
     "connection_string": "db_credential",
-    "private_key": "private_key", "ssh_key": "private_key", "crypto_key": "private_key",
+    "private_key": "private_key", "ssh_key": "private_key",
+    "crypto_key": "generic",  # symmetric or hex key material: not an asymmetric private key
     "password": "password",
     "generic_secret": "generic",
 }
@@ -143,7 +145,9 @@ _SIGNATURE_TO_CATEGORY: dict[str, ViolationCategory] = {
 # via re.search() is safe here because the input is a single programming
 # identifier, not free prose.
 _VAR_NAME_LEXICON: Tuple[Tuple[re.Pattern, ViolationCategory, float], ...] = (
-    (re.compile(r"(?i)(?:private|signing|encryption|hmac|aes|rsa|ec)_?key"),
+    (re.compile(r"(?i)(?:private|rsa)_?key"),
+     ViolationCategory.PRIVATE_KEY, 0.85),
+    (re.compile(r"(?i)(?:signing|encryption|hmac|aes|ec)_?key"),
      ViolationCategory.CRYPTO_KEY, 0.85),
     (re.compile(r"(?i)(?:db|database|pg|mysql|mongo|redis|amqp|mq)_?(?:url|conn(?:ection)?|str(?:ing)?)"),
      ViolationCategory.CONNECTION_STRING, 0.90),
@@ -220,8 +224,22 @@ _HEX40_RE = re.compile(r"^[a-f0-9]{40}$")
 _HEX64_RE = re.compile(r"^[a-f0-9]{64}$")
 
 
+# Public provider formats with no detection regex of their own (the ML layer catches them). A match is
+# decisive: 0.99 beats any var name, so `password = "github_pat_..."` still reports a GitHub token.
+_PROVIDER_FORMATS: Tuple[Tuple[re.Pattern, ViolationCategory, str], ...] = (
+    (re.compile(r"^github_pat_\w{22,}$"), ViolationCategory.GITHUB_TOKEN, "github_fine_grained_pat"),
+    (re.compile(r"^do[opr]_v1_[a-f0-9]{64}$"), ViolationCategory.API_TOKEN, "digitalocean_token"),
+    (re.compile(r"^hv[sbr]\.[\w-]{20,}$"), ViolationCategory.VAULT_TOKEN, "vault_token"),
+    (re.compile(r"^(?:AC|SK)[a-f0-9]{32}$"), ViolationCategory.TWILIO_KEY, "twilio_sid"),
+    (re.compile(r"^[MNO][\w-]{23,25}\.[\w-]{6}\.[\w-]{27,38}$"), ViolationCategory.API_TOKEN, "discord_bot_token"),
+)
+
+
 def _classify_by_value(token: str) -> Optional[CategoryInference]:
     """Layer 3: structural signal from the token value itself."""
+    for pattern, category, name in _PROVIDER_FORMATS:
+        if pattern.match(token):
+            return CategoryInference(category, _reason("value_structure", name, 0.99), 0.99)
     # JWT — three base64url segments separated by dots (full token)
     if token.startswith("eyJ") and token.count(".") == 2:
         return CategoryInference(
@@ -282,6 +300,52 @@ def _classify_by_value(token: str) -> Optional[CategoryInference]:
 
 
 # ---------------------------------------------------------------------------
+# Layer 4: the token is a piece of a connection string on its line
+# ---------------------------------------------------------------------------
+
+_AZURE_CONN_RE = re.compile(r"(?i)(?:AccountKey|SharedAccessKey|DefaultEndpointsProtocol)\s*=")
+_DB_URI_SCHEME_RE = re.compile(
+    r"(?i)jdbc:|(?:postgres(?:ql)?|mysql|mariadb|rediss?|mongodb(?:\+srv)?|amqps?|rabbitmq|mssql|sqlserver)://"
+)
+_ADO_PASSWORD_RE = re.compile(r"(?i)(?:password|pwd)\s*=")
+_ADO_SERVER_RE = re.compile(r"(?i)(?:server|data source|host|database|initial catalog)\s*=")
+_SEGMENT_CAP = 512  # chars either side of the token; connection strings are far shorter
+
+
+def _segment(line: str, token: str, i: int) -> str:
+    """The string literal holding the token when matching quotes enclose it, else its whitespace-delimited
+    word. ponytail: an escaped quote inside a literal cuts it short; a real string parser if the per-type
+    report shows misses from it."""
+    j = i + len(token)
+    lo, hi = max(0, i - _SEGMENT_CAP), min(len(line), j + _SEGMENT_CAP)
+    left = max(line.rfind(q, lo, i) for q in "\"'`")
+    if left >= 0:
+        right = line.find(line[left], j, hi)
+        if right >= 0:
+            return line[left + 1:right]
+    start = max(line.rfind(" ", lo, i), line.rfind("\t", lo, i)) + 1
+    stop = min((k for k in (line.find(" ", j, hi), line.find("\t", j, hi)) if k >= 0), default=hi)
+    return line[max(start, lo):stop]
+
+
+def _classify_by_line(line: str, token: str) -> Optional[CategoryInference]:
+    """Layer 4: the string holding the token is a connection string (a password inside a JDBC URL, an
+    AccountKey inside an Azure storage string). Linear time: the read tool scans minified files."""
+    i = line.find(token)
+    if i < 0:
+        return None
+    seg = _segment(line, token, i)
+    if _AZURE_CONN_RE.search(seg):
+        return CategoryInference(ViolationCategory.AZURE_KEY,
+                                 _reason("line_context", "azure_connection_string", 0.90), 0.90)
+    if _DB_URI_SCHEME_RE.search(seg) or (";" in seg and _ADO_PASSWORD_RE.search(seg)
+                                         and _ADO_SERVER_RE.search(seg)):
+        return CategoryInference(ViolationCategory.CONNECTION_STRING,
+                                 _reason("line_context", "inside_connection_string", 0.90), 0.90)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -290,6 +354,7 @@ def infer_category(
     signature_name: Optional[str],
     var_name: Optional[str],
     token: str,
+    line: Optional[str] = None,
 ) -> CategoryInference:
     """
     Infer violation category from available signals (three-layer heuristic).
@@ -300,6 +365,8 @@ def infer_category(
         var_name: The left-hand-side variable name (e.g., 'database_password').
             None when the token has no associated LHS variable.
         token: The raw detected token value.
+        line: The source line, when known. A token inside a connection string on it is reported
+            as that connection string's type unless its own value is decisive (FR-CORE-02).
 
     Returns:
         CategoryInference with category, reason, and confidence.
@@ -312,6 +379,13 @@ def infer_category(
             confidence=1.0,
         )
 
+    inference = _infer_from_name_and_value(var_name, token)
+    if line and inference.confidence < 0.99:
+        return _classify_by_line(line, token) or inference
+    return inference
+
+
+def _infer_from_name_and_value(var_name: Optional[str], token: str) -> CategoryInference:
     # Layer 2: variable name lexicon.
     var_match: Optional[CategoryInference] = None
     if var_name:
@@ -330,7 +404,8 @@ def infer_category(
 
     # Combine: value structure wins decisively only when confidence delta > 0.1.
     if var_match and value_match:
-        if value_match.confidence > var_match.confidence + 0.1:
+        # A provider format or PEM header (0.99) is decisive whatever the variable is called.
+        if value_match.confidence >= 0.99 or value_match.confidence > var_match.confidence + 0.1:
             return value_match
         # Both fired — report the var_name category with combined reason.
         combined_reason = (
