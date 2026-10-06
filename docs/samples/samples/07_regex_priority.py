@@ -11,11 +11,11 @@
 #   severity: "critical"        (CRITICAL tier)
 #          or "severity: "high" (HIGH tier)
 #
-# No --ml flag needed — the regex pass runs unconditionally on every scan.
+# The regex pass runs unconditionally on every scan.
 # This file also has NO ML findings by design: all tokens match a hard
 # regex pattern before the entropy gate is ever reached.
 #
-# EXPECTED FINDINGS (no --ml needed):
+# EXPECTED FINDINGS:
 #   Line 28  AWS_ACCESS_KEY_ID   → CRITICAL, category: aws_key
 #   Line 31  GITHUB_PAT          → CRITICAL, category: github_token
 #   Line 34  SLACK_BOT_TOKEN     → CRITICAL, category: slack_token

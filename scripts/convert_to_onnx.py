@@ -13,7 +13,7 @@ Usage:
     python scripts/convert_to_onnx.py
     python scripts/convert_to_onnx.py --model-dir /path/to/models
 
-Requirements (pip install harpocrates[ml]):
+Requirements (pip install 'harpocrates[train]'):
     xgboost>=2.0.0, onnxmltools>=1.12.0, skl2onnx>=0.5.0
 """
 
@@ -54,7 +54,7 @@ def convert_xgboost(model_path: Path, output_path: Path, n_features: int) -> Non
         )
         from xgboost import XGBClassifier
     except ImportError as e:
-        print(f"ERROR: {e}\nInstall: pip install 'harpocrates[ml]' onnxmltools skl2onnx")
+        print(f"ERROR: {e}\nInstall: pip install 'harpocrates[train]'")
         sys.exit(1)
 
     clf = XGBClassifier()

@@ -621,7 +621,7 @@ def main() -> None:
     try:
         import xgboost  # noqa: F401
     except ImportError as e:
-        print("Error: Missing ML dependency. Install with: pip install harpocrates[ml]")
+        print("Error: Missing ML dependency. Install with: pip install 'harpocrates[train]'")
         print(f"Details: {e}")
         sys.exit(1)
 

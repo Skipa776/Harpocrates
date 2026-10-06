@@ -22,7 +22,7 @@ def test_wheel_installs_with_ml_pipeline() -> None:
     Fails if:
     - package-data is missing from pyproject.toml (models not bundled)
     - model paths resolve relative to source tree instead of installed package
-    - ML dependencies (xgboost, lightgbm) are absent from wheel metadata
+    - onnxruntime is absent from wheel metadata
     """
     # Step 1: Build wheel
     build_result = subprocess.run(
@@ -72,7 +72,6 @@ def test_wheel_installs_with_ml_pipeline() -> None:
             [
                 str(harpo), "scan",
                 str(FIXTURE),
-                "--ml",
                 "--ml-threshold", "0.19",
             ],
             capture_output=True,
@@ -80,7 +79,7 @@ def test_wheel_installs_with_ml_pipeline() -> None:
         )
 
         # Step 6: ML pipeline must be active (bundled models loaded)
-        assert "ML verification enabled" in result.stdout, (
+        assert "ML model could not be loaded" not in result.stderr, (
             f"ML pipeline not active after wheel install. "
             f"Models may be missing from wheel.\n"
             f"stdout: {result.stdout!r}\n"

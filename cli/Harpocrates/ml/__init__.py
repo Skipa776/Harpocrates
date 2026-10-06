@@ -1,14 +1,9 @@
-"""
-ML-based secrets verification module for Harpocrates.
-
-This module provides context-aware detection using XGBoost to distinguish
-between true secrets and false positives (e.g., Git SHAs, UUIDs).
-"""
+"""ML verification: features, code context, and the shipped ONNX model (onnx_verifier.OnnxVerifier)."""
 from __future__ import annotations
 
 from Harpocrates.ml.context import CodeContext, extract_context
 from Harpocrates.ml.features import FeatureVector, extract_features
-from Harpocrates.ml.verifier import VerificationResult, XGBoostVerifier
+from Harpocrates.ml.verifier import VerificationResult
 
 __all__ = [
     "CodeContext",
@@ -16,5 +11,4 @@ __all__ = [
     "FeatureVector",
     "extract_features",
     "VerificationResult",
-    "XGBoostVerifier",
 ]
