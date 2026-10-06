@@ -62,6 +62,7 @@ def _validate_model_config(
         )
     platt_a = finite_number("platt_a", 0.0)
     platt_b = finite_number("platt_b", 0.0)
+    _calibration_map(config)
     feature_count = config.get("feature_count")
     if feature_count is not None and (type(feature_count) is not int or feature_count <= 0):
         raise OnnxModelSchemaError("model_config.json 'feature_count' must be a positive integer")
@@ -116,6 +117,39 @@ def _validate_model_schema(session, configured_feature_count: Optional[int]) -> 
             "Re-run scripts/convert_to_onnx.py."
         )
     return model_width
+
+
+def _calibration_map(config: dict[str, Any]) -> Optional[Tuple[List[float], List[float]]]:
+    """Isotonic map raw score -> P(secret), fit on validation (FR-CORE-03). None reports raw scores."""
+    cal = config.get("calibration")
+    if cal is None:
+        return None
+    if not isinstance(cal, dict):
+        raise OnnxModelSchemaError("model_config.json 'calibration' must be an object with 'x' and 'y'")
+    if config.get("platt_a", 0.0) or config.get("platt_b", 0.0):
+        # The map is fit on the raw score; stacking it on a Platt-scaled score would be wrong.
+        raise OnnxModelSchemaError("model_config.json 'calibration' cannot be combined with Platt scaling")
+    xs, ys = cal.get("x"), cal.get("y")
+    ok = (
+        isinstance(xs, list) and isinstance(ys, list) and len(xs) == len(ys) >= 2
+        and all(type(v) in (int, float) and 0.0 <= v <= 1.0 for v in xs + ys)
+        and xs[0] == 0.0 and xs[-1] == 1.0
+        and all(a < b for a, b in zip(xs, xs[1:])) and all(a <= b for a, b in zip(ys, ys[1:]))
+    )
+    if not ok:
+        raise OnnxModelSchemaError(
+            "model_config.json 'calibration' must map [0, 1] to [0, 1] with increasing x "
+            "and non-decreasing y of equal length"
+        )
+    return [float(v) for v in xs], [float(v) for v in ys]
+
+
+def _calibrate(prob: float, cal: Optional[Tuple[List[float], List[float]]]) -> Optional[float]:
+    if cal is None:
+        return None
+    import numpy as np
+
+    return float(np.interp(prob, cal[0], cal[1]))
 
 
 def _apply_platt(raw_prob: float, a: float, b: float) -> float:
@@ -197,6 +231,7 @@ class OnnxVerifier(Verifier):
         self._threshold_high = _DEFAULT_THRESHOLD_HIGH
         self._platt_a = 0.0
         self._platt_b = 0.0
+        self._calibration: Optional[Tuple[List[float], List[float]]] = None
 
         if not lazy_load:
             self._load_session()
@@ -255,6 +290,7 @@ class OnnxVerifier(Verifier):
             self._platt_b,
             config_width,
         ) = _validate_model_config(config)
+        self._calibration = _calibration_map(config)
         if self._layer is not None:
             self._threshold_low = _layer_threshold(config, self._layer, self._threshold_high)
         self._session = ort.InferenceSession(model_bytes)
@@ -317,6 +353,7 @@ class OnnxVerifier(Verifier):
 
         features = extract_features(finding, context)
         is_secret, ml_confidence, routing = self._route(features)
+        prob = ml_confidence if is_secret else 1.0 - ml_confidence
 
         original_confidence = finding.confidence or 0.5
         combined_confidence = self._combine_confidence(
@@ -333,6 +370,7 @@ class OnnxVerifier(Verifier):
             combined_confidence=combined_confidence,
             features_used=dict(zip(FeatureVector.get_feature_names(), features.to_array())),
             explanation=explanation,
+            calibrated=_calibrate(prob, self._calibration),
         )
 
     def verify_batch(
@@ -379,6 +417,7 @@ class OnnxVerifier(Verifier):
                         )
                     ),
                     explanation=f"{label} ({ml_confidence:.0%} confidence) [ONNX/{routing}]",
+                    calibrated=_calibrate(prob, self._calibration),
                 )
             )
         return results

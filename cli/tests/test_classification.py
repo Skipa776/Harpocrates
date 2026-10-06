@@ -330,3 +330,64 @@ def test_finding_str_includes_category() -> None:
     s = str(f)
     assert "[password]" in s
     assert "ML_CANDIDATE" in s
+
+
+# ---------------------------------------------------------------------------
+# FR-CORE-02: provider formats and connection-string context decide the type
+# (all values are generated shapes, not real credentials)
+# ---------------------------------------------------------------------------
+
+def test_fr_core_02_provider_prefix_beats_var_name() -> None:
+    from Harpocrates.core.classification import secret_type
+
+    cases = {
+        "github_pat_" + "A1b2C3d4E5" * 8: "github_token",
+        "dop_v1_" + "ab12" * 16: "api_token",
+        "hvs." + "Qx7Lm2Pz9Rt4Vw8Ks3Nd5Hy1": "vault_token",
+        "AC" + "0f1e2d3c" * 4: "twilio_key",
+        "MTk4NjIyNDgzNDcxOTI1MjQ4" + ".Gx1yZ2." + "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW": "api_token",
+    }
+    for token, category in cases.items():
+        inf = infer_category(signature_name=None, var_name="password", token=token)
+        assert inf.category.value == category, token[:12]
+    # A Twilio SID is an API credential, never a private key.
+    assert secret_type(infer_category(signature_name=None, var_name=None, token="AC" + "0f1e2d3c" * 4)
+                       .category.value) == "api_token"
+
+
+def test_fr_core_02_piece_of_connection_string_is_db_credential() -> None:
+    pw = "Zq8vLm2Rt5Wx"
+    for line in (f'url = "jdbc:postgresql://db:5432/app?user=app&password={pw}"',
+                 f'cs = "Server=db;Database=app;User Id=app;Password={pw};"',
+                 f'DATABASE_URL="postgres://app:{pw}@db:5432/app"'):
+        inf = infer_category(signature_name=None, var_name=None, token=pw, line=line)
+        assert inf.category == ViolationCategory.CONNECTION_STRING, line
+    azure = "DefaultEndpointsProtocol=https;AccountName=acct;AccountKey=" + "Qm9n" * 22 + ";"
+    inf = infer_category(signature_name=None, var_name=None, token="Qm9n" * 22, line=azure)
+    assert inf.category == ViolationCategory.AZURE_KEY
+    # Without connection-string context, the var name still decides.
+    assert infer_category(signature_name=None, var_name="password", token=pw,
+                          line=f'password = "{pw}"').category == ViolationCategory.PASSWORD
+
+
+def test_fr_core_02_hex_blob_is_not_a_private_key() -> None:
+    from Harpocrates.core.classification import secret_type
+
+    hex_value = "0f1e2d3c" * 4  # a Twilio auth token and an AES-128 key look the same
+    assert secret_type(infer_category(signature_name=None, var_name=None, token=hex_value).category.value) == "generic"
+    assert infer_category(signature_name=None, var_name="RSA_PRIVATE_KEY", token="x" * 20).category == \
+        ViolationCategory.PRIVATE_KEY
+
+
+def test_fr_core_02_line_context_is_linear_and_local() -> None:
+    import time
+
+    tok = "Zq8vLm2Rt5Wx" * 2
+    for line in ("password=a;" * 20000 + f" {tok}", "a" * 200000 + f" {tok}"):
+        start = time.perf_counter()
+        infer_category(signature_name=None, var_name=None, token=tok, line=line)
+        assert time.perf_counter() - start < 1
+    # A DB URI elsewhere on an unquoted line doesn't make an API key a db credential.
+    line = f"DB=postgres://u:p@h/db; API_KEY={tok}"
+    assert infer_category(signature_name=None, var_name="API_KEY", token=tok, line=line).category == \
+        ViolationCategory.API_TOKEN
