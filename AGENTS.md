@@ -9,7 +9,7 @@ Harpocrates Guard is a local security boundary that stops secrets from leaving a
 ## Commands
 
 ```bash
-pip install -e ".[dev,ml,mcp]"
+pip install -e ".[dev,train,mcp]"
 cargo build --release --manifest-path core/Cargo.toml
 python -m pytest -q
 ruff check .

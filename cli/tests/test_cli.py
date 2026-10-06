@@ -427,11 +427,11 @@ def test_cli_partial_scan_error_exits_two(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 2
 
 
-def test_cli_explicit_ml_model_load_failure_exits_two(
+def test_cli_ml_model_load_failure_exits_two(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """--ml must fail closed when its verifier cannot be initialized."""
-    import Harpocrates.ml.ensemble as ensemble
+    """scan must fail closed when the model cannot be loaded."""
+    import Harpocrates.ml.onnx_verifier as onnx_verifier
 
     file_path = tmp_path / "config.txt"
     file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
@@ -439,24 +439,24 @@ def test_cli_explicit_ml_model_load_failure_exits_two(
     def fail_to_load(*args, **kwargs):
         raise RuntimeError("model schema mismatch")
 
-    monkeypatch.setattr(ensemble, "get_verifier", fail_to_load)
+    monkeypatch.setattr(onnx_verifier, "OnnxVerifier", fail_to_load)
 
-    result = runner.invoke(app, ["scan", str(file_path), "--ml"])
+    result = runner.invoke(app, ["scan", str(file_path)])
 
     assert result.exit_code == 2
     assert "model schema mismatch" in result.output
 
 
-def test_cli_explicit_ml_inference_failure_exits_two(
+def test_cli_ml_inference_failure_exits_two(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """--ml must return an error when inference fails during a scan."""
+    """scan must return an error when inference fails."""
     from Harpocrates.core.result import ScanResult
 
     file_path = tmp_path / "config.txt"
     file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
     monkeypatch.setattr(
-        "Harpocrates.ml.ensemble.get_verifier",
+        "Harpocrates.ml.onnx_verifier.OnnxVerifier",
         lambda **kwargs: object(),
     )
     monkeypatch.setattr(
@@ -466,7 +466,7 @@ def test_cli_explicit_ml_inference_failure_exits_two(
         ),
     )
 
-    result = runner.invoke(app, ["scan", str(file_path), "--ml"])
+    result = runner.invoke(app, ["scan", str(file_path)])
 
     assert result.exit_code == 2
     assert "invalid input width" in result.output
@@ -481,7 +481,7 @@ def test_cli_ml_auto_backend_fallback_warning_is_not_fatal(
     file_path = tmp_path / "config.txt"
     file_path.write_text("APP_NAME=Test\n", encoding="utf-8")
     monkeypatch.setattr(
-        "Harpocrates.ml.ensemble.get_verifier",
+        "Harpocrates.ml.onnx_verifier.OnnxVerifier",
         lambda **kwargs: object(),
     )
     monkeypatch.setattr(
@@ -493,7 +493,7 @@ def test_cli_ml_auto_backend_fallback_warning_is_not_fatal(
         ),
     )
 
-    result = runner.invoke(app, ["scan", str(file_path), "--ml"])
+    result = runner.invoke(app, ["scan", str(file_path)])
 
     assert result.exit_code == 0
     assert "used Python fallback" in result.output

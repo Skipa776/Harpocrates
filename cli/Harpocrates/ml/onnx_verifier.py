@@ -62,7 +62,6 @@ def _validate_model_config(
         )
     platt_a = finite_number("platt_a", 0.0)
     platt_b = finite_number("platt_b", 0.0)
-    _calibration_map(config)
     feature_count = config.get("feature_count")
     if feature_count is not None and (type(feature_count) is not int or feature_count <= 0):
         raise OnnxModelSchemaError("model_config.json 'feature_count' must be a positive integer")
