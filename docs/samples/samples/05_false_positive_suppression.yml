@@ -1,5 +1,5 @@
 # Kubernetes / Helm values file — false positive suppression
-# Run: harpocrates scan --ml docs/samples/samples/05_false_positive_suppression.yml
+# Run: harpocrates scan docs/samples/samples/05_false_positive_suppression.yml
 #
 # Before v0.4.0 the ML model had no features distinguishing credentials from
 # file paths, enum constants, host literals, or template placeholders.

@@ -103,7 +103,7 @@ def run_detect_secrets(root: Path, records, placed) -> list[bool]:
 
 
 def run_harpocrates(root: Path, records, placed, model_dir, ml_threshold) -> tuple[list[bool], list[bool]]:
-    """Scan each file as `harpocrates scan --ml` does. Also returns candidate coverage: whether any
+    """Scan each file as `harpocrates scan` does. Also returns candidate coverage: whether any
     raw candidate (before ML) overlaps the labeled token, the recall ceiling for any threshold."""
     from Harpocrates.core.detector import _collect_file_findings, detect_file_with_ml
 

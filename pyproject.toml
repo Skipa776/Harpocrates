@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "harpocrates"
 version = "0.4.3"
-description = "ML-powered secrets detection tool"
+description = "Secrets scanner with a bundled ML model, plus a redacting read tool for AI coding agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -35,43 +35,14 @@ dev = [
     "mypy>=1.0.0",
     "build>=1.0.0",
 ]
-ml = [
-    "xgboost>=2.0.0,<4",
-    "lightgbm>=4.0.0,<5",
-    "scikit-learn>=1.3.0",
-    "numpy>=1.24.0",
-    "pandas>=2.0.0",
-    "onnxmltools>=1.12.0",
-    "skl2onnx>=0.5.0",
-]
-api = [
-    "fastapi>=0.109.0",
-    "uvicorn[standard]>=0.27.0",
-    "pydantic-settings>=2.1.0",
-    "python-multipart>=0.0.6",
-]
 mcp = [
     "mcp>=1.27,<2",
 ]
-llm = [
-    # LLM providers use standard library (urllib) for HTTP
-    # Cloud SDKs are optional - users can install if needed:
-    #   anthropic>=0.18.0  # for Anthropic Claude
-    #   openai>=1.10.0     # for OpenAI GPT
-]
-all = [
+# Model training and export (scripts/train_v11.py, scripts/convert_to_onnx.py). Not needed to scan.
+train = [
     "xgboost>=2.0.0,<4",
-    "lightgbm>=4.0.0,<5",
     "scikit-learn>=1.3.0",
-    "numpy>=1.24.0",
-    "pandas>=2.0.0",
     "onnxmltools>=1.12.0",
-    "skl2onnx>=0.5.0",
-    "fastapi>=0.109.0",
-    "uvicorn[standard]>=0.27.0",
-    "pydantic-settings>=2.1.0",
-    "python-multipart>=0.0.6",
-    "mcp>=1.27,<2",
 ]
 
 [project.scripts]
@@ -98,19 +69,12 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # N803/N806: uppercase X_train/X_val follow sklearn/numpy ML convention
 "cli/Harpocrates/training/train_model.py" = ["N803", "N806"]
-"cli/Harpocrates/training/train_two_stage.py" = ["N803", "N806"]
-"cli/Harpocrates/training/cross_validation.py" = ["N803", "N806"]
-"cli/Harpocrates/training/train.py" = ["N806"]
-"cli/Harpocrates/training/evaluate.py" = ["N806"]
 "cli/Harpocrates/training/generators/generate_data.py" = ["N806"]
 # scripts/ and bench/ are dev-only exploratory tools — ML naming conventions and late imports expected
 "scripts/*.py" = ["N803", "N806", "N812", "E402", "F841"]
 "bench/*.py" = ["N803", "N806", "E402", "F841"]
 # Analysis notebooks: compact exploratory style (setup before imports, one-line statements).
 "bench/*.ipynb" = ["E401", "E402", "E701", "E702", "E731", "E741", "F811", "I001", "N803", "N812", "N816"]  # each round re-imports so it runs on its own
-# E402: intentional late import (optional heavy deps loaded after availability check)
-"cli/Harpocrates/api/main.py" = ["E402"]
-"cli/Harpocrates/ml/ensemble.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["cli/tests"]
@@ -128,7 +92,6 @@ exclude = ["tests*", "examples*", "scripts*", "comparison*"]
 
 [tool.setuptools.package-data]
 "Harpocrates.ml.models" = [
-    "stageA_xgboost.json",
     "model.onnx",
     "model_config.json",
     "onnx_model_hashes.json",

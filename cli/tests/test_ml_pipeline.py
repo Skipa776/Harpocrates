@@ -10,8 +10,6 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from Harpocrates.core.result import EvidenceType, Finding
 from Harpocrates.ml.context import CodeContext
 from Harpocrates.ml.features import FeatureVector, extract_features
@@ -187,15 +185,6 @@ class TestVerifierNoCrash:
 
     def test_verifier_with_various_tokens(self):
         """Test that verifier handles various token types without crashing."""
-        from Harpocrates.ml.verifier import XGBoostVerifier
-
-        # These tests just verify no exceptions are raised
-        # Model may not be trained, so we catch FileNotFoundError
-        try:
-            XGBoostVerifier(lazy_load=True)
-        except (ImportError, FileNotFoundError):
-            pytest.skip("XGBoost or model not available")
-
         tokens = [
             "AKIAIOSFODNN7EXAMPLE",  # AWS-like
             "ghp_1234567890abcdefghij",  # GitHub-like
@@ -259,113 +248,3 @@ class TestVerifierNoCrash:
         # Should not raise
         features = extract_features(finding, context)
         assert len(features.to_array()) == 64
-
-
-class TestCrossValidation:
-    """Tests for cross-validation functionality."""
-
-    def test_stratified_k_fold_split(self):
-        """Test that stratified split maintains class balance."""
-        from Harpocrates.training.cross_validation import stratified_k_fold_split
-        from Harpocrates.training.dataset import Dataset
-
-        # Generate balanced data
-        data = generate_training_data(count=100, balance=0.5, seed=42)
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-            for record in data:
-                f.write(json.dumps(record) + "\n")
-            temp_path = Path(f.name)
-
-        try:
-            dataset = Dataset.from_jsonl(temp_path)
-            folds = stratified_k_fold_split(dataset, k=5, seed=42)
-
-            assert len(folds) == 5
-
-            for train_ds, val_ds in folds:
-                # Each fold should have data
-                assert len(train_ds) > 0
-                assert len(val_ds) > 0
-
-                # Combined should equal original
-                assert len(train_ds) + len(val_ds) == len(dataset)
-        finally:
-            temp_path.unlink()
-
-
-class TestEnsembleVerifier:
-    """Tests for ensemble verifier."""
-
-    def test_ensemble_config_defaults(self):
-        """Test ensemble config has sensible defaults."""
-        from Harpocrates.ml.ensemble import EnsembleConfig, EnsembleStrategy
-
-        config = EnsembleConfig()
-
-        assert config.xgboost_weight == 0.6
-        assert config.lightgbm_weight == 0.4
-        assert config.strategy == EnsembleStrategy.WEIGHTED_AVERAGE
-        assert config.xgboost_weight + config.lightgbm_weight == 1.0
-
-    def test_ensemble_strategy_enum(self):
-        """Test ensemble strategy options."""
-        from Harpocrates.ml.ensemble import EnsembleStrategy
-
-        strategies = list(EnsembleStrategy)
-        assert len(strategies) == 4
-        assert EnsembleStrategy.WEIGHTED_AVERAGE in strategies
-        assert EnsembleStrategy.SOFT_VOTING in strategies
-        assert EnsembleStrategy.HARD_VOTING in strategies
-        assert EnsembleStrategy.MAX_CONFIDENCE in strategies
-
-
-class TestLightGBMVerifier:
-    """Tests for LightGBM verifier."""
-
-    def test_lightgbm_verifier_singleton(self):
-        """Test LightGBM verifier singleton pattern."""
-        from Harpocrates.ml.lightgbm_verifier import LightGBMVerifier
-
-        # Reset any existing instance
-        LightGBMVerifier.reset_instance()
-
-        try:
-            v1 = LightGBMVerifier.get_instance()
-            v2 = LightGBMVerifier.get_instance()
-            assert v1 is v2
-        except (ImportError, FileNotFoundError):
-            pytest.skip("LightGBM or model not available")
-        finally:
-            LightGBMVerifier.reset_instance()
-
-    def test_lightgbm_threshold_property(self):
-        """Test threshold property."""
-        from Harpocrates.ml.lightgbm_verifier import LightGBMVerifier
-
-        verifier = LightGBMVerifier(threshold=0.7, lazy_load=True)
-        assert verifier.threshold == 0.7
-
-
-class TestTrainingFunctions:
-    """Tests for training module functions."""
-
-    def test_train_model_import(self):
-        """Test training functions can be imported."""
-        try:
-            from Harpocrates.training.train import (  # noqa: F401
-                save_model,
-                train_ensemble,
-                train_lightgbm_model,
-                train_model,
-            )
-        except ImportError:
-            pytest.skip("ML dependencies not available")
-
-    def test_model_types_constant(self):
-        """Test MODEL_TYPES constant exists."""
-        from Harpocrates.training.train import MODEL_TYPES
-
-        assert "xgboost" in MODEL_TYPES
-        assert "lightgbm" in MODEL_TYPES
-        assert "ensemble" in MODEL_TYPES

@@ -1,6 +1,6 @@
 // Java Spring Boot config class — explainability demo
 // Run: harpocrates scan --explain docs/samples/samples/06_explain_demo.java
-// Requires: pip install harpocrates[ml]
+// Requires: pip install "harpocrates[train]"
 //
 // --explain outputs JSON with per-feature TreeSHAP contributions showing
 // which model features drove each ML detection decision.

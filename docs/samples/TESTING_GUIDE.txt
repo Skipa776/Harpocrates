@@ -11,10 +11,9 @@ Sample files live in docs/samples/samples/ and span multiple languages to
 reflect real-world use cases. Harpocrates scans any file regardless of
 extension. Run any sample with:
 
-  harpocrates scan docs/samples/samples/<file>
-  harpocrates scan --ml docs/samples/samples/<file>      # adds ML verification pass
+  harpocrates scan docs/samples/samples/<file>      # regex, entropy and the ML model
   harpocrates scan --json docs/samples/samples/<file>    # machine-readable output
-  harpocrates scan --explain docs/samples/samples/<file> # XAI contributions (requires [ml])
+  harpocrates scan --explain docs/samples/samples/<file> # XAI contributions (requires xgboost: pip install "harpocrates[train]")
 
 Sample files and their languages:
   01_severity_calibration.env     — dotenv / deployment config
@@ -43,7 +42,7 @@ WHAT CHANGED:
   (e.g., a full AWS access key or GitHub PAT in exact format).
 
 WHAT TO VERIFY:
-  harpocrates scan --ml docs/samples/samples/01_severity_calibration.env
+  harpocrates scan docs/samples/samples/01_severity_calibration.env
 
   EXPECTED FINDINGS:
     Line 14  APIM_CLIENT_KEY   → severity: MEDIUM, category: api_token
@@ -180,9 +179,9 @@ WHAT CHANGED:
   These features feed the ML model, suppressing false positives at inference.
 
 WHAT TO VERIFY:
-  harpocrates scan --ml docs/samples/samples/05_false_positive_suppression.yml
+  harpocrates scan docs/samples/samples/05_false_positive_suppression.yml
 
-  EXPECTED (with --ml flag for full ML verification pass):
+  EXPECTED:
     Line  3  key_path = "/etc/ssl/server.key"     → INFO  (file path)
     Line  4  AUTHENTICATED = "authenticated"       → INFO  (lowercase word)
     Line  5  host = "0.0.0.0"                     → INFO  (host literal)
@@ -194,9 +193,8 @@ WHAT TO VERIFY:
     - They may still appear at INFO (tool is conservative — surfaces then
       lets the user decide) but must not be elevated incorrectly
 
-  NOTE: Without --ml the regex and entropy stages still run; some of these
-  may appear at INFO from the entropy gate. The ML verification pass is
-  what suppresses them to INFO from the pre-v0.4 CRITICAL/HIGH.
+  NOTE: The ML model, which runs on every scan, is what suppresses these
+  to INFO from the pre-v0.4 CRITICAL/HIGH.
 
 
 =======================================================================
@@ -234,7 +232,7 @@ WHAT CHANGED:
   Token-derived feature values (token_length, token_entropy, etc.) are
   serialized as null to prevent reconstruction of the redacted token.
 
-  Requires: pip install harpocrates[ml]
+  Requires: pip install "harpocrates[train]"
 
 WHAT TO VERIFY:
   harpocrates scan --explain docs/samples/samples/06_explain_demo.java
@@ -319,7 +317,7 @@ WHAT THIS DEMONSTRATES:
   The ML model is NOT involved at all for these lines.
 
   This file covers all 14 built-in patterns across 9 CRITICAL and 5 HIGH
-  signatures. No --ml flag needed — regex runs on every scan unconditionally.
+  signatures. Regex runs on every scan unconditionally.
 
 WHAT TO VERIFY:
   harpocrates scan docs/samples/samples/07_regex_priority.py
@@ -362,7 +360,6 @@ WHAT TO VERIFY:
     - ALL findings have evidence: "regex" (none should be "entropy" or "ml")
     - 9 findings are CRITICAL (one per CRITICAL signature)
     - 6 findings are HIGH (5 HIGH signatures + 1 overlap — see note below)
-    - No --ml flag was needed to produce these findings
 
   NOTE ON FINDING COUNT:
     The Anthropic key (sk-ant-api03-...) produces TWO findings:
@@ -377,16 +374,12 @@ WHAT TO VERIFY:
 =======================================================================
 KNOWN LIMITATIONS (not bugs)
 =======================================================================
-- File paths and enum values may still appear at INFO severity without
-  the --ml flag, because the regex/entropy stages don't use value-shape
-  features. Always use --ml for production scans.
-
 - The --explain flag bypasses the standard table output and emits JSON
   only. It cannot be combined with --json or --output flags.
 
 - Explanation is only available for ML-stage findings. Regex-tier
   CRITICAL findings always have "explanation": null.
 
-- The xgboost[ml] extra is required for --explain and
+- xgboost (the [train] extra) is required for --explain and
   include_contributions=True. Running without it gives a clear error:
-    "✗ --explain requires XGBoost. Install with: pip install harpocrates[ml]"
+    "✗ --explain requires xgboost: pip install xgboost"

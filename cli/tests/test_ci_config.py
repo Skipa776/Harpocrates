@@ -11,7 +11,7 @@ def test_mcp_extras_remain_on_the_v1_api() -> None:
     """The server imports FastMCP from the v1-only module path."""
     project = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert project.count('"mcp>=1.27,<2"') == 2
+    assert project.count('"mcp>=1.27,<2"') == 1  # the [mcp] extra; [all] is gone
 
 
 def test_workflows_use_node24_actions() -> None:

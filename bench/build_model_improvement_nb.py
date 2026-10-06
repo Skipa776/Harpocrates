@@ -145,7 +145,7 @@ plt.tight_layout(); plt.show()"""),
 """),
     md("""## 3. Speed: where does scan time go?
 
-Profile the full `detect_file_with_ml` path (the CLI's `scan --ml`) over files sampled from the OSS test-split repos, using the gate model."""),
+Profile the full `detect_file_with_ml` path (the CLI's `scan`) over files sampled from the OSS test-split repos, using the gate model."""),
     code("""import cProfile, pstats, random, csv
 sys.path.insert(0, str(ROOT / "bench"))
 from bench.eval_detector import _onnx_verifier

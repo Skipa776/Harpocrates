@@ -241,7 +241,7 @@ def _load_booster(model_path: Optional[Path]) -> "xgb.Booster":
         if not path.exists():
             raise FileNotFoundError(
                 f"TreeSHAP requires {path}. "
-                "Reinstall with `pip install harpocrates[ml]` or rebuild via "
+                "Reinstall with `pip install harpocrates` or rebuild via "
                 "`python -m Harpocrates.training.train_model`."
             )
 

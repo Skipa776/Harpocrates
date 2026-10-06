@@ -8,7 +8,7 @@ Every dataset used to train, validate, or benchmark the Harpocrates detector. Al
 - 64 features, with the 10 variable-name features zeroed in training;
 - depth 7, 600 trees, monotonic constraints.
 
-`xgboost_model.json` is the same model (used by `--explain`). `stageA_xgboost.json`, the native fallback when ONNX cannot load, is still the v0.4 model. The previous shipped model (v1.1, model v16) is archived locally as `data/models/v16.json`.
+`xgboost_model.json` is the same model (used by `--explain`). There is no native fallback: if the ONNX model cannot load, `harpocrates scan` exits 2. The previous shipped model (v1.1, model v16) is archived locally as `data/models/v16.json`.
 
 **How it was trained:** `scripts/train_v11.py --pipeline-features` on **scanner candidates**. The scanner's own extraction runs over each record, and each candidate is labeled by overlap with the true secret. The training data is:
 - 94,183 candidate rows from the three training files below;

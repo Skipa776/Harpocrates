@@ -28,7 +28,7 @@ Usage:
     python scripts/generate_synthetic_data.py --max-concurrent 8
 
 Requirements:
-    pip install harpocrates[ml] aiohttp tqdm
+    pip install "harpocrates[train]" aiohttp tqdm
 """
 from __future__ import annotations
 
