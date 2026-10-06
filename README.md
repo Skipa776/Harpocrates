@@ -83,13 +83,6 @@ pip install harpocrates            # the scanner CLI (ML model included)
 harpocrates scan .
 ```
 
-PyPI currently has v0.4.3, which ships the older v0.4 model and still needs `--ml`. Until v1.2 is released, install this repository to get what this README describes:
-
-```bash
-pip install "git+https://github.com/Skipa776/Harpocrates"
-# or, from a clone: pip install -e .
-```
-
 Optional read tool for AI agents:
 
 ```bash
@@ -105,7 +98,7 @@ Pre-commit hook — add to `.pre-commit-config.yaml`, then run `pre-commit insta
 ```yaml
 repos:
   - repo: https://github.com/Skipa776/Harpocrates
-    rev: v0.4.3
+    rev: v1.2.0
     hooks:
       - id: harpocrates
 ```
@@ -130,7 +123,7 @@ Placeholders: each session uses its own random key, the same secret gets the sam
 
 ## Past versions
 
-- **v1.2** (model v17, this repo; unreleased on PyPI — the current PyPI release ships the v0.4 model): higher recall, read tool for AI agents, calibrated confidence. `--ml` was removed so the model always runs (drop `--ml` from scripts and pre-commit `args`; it is now an error); the REST API, LLM verifier, and legacy training CLI were removed.
+- **v1.2.0** (model v17): higher recall, read tool for AI agents, calibrated confidence. `--ml` was removed so the model always runs (drop `--ml` from scripts and pre-commit `args`; it is now an error); the REST API, LLM verifier, and legacy training CLI were removed.
 - **v0.4:** redesigned 64-feature vector, TreeSHAP `--explain`, severity calibration.
 - **v0.3:** retrained on 62k samples, comment scanning, violation categories.
 - **v0.2:** XGBoost + ONNX model, MCP server, pre-commit hook.
