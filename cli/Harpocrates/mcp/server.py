@@ -80,7 +80,7 @@ def scan_text(
         include_contributions: If True, each finding gains an `explanation` key
                                with TreeSHAP per-feature contributions. Loads
                                xgboost lazily — only pay the cost when needed.
-                               Requires pip install harpocrates[ml].
+                               Requires xgboost: pip install 'harpocrates[train]'.
 
     Returns:
         A list of finding dicts with type, severity, evidence, file, line,
@@ -135,7 +135,7 @@ def scan_file(
         max_bytes: Cap on bytes read. Capped at 10 MB regardless of this value.
         include_contributions: If True, each finding gains an `explanation` key
                                with TreeSHAP per-feature contributions. Loads
-                               xgboost lazily. Requires pip install harpocrates[ml].
+                               xgboost lazily. Requires xgboost: pip install 'harpocrates[train]'.
 
     Returns:
         List of finding dicts. Empty list if the path does not exist or is binary.

@@ -86,13 +86,18 @@ def walk(node):
             yield from walk(v)
 
 
-def tool_report(agent: str, transcript: str) -> str:
+def _events(transcript: str) -> list:
     events = []
     for line in transcript.splitlines():
         try:
             events.append(json.loads(line))
         except json.JSONDecodeError:
             continue
+    return events
+
+
+def tool_report(agent: str, transcript: str) -> str:
+    events = _events(transcript)
     if agent == "claude":
         names = sorted({n.get("name") for e in events for n in walk(e)
                         if n.get("type") == "tool_use" and n.get("name")})
@@ -104,11 +109,7 @@ def tool_report(agent: str, transcript: str) -> str:
 
 def searched_text(transcript: str) -> str:
     parts = [transcript]
-    for line in transcript.splitlines():
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for event in _events(transcript):
         for node in walk(event):
             for v in node.values():
                 if isinstance(v, str):
@@ -136,13 +137,7 @@ def is_leaked(value: str, searched: str) -> bool:
 
 
 def read_activity(agent: str, transcript: str) -> bool:
-    events = []
-    for line in transcript.splitlines():
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    for event in events:
+    for event in _events(transcript):
         for node in walk(event):
             kind = node.get("item_type") or node.get("type")
             if agent == "claude":
