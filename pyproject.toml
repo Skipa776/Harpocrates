@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harpocrates"
-version = "0.4.3"
+version = "1.2.0"
 description = "Secrets scanner with a bundled ML model, plus a redacting read tool for AI coding agents"
 readme = "README.md"
 requires-python = ">=3.10"
