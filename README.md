@@ -101,6 +101,7 @@ repos:
     rev: v1.2.0
     hooks:
       - id: harpocrates
+        args: ["--ignore", "graphify-out,*.lock"]   # optional
 ```
 
 Usage:
@@ -112,6 +113,20 @@ harpocrates scan ./my_project --fail-on high
 harpocrates scan ./my_project --history
 harpocrates scan ./my_project --engine rust   # needs cargo build --release --manifest-path core/Cargo.toml
 ```
+
+Exclude files and directories with `--ignore`, a comma-separated list:
+
+```bash
+harpocrates scan . --ignore "graphify-out,tests"            # directories by name
+harpocrates scan . --ignore "*.json,*.min.js"               # files by glob
+harpocrates scan . --ignore "graphify-out,*.lock,fixtures"  # both
+```
+
+- A pattern without a wildcard matches a file or directory name exactly, at any depth. `graphify-out` skips that directory wherever it appears.
+- A pattern with `*`, `?` or `[` is a glob matched against each name in the path.
+- Patterns can't contain `/`: `app/static` matches nothing, so use `static`, which skips every directory with that name.
+- Skipped by default: `.git`, `node_modules`, virtual environments, `dist`, `build`, `target`, caches, IDE folders, compiled files, archives and images. Symlinks are never followed.
+- There is no ignore file yet, and `.gitignore` isn't read.
 
 The MCP server listens on stdio (`harpocrates-mcp`, requires Python 3.10+) and exposes four tools:
 
