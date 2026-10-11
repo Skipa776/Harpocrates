@@ -579,3 +579,267 @@ def test_fr_read_03_hook_grep_non_utf8_file_name(repo, capsys, tmp_path: Path) -
         pytest.skip("this file system rejects non-UTF-8 names")
     code, out = _run(_grep_event(tmp_path, "foo"), capsys)
     assert code == 0 and _denied(out)
+
+
+# ---------------------------------------------------------------------- symlinks, .git, stdin readers, heredocs
+
+
+def _plain(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """A directory outside any work tree (git is kept from looking above tmp_path)."""
+    monkeypatch.setattr(hooks, "_GIT_ENV", {**hooks._GIT_ENV, "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)})
+    root = tmp_path / "plain"
+    root.mkdir()
+    (root / "README.md").write_text("nothing here\n")
+    return root
+
+
+@pytest.mark.parametrize("where, target", [("git", "outside"), ("plain", "outside"), ("git", "ignored")])
+def test_fr_read_03_hook_scope_follows_symlinked_directories(repo, capsys, tmp_path: Path,
+                                                             monkeypatch: pytest.MonkeyPatch, where: str,
+                                                             target: str) -> None:
+    """`grep -R`, BSD `grep -S` and `rg -L` follow a link to a directory: so does the scope, always (reading
+    more than the tool would is safe). A listed symlink that points to a directory is walked the same way."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    secret = f"foo\nGITHUB_TOKEN = \"{token}\"\n"
+    if where == "git":
+        root = _git_repo(tmp_path / "w", "junk/\n", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    else:
+        root = _plain(monkeypatch, tmp_path)
+    dest = root / "junk" if target == "ignored" else tmp_path / "outside"
+    dest.mkdir(exist_ok=True)
+    (dest / "notes.txt").write_text(secret)
+    (root / "lnk").symlink_to(dest, target_is_directory=True)
+    for cmd in ("grep -R foo .", "rg -L foo .", "grep -r foo .", "grep -rS foo ."):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and token[:12] not in out, cmd
+
+
+def test_fr_read_03_hook_rg_dash_l_follows_links_and_prints(repo, capsys) -> None:
+    """-L means --files-without-match to grep, ag and ack (names only) but --follow to rg, which prints lines."""
+    root, _ = repo
+    code, out = _run(_bash(root, "rg -L foo ."), capsys)
+    assert code == 0 and _denied(out)
+    for cmd in ("grep -L -r foo .", "grep -L foo README.md", "ag -L foo ."):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+@pytest.mark.parametrize("where", ["git", "plain"])
+def test_fr_read_03_hook_scope_symlink_loop_terminates(repo, capsys, tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch, where: str) -> None:
+    """Links back to a parent, to the root itself, and a pair that point at each other: the walk visits each real
+    directory once, so it returns, and the duplicate paths don't eat the MAX_SCOPE_FILES cap."""
+    if where == "git":
+        root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    else:
+        root = _plain(monkeypatch, tmp_path)
+    (root / "a").mkdir()
+    (root / "a/f.txt").write_text("foo\n")
+    (root / "a/up").symlink_to("..", target_is_directory=True)
+    (root / "self").symlink_to(".", target_is_directory=True)
+    (root / "x").mkdir()
+    (root / "y").mkdir()
+    (root / "x/to_y").symlink_to("../y", target_is_directory=True)
+    (root / "y/to_x").symlink_to("../x", target_is_directory=True)
+    for cmd in ("grep -R foo .", "rg -L foo", "grep -r foo a"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def _repo_with_remote_token(root: Path, token: str) -> Path:
+    root = _git_repo(root, "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    with (root / ".git/config").open("a") as fh:
+        fh.write(f"[remote \"origin\"]\n\turl = https://x:{token}@example.com/r.git\n")
+    return root
+
+
+def test_fr_read_03_hook_git_dir_is_in_scope_for_tools_that_descend(repo, capsys, tmp_path: Path) -> None:
+    """`grep -r .` reads .git/config, which can hold a token in a remote URL. Checked on this machine: grep -r/-R
+    descend into .git; rg does only with --hidden, -. or -uu; git grep never does. The Grep tool is not in play."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _repo_with_remote_token(tmp_path / "w", token)
+    for cmd in ("grep -r foo .", "grep -R foo", "grep -rn foo", "rg --hidden foo", "rg -uu foo .", "rg -. foo",
+                "xargs grep -r foo"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and ".git/config" in out and token[:12] not in out, cmd
+    for cmd in ("git grep foo", "rg foo .", "rg -n foo", "rg -u foo", "grep -n foo src/app.py", "grep -r foo src",
+                "git -C . grep foo"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def test_fr_read_03_hook_git_dir_in_nested_repo_is_in_scope(repo, capsys, tmp_path: Path,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    _, canaries = repo
+    root = _plain(monkeypatch, tmp_path)
+    _repo_with_remote_token(root / "inner", _canary_token(canaries))
+    code, out = _run(_bash(root, "grep -r foo ."), capsys)
+    assert code == 0 and _denied(out) and ".git/config" in out
+
+
+@pytest.mark.parametrize("rel", [".git/objects/ab/cdef", ".git/modules/sub/objects/ab/cdef"])
+def test_fr_read_03_hook_git_dir_objects_stay_out_of_scope(repo, capsys, tmp_path: Path, rel: str) -> None:
+    """Trade-off: .git/objects holds compressed data, and the cap would trip on any real repository, so a search
+    that descends into .git is not checked there."""
+    _, canaries = repo
+    root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(f"GITHUB_TOKEN={_canary_token(canaries)}\n")
+    assert _run(_bash(root, "grep -r foo ."), capsys) == (0, "")
+
+
+def test_fr_read_03_hook_stdin_readers_do_not_scan_the_tree(repo, capsys) -> None:
+    """A grep with no file operand and no recursion reads stdin; so does rg or ag after a pipe."""
+    root, _ = repo
+    for cmd in ("mypy x | grep error:", "echo hi | grep -v foo", "ls | grep -E 'a|b'", "ls | grep -A 3 error:",
+                "ls | grep -e a -e b", "ls | grep -n 'x.*y'", "ls | rg -n foo", "ls | ag foo", "ls | egrep foo",
+                "ls | grep foo -", "ls |& rg foo", "ls | head -3 | grep foo", "ls | rg -g '*.py' foo"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+    for cmd in ("grep -r foo", "grep -R foo", "grep -d recurse foo", "grep --recursive foo", "grep -rn foo",
+                "grep -nr foo", "rg foo", "rg foo | head", "ls | rg foo .", "ls | grep foo .", "ls | grep foo *",
+                "ls | grep foo $(echo x)", "ls | xargs grep foo", "ls | grep -e foo .",
+                "ls && rg foo", "echo x | git grep foo"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+
+
+def test_fr_read_03_hook_search_name_must_be_the_command(repo, capsys) -> None:
+    """`which rg`, `type grep`, `echo grep` name a search tool without running it. A search still counts
+    after wrappers, `VAR=x`, shell keywords and on any line of a script; behind a wrapper the hook doesn't know it
+    is scoped by its operands, else the tree (never taken for a stdin reader)."""
+    root, _ = repo
+    for cmd in ("which rg git", "echo grep", "command -v rg", "type grep", "whereis rg",
+                "git log --grep=foo --oneline", "echo hi | echo rg", "sudo which rg", "man grep",
+                "printf '%s\n' rg"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+    for cmd in ("sudo rg foo", "sudo -u root rg foo", "env FOO=1 grep -r foo .", "env -i rg foo", "command rg foo",
+                "nice -n 5 rg foo", "nohup rg foo", "time rg foo", "timeout 5 rg foo", "timeout -s KILL 5s rg foo",
+                "FOO=1 rg foo", "ls | xargs -n1 rg foo", "xargs -I {} grep foo {}", "git grep foo HEAD",
+                "git -C . grep foo HEAD", "git --no-pager grep foo HEAD", "echo hi\nrg foo", "cd . && rg foo",
+                "for d in a b; do rg foo; done", "if true; then rg foo; fi", "{ rg foo; }", "(rg foo)",
+                "echo hi # note\nrg foo", "ls |& grep -r foo", "sudo env FOO=1 nice rg foo",
+                # a wrapper the hook doesn't know hides nothing: a search name in the words still counts
+                "caffeinate grep -rn aws .", "flock /tmp/l grep -rn aws .", "script -q /dev/null grep -rn aws .",
+                "parallel grep -rn aws ::: .", "unbuffer grep -rn aws .", "find . -exec grep aws {} +",
+                "ls | unbuffer grep aws", "ls | caffeinate rg aws"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+
+
+def _secret_env(tmp_path: Path, token: str) -> Path:
+    (tmp_path / "secret.env").write_text(f"GITHUB_TOKEN={token}\n")
+    (tmp_path / "README.md").write_text("nothing here\n")
+    return tmp_path
+
+
+def test_fr_read_03_hook_heredoc_body_is_input_not_shell(repo, capsys, tmp_path: Path) -> None:
+    """A heredoc body is cut before the command is tokenised, so an apostrophe in it no longer raises (= exit 2,
+    'hook error; blocked'); it is then read as command lines (_prose), so prose that names no secret file passes."""
+    _, canaries = repo
+    root = _secret_env(tmp_path, _canary_token(canaries))
+    for cmd in ("python - <<'EOF'\nprint(\"it's\")\nEOF", "python - <<EOF\nprint(\"it's\")\nEOF\n",
+                "cat <<-EOF\n\tit's\n\tEOF", "cat <<\"EOF\" > notes.txt\nit's `not run`\nEOF",
+                "cat <<A <<B\none's\nA\ntwo's\nB", "cat <<< \"it's\"", "echo $((1<<3))", "echo 'a << b'",
+                "cat <<'EOF' > f.txt\nhello\nEOF", "git commit -m \"$(cat <<'EOF'\nfix: x\nEOF\n)\""):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def test_fr_read_03_hook_heredoc_shell_body_and_substitutions_are_checked(repo, capsys, tmp_path: Path) -> None:
+    """Whatever reads a heredoc may run it, so its body is checked as command lines, quoted delimiter or not; an
+    unquoted delimiter also expands `$(...)` and backticks first; commands after the heredoc are still judged."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _secret_env(tmp_path, token)
+    for cmd in ("bash <<EOF\ncat secret.env\nEOF", "sudo bash <<'EOF'\ncat secret.env\nEOF",
+                "env FOO=1 sh -s <<-EOF\n\tcat secret.env\n\tEOF", "cat <<EOF\n$(cat secret.env)\nEOF",
+                "cat <<EOF\nline `cat secret.env`\nEOF", "python - <<'EOF'\nprint(\"it's\")\nEOF\ncat secret.env",
+                "cd . && bash <<'EOF'\ncat 'secret.env'\nEOF", "bash <<A <<B\ntrue\nA\ncat secret.env\nB",
+                "cat <<'EOF'\n$(cat secret.env)\nEOF", "cat <<\\EOF\n`cat secret.env`\nEOF"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and token[:12] not in out, cmd
+
+
+def test_fr_read_03_hook_heredoc_never_closed_is_read_to_the_end(repo, capsys, tmp_path: Path) -> None:
+    """No terminator line: the rest of the command is the body. No crash, and nothing slips through."""
+    _, canaries = repo
+    root = _secret_env(tmp_path, _canary_token(canaries))
+    for cmd in ("cat <<EOF\nbody", "cat <<EOF", "cat <<'EOF'\nit's\nEOF2", "echo $((1<<X))", "echo $((1<<3))"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+    code, out = _run(_bash(root, "cat <<EOF\nit's\ncat secret.env"), capsys)
+    assert code == 0 and _denied(out)
+
+
+def test_fr_read_03_hook_find_exec_search_is_scoped_to_find_paths(repo, capsys, tmp_path: Path) -> None:
+    """`find PATHS -exec grep ...` searches what find lists: its start paths, or the cwd if it names none."""
+    _, canaries = repo
+    root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    (root / "config.py").write_text(f"foo\nGITHUB_TOKEN = \"{_canary_token(canaries)}\"\n")
+    for cmd in ("find src -exec grep aws {} +", "find -L src -name '*.py' -ok rg aws {} \\;",
+                "find src -execdir grep aws {} \\;"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+    for cmd in ("find . -exec grep aws {} +", "find -exec grep aws {} +", "find src . -exec grep aws {} +",
+                "find config.py -exec grep aws {} +"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and "config.py" in out, cmd
+
+
+def test_fr_read_03_hook_heredoc_body_is_never_dropped(repo, capsys) -> None:
+    """Whatever reads a heredoc (a pipe into bash or sh, `source /dev/stdin`, a wrapper, `xargs cat`, or a `<<` that
+    is arithmetic and no heredoc at all) the body may run or name files, so it is read as command lines: plain
+    str.split, never shlex, so prose can't raise. A body that is never closed is read to the end."""
+    root, _ = repo
+    for cmd in ("echo $((1<<X))\ncat .env\nX", "(( x=1<<X ))\ncat .env\nX", "cat <<E | bash\ncat .env\nE",
+                "cat <<E | sh -\ncat .env\nE", "source /dev/stdin <<E\ncat .env\nE",
+                "caffeinate bash <<E\ncat .env\nE", 'bash -c "$(cat <<EOF\ncat .env\nEOF\n)"',
+                "xargs cat <<E\n.env\nE", "cat <<E\ncat .env", "cat <<'E'\ncd . && cat .env\nE",
+                "cat <<E | bash\nls; cat .env\nE", "cat <<E | bash\necho hi | grep -r aws .\nE",
+                "bash <<E\nbash -c 'cat .env'\nE", "bash <<E\nenv FOO=1 sudo grep -r aws .\nE",
+                "cat <<E | bash\n(cat .env)\nE", "cat <<E | bash\nfoo `cat .env`\nE"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+    for cmd in ("python - <<'EOF'\nprint(\"it's fine\")\nEOF", "cat <<'EOF' > f.txt\nhello\nEOF",
+                "git commit -m \"$(cat <<'EOF'\nfix: x\nEOF\n)\"", "cat <<E | bash\necho hi | grep -v x\nE",
+                "cat <<EOF\nit's a `quoted` (aside); done\nEOF"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def test_fr_read_03_hook_naming_commands_do_not_cover_text_that_runs(repo, capsys) -> None:
+    """`echo grep` names a program, unless the text is run: piped into a shell, source, eval or xargs, or run
+    as the output of a substitution. Then it is a search like any other. Package managers are no exception."""
+    root, _ = repo
+    for cmd in ("echo grep -r aws . | sh", "printf grep -r aws . | bash", "echo 'grep -r aws .' | sh",
+                "echo grep -r aws . | xargs", "echo grep -r aws . | zsh", "echo grep -r aws . | dash",
+                "echo grep -r aws . | ksh", "echo grep -r aws . | fish", "echo grep -r aws . | source /dev/stdin",
+                "echo grep -r aws . | eval", "eval echo grep -r aws .", "$(echo grep -r aws .)",
+                "`echo grep -r aws .`", "bash -c \"$(echo grep -r aws .)\"", "npm exec -- rg aws .",
+                "brew info rg"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+    for cmd in ("echo grep -r aws . | cat", "echo grep | tr a-z A-Z", "which rg | head", "echo grep -r aws ."):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def test_fr_read_03_hook_stdin_shortcut_needs_words_that_cannot_name_files(
+        repo, capsys, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any `$` in a word (`$@`, `$'..'`, `$F`) may stand for a file name; GREP_OPTIONS can add -r to a plain grep.
+    Either turns the 'reads stdin' shortcut off."""
+    root, _ = repo
+    for cmd in ("GREP_OPTIONS=-r grep aws", "export GREP_OPTIONS=-r; grep aws", "set -- .env; grep aws \"$@\"",
+                "grep aws $'.env'", "grep aws $\".env\"", "ls | grep aws $F", "ls | grep -e aws $@",
+                "bash -c 'GREP_OPTIONS=-r grep aws'", "GREP_OPTIONS=-r; bash -c 'grep aws'"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+    assert _run(_bash(root, "ls | grep aws"), capsys) == (0, "")
+    monkeypatch.setenv("GREP_OPTIONS", "-r")
+    code, out = _run(_bash(root, "ls | grep aws"), capsys)
+    assert code == 0 and _denied(out)
+
+
+@pytest.mark.parametrize("rel", [".git/lfs/objects/ab/cd/oid", ".git/lfs/tmp/blob"])
+def test_fr_read_03_hook_git_dir_lfs_content_is_in_scope(repo, capsys, tmp_path: Path, rel: str) -> None:
+    """.git/lfs holds the raw content of large files, so a search that descends into .git reads it."""
+    _, canaries = repo
+    root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(f"GITHUB_TOKEN={_canary_token(canaries)}\n")
+    code, out = _run(_bash(root, "grep -r foo ."), capsys)
+    assert code == 0 and _denied(out) and rel in out

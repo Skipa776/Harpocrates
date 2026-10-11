@@ -195,6 +195,35 @@ def test_fr_read_05_touches_blocks_writes_and_allow_cmd(cmd) -> None:
     assert allowlist.touches(cmd), cmd
 
 
+def _glob_cmds() -> list[str]:
+    d = "." + "harp" + "ocrates"  # built here so the literal path never appears in a command line
+    return [
+        "cp evil ~/.*/allow",
+        "cp evil ~/.h*/allow",
+        "cp evil $HOME/.[h]" + d[2:] + "/allow",
+        "cp evil ~/.{" + d[1:] + ",x}/allow",
+        "cp evil ~/.?" + d[2:] + "/allow",
+        "mv x ~/.h" + "?" * 10 + "/allow",
+    ]
+
+
+@pytest.mark.parametrize("cmd", _glob_cmds())
+def test_fr_read_05_touches_blocks_globbed_dir_names(cmd) -> None:
+    assert allowlist.touches(cmd), cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "ls ~/.*",
+    "ls -d ~/.c*",
+    "cat ~/.zshrc",
+    "grep -rn foo ~/.config",
+    "echo *.py",
+    "ls src/.*",  # a glob on a dot-name still counts as a mention, but a plain read passes
+])
+def test_fr_read_05_touches_allows_unrelated_and_read_only_globs(cmd) -> None:
+    assert not allowlist.touches(cmd), cmd
+
+
 def test_fr_read_05_cli_allow_adds_and_lists(repo, allow_file: Path) -> None:
     from typer.testing import CliRunner
 
@@ -299,3 +328,43 @@ def test_fr_read_05_edit_edge_cases(repo, capsys, tmp_path: Path, monkeypatch: p
     allowlist.add(own)
     assert _decision({**edit, "tool_input": {"file_path": str(own)}}, capsys, ask=True) == (0, "", "")
     assert "\tEdit\t" in allowlist.LOG_FILE.read_text()
+
+
+def _obfuscated_cmds() -> list[str]:
+    n = "harp" + "ocrates"  # assembled so the literal path never appears in a command line
+    return [
+        "echo / >> ~/.\\" + n + "/allow",
+        "cd ~ && echo / >> .h\\" + n[1:] + "/allow",
+        'echo / >> ~/.ha""' + n[2:] + "/allow",
+        "echo / >> ~/.ha''" + n[2:] + "/allow",
+        "echo / >> ~/.'harp'" + n[4:] + "/allow",
+        "echo / >> ~/{.h,x}" + n[1:] + "/allow",
+        "echo / >> ~/{.,}" + n + "/allow",
+        "echo / >> $'\\056" + n + "'/allow",
+        "echo / >> $'\\x2e" + n + "'/allow",
+        "shopt -s dotglob; echo / >> ~/*" + n[1:] + "/allow",
+        "cp x ~/?" + n[1:] + "/allow",
+        "cp x ~/[.]" + n + "/allow",
+        "h''" + n[1:] + " allow /",
+        "rm -rf .[a-z]*cache",  # accepted over-block: a dot-glob in a non-read-only command
+    ]
+
+
+@pytest.mark.parametrize("cmd", _obfuscated_cmds())
+def test_fr_read_05_touches_blocks_obfuscated_spellings(cmd) -> None:
+    assert allowlist.touches(cmd), cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "harpocrates scan .",
+    "python -m Harpocrates.cli scan .",
+    "cd /Users/joshuado/harpocrates && pytest -q",
+    ".venv/bin/python -m pytest cli/tests/test_hooks_allowlist.py",
+    "grep -rn allow /Users/joshuado/harpocrates/cli",
+    "ls ~/.harpocrates",
+    "cat ~/.harpocrates/allow.log",
+    "ls ~/.ha''rpocrates",
+    "echo 'a,b' {1,2}",
+])
+def test_fr_read_05_touches_allows_clean_and_read_only_after_normalising(cmd) -> None:
+    assert not allowlist.touches(cmd), cmd

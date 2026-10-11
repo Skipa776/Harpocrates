@@ -18,7 +18,7 @@ unknown one) gets the refusal. Codex runs without --ask: its handling of "ask" i
 
 ponytail: Bash coverage is best effort. It follows `sh -c` bodies, `$(...)`, backticks, `cd`, `git -C`,
 globs, `~` and `$VAR` paths, `git show rev:path`, and the environment. A script that opens files itself
-(`python x.py`, `node -e`), `find -exec`, `xargs` fed by a pipe, and `git diff` / `git log -p` output get
+(`python x.py`, `node -e`, `python - <<EOF`), `find -exec`, `xargs` fed by a pipe, and `git diff` / `git log -p` output get
 through. The egress gate (M2) covers what reaches the provider whatever the tool.
 A recursive search inside a git work tree is scoped to the files git lists plus git-ignored files named like secret
 stores; a secret in an ignored file with an ordinary name can pass `grep -r` (see _scope). Only the gate stops it.
@@ -54,7 +54,31 @@ _NAMES_ONLY = {"-l", "--files-with-matches", "-L", "--files-without-match", "-c"
 _SHELLS = {"sh", "bash", "zsh", "dash", "fish", "ksh"}
 _ENV_DUMP = re.compile(r"(?<![\w./-])(?:env|printenv|compgen)(?![\w./-])|\b(?:export|declare|typeset)\s+-p\b"
                        r"|(?:^|[;&|(`]\s*)set\s*(?:$|[;&|)`])|/proc/[^\s]*environ")
-_SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "\n"}
+_SEPARATORS = set(";&|()")  # a token made only of these ends a command (shlex groups them: `&&`, `|&`, `;;`)
+_PIPES = {"|", "|&"}
+_GREPS = {"grep", "egrep", "fgrep"}
+_ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
+# Words that run what follows, with the short options that take a separate value. A search that is the command
+# word after them may be reading stdin (_search_command); behind any other command it is scoped without that.
+_PREFIXES = {"sudo": "ugphCDrtTUR", "doas": "uC", "env": "uCSP", "command": "", "nice": "n", "nohup": "", "time": "fo",
+             "timeout": "sk", "xargs": "adEIJLnPs", "stdbuf": "ioe", "ionice": "cnpPu", "setsid": "", "exec": "",
+             "builtin": "", "if": "", "then": "", "elif": "", "else": "", "do": "", "while": "", "until": "", "!": "",
+             "{": ""}
+# Commands that only name programs, never run them (`command -v` is handled by _command_word): a search name
+# among their words is not a search (`which rg`, `echo grep`) unless the text is run (_feeds_a_shell).
+_NAMING = {"which", "type", "whereis", "hash", "man", "info", "help", "tldr", "echo", "printf"}
+_LONG_VALUE = {"--user", "--group", "--host", "--prompt", "--chdir", "--role", "--type", "--unset", "--split-string",
+               "--signal", "--kill-after", "--arg-file", "--delimiter", "--eof", "--max-args", "--max-lines",
+               "--max-procs", "--max-chars", "--adjustment"}
+_DURATION = re.compile(r"\d+(\.\d+)?[smhd]?$")
+_UNRESOLVED = re.compile(r"[*?\[{`$]")  # a word the hook can't turn into paths: glob, brace, backtick, any $
+_SINKS = _SHELLS | {"source", ".", "eval", "xargs"}  # a pipe into one of these runs its input as commands
+_PROSE_SPLIT = re.compile(r"(\|&|\|\||&&|[|&;()`])")  # what ends a command in a heredoc body
+_HEREDOC = re.compile(
+    r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?<!\S)#[^\n]*"""  # quotes, escapes and comments hide what they hold
+    r"""|(?<!<)<<(?!<)(?P<tabs>-?)[ \t]*"""
+    r"""(?:(?P<q>['"])(?P<qword>[^\n]+?)(?P=q)|(?P<esc>\\?)(?P<word>[^\s;&|()<>'"\\]+))"""
+    r"|\n", re.S)
 _SHELL_C = re.compile(r"^-[a-zA-Z]*c[a-zA-Z]*$")
 _SUBSHELL = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
 _ENV_REF = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
@@ -240,11 +264,49 @@ def _in_git(root: Path) -> bool:
     return _git(root if root.is_dir() else root.parent, "rev-parse", "--is-inside-work-tree") == b"true\n"
 
 
-def _walk(root: Path, secret_names: bool = False) -> list[Path]:
-    """Every file under root, .git excluded; with secret_names only those named like a secret store."""
+def _git_internals(gitdir: Path) -> list[Path]:
+    """Files a search that descends into .git reads, except objects/ (compressed; a real history would trip
+    MAX_SCOPE_FILES on every `grep -r .`). lfs/ stays in, its objects/ too: that is the raw content of large files.
+    Trade-off: a secret committed into an object is not checked; the config (a token in a remote URL), refs, logs
+    and hooks, where one usually sits, are."""
     files: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(gitdir):
         _tick()
+        rel = os.path.relpath(dirpath, gitdir)
+        if rel != "lfs" and not rel.startswith("lfs" + os.sep):
+            dirnames[:] = [d for d in dirnames if d != "objects"]
+        files += [Path(dirpath) / f for f in filenames]
+        if len(files) > MAX_SCOPE_FILES:
+            raise _OutOfTimeError  # too wide to vouch for: deny
+    return files
+
+
+def _ident(path: str | Path) -> tuple[int, int]:
+    """Which directory this is, whatever link led to it (cheaper than resolving the path)."""
+    st = os.stat(path)
+    return st.st_dev, st.st_ino
+
+
+def _walk(root: Path, secret_names: bool = False, git_dir: bool = False,
+          seen: Optional[set[tuple[int, int]]] = None) -> list[Path]:
+    """Every file under root, .git excluded (git_dir: included, see _git_internals); with secret_names only those
+    named like a secret store. Links to directories are followed, as `grep -R` and `rg -L` do (the scope may read
+    more than the tool, never less): each real directory is walked once (seen), so a link loop ends and a link to a
+    place already covered adds nothing. The file cap still counts."""
+    files: list[Path] = []
+    seen = set() if seen is None else seen
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        _tick()
+        try:
+            here = _ident(dirpath)
+        except OSError:  # gone since it was listed
+            continue
+        if here in seen:
+            dirnames.clear()
+            continue
+        seen.add(here)
+        if git_dir and not secret_names and ".git" in dirnames:
+            files += _git_internals(Path(dirpath) / ".git")
         dirnames[:] = [d for d in dirnames if d != ".git"]
         files += [Path(dirpath) / f for f in filenames if not secret_names or _SENSITIVE.match(f)]
         if len(files) > MAX_SCOPE_FILES:
@@ -283,7 +345,7 @@ def _hides_shown_files(visible: bytes, ignored: bytes) -> bool:
     return False
 
 
-def _scope(root: Path, full: bool = False) -> list[Path]:
+def _scope(root: Path, full: bool = False, git_dir: bool = False) -> list[Path]:
     """Every file a recursive search of root reads, .git excluded. In a git work tree that is what git lists
     (tracked, and untracked but not ignored) plus git-ignored files named like secret stores (SENSITIVE_FILES),
     wherever they sit. Trade-off: a secret in a git-ignored file with an ordinary name (notes.local) can now
@@ -294,7 +356,9 @@ def _scope(root: Path, full: bool = False) -> list[Path]:
     (not a work tree, missing, failing or stalling): an error never shrinks the scope.
     RESIDUAL: a rule the agent commits still hides files (same class as the script gap in the module docstring),
     as does `git update-index --assume-unchanged` on an edited .gitignore, or a self-ignoring .gitignore in a
-    directory with no tracked files."""
+    directory with no tracked files.
+    Links to directories are followed (_walk). git_dir adds the files of .git (_git_internals), for the shell
+    searches that descend into it."""
     if root.is_file():
         return [root]
     ls = ["ls-files", "-z", "--others", "--exclude-standard"]
@@ -302,7 +366,8 @@ def _scope(root: Path, full: bool = False) -> list[Path]:
     visible = None if full or ignored_root or _unvetted_ignore_rules(root) else _git(root, *ls, "--cached")
     ignored = None if visible is None else _git(root, *ls, "--ignored")
     if ignored is None or _hides_shown_files(visible, ignored):
-        return _walk(root)
+        return _walk(root, git_dir=git_dir)
+    seen = {_ident(root)}  # a link back into the tree adds nothing: git listed it
     files: list[Path] = []
     for listing, secret_names in ((visible, False), (ignored, True)):
         for rel in filter(None, listing.split(b"\0")):
@@ -311,12 +376,16 @@ def _scope(root: Path, full: bool = False) -> list[Path]:
             if secret_names and not name.endswith("/") and not _SENSITIVE.match(name.rsplit("/", 1)[-1]):
                 continue
             path = root / name
-            if path.is_dir() and not path.is_symlink():  # a nested repo or submodule: git lists it as one entry
-                files += _walk(path, secret_names)
+            if path.is_dir():  # a nested repo or submodule (git lists it as one entry), or a link to a directory
+                files += _walk(path, secret_names, git_dir, seen)
             elif path.is_file():
                 files.append(path)
             if len(files) > MAX_SCOPE_FILES:
                 raise _OutOfTimeError  # too wide to vouch for: deny
+    if git_dir and (root / ".git").is_dir():
+        files += _git_internals(root / ".git")
+        if len(files) > MAX_SCOPE_FILES:
+            raise _OutOfTimeError
     return files
 
 
@@ -403,15 +472,66 @@ def _grep_tool(args: dict, cwd: Path) -> list[Path]:
     return _matching(pattern, [cwd / args.get("path", ".")], flags, py)
 
 
-def _search_command(argv: list[str], here: Path) -> list[Path]:
+def _recursive(args: list[str]) -> bool:
+    """True if these grep arguments make it descend into directories: -r or -R (alone or in a cluster), --recursive
+    and its abbreviations, -d recurse. Over-reads: a word that looks like one counts."""
+    for a in args:
+        if a.startswith("--"):
+            name = a.partition("=")[0]
+            if "recurs" in name or (len(name) > 3 and "--recursive".startswith(name)):
+                return True
+        elif a.startswith("-") and set(a) & set("rR"):
+            return True
+    return any(a == "recurse" or a.endswith("=recurse") or a.endswith("drecurse") for a in args)
+
+
+def _names_pattern(flag: str) -> bool:
+    """True if a flag may carry the pattern (-e, -f, --regexp, --file, in a cluster or abbreviated): then no
+    positional word is the pattern. Over-reads, so a real file operand is never taken for the pattern."""
+    if flag.startswith("--"):
+        name = flag.partition("=")[0]
+        return len(name) > 3 and ("--regexp".startswith(name) or "--file".startswith(name))
+    return bool(set(flag) & set("ef"))
+
+
+def _reads_git(name: str, flags: list[str], recursive: bool) -> bool:
+    """True if the search, run with these flags, reads inside .git. Checked on this machine: BSD grep -r/-R do; rg
+    only with --hidden, -. or -uu; git grep never. ag and ack aren't installed here, so assumed: ag with --hidden or
+    -u, ack with --noignore-dir (it skips .git by default). Over-approximation is safe."""
+    short = "".join(a[1:] for a in flags if not a.startswith("--"))
+    if name in _GREPS:
+        return recursive
+    if name == "rg":
+        return "--hidden" in flags or "." in short or short.count("u") + flags.count("--unrestricted") >= 2
+    if name == "ag":
+        return "--hidden" in flags or "u" in short or "--unrestricted" in flags
+    return any(a.startswith("--noignore-dir") for a in flags)
+
+
+def _search_command(argv: list[str], here: Path, piped: bool = False, tree: bool = False,
+                    git: bool = False, env_opts: bool = False) -> list[Path]:
     """Files a grep/rg-style shell command could print from. Its pattern is never evaluated: attached
     and clustered flags (`-eX`, `--regexp=X`, `-nA 3`), inversion (`-v`), `--passthru` and basic-regex
     syntax all change which lines print, so every file in scope counts unless only names are printed.
-    The Grep tool, with its structured input, gets the exact check (_grep_tool)."""
-    if any(a in _NAMES_ONLY for a in argv[1:]):
+    The Grep tool, with its structured input, gets the exact check (_grep_tool).
+    With no file operand it reads stdin, not the tree: grep unless it recurses, rg/ag/ack after a pipe. A word
+    that could name files the hook can't see (glob, $VAR, $(...)) counts as an operand. tree: it searches the work
+    tree whatever its stdin (`git grep`) or xargs feeds it file names. The scope includes .git (_scope) for the
+    searches that descend into it (_reads_git). env_opts: GREP_OPTIONS may make any grep recursive."""
+    name, opts = Path(argv[0]).name, argv[1:]
+    if any(a in (_NAMES_ONLY - {"-L"} if name == "rg" else _NAMES_ONLY) for a in opts):  # rg -L is --follow
         return []  # file names or counts only
-    roots = [_resolve(a, here) for a in argv[1:] if not a.startswith("-") and _resolve(a, here).exists()]
-    return _matching(None, roots or [here], [], 0)
+    head = opts[:opts.index("--")] if "--" in opts else opts
+    flags = [a for a in head if a.startswith("-")]
+    words = [a for a in head if not a.startswith("-")] + opts[len(head) + 1:]
+    roots = [r for r in (_resolve(a, here) for a in words) if r.exists()]
+    recursive = name in _GREPS and (env_opts or _recursive(head))
+    operands = words if any(_names_pattern(a) for a in flags) else words[1:]  # else the first word is the pattern
+    if not roots and not (tree or git or recursive or any(_UNRESOLVED.search(a) for a in operands)
+                          or (name not in _GREPS and not piped)):
+        return []  # reads stdin
+    descends = not git and _reads_git(name, flags, recursive)
+    return [f for r in (roots or [here]) if r.exists() for f in _scope(r, git_dir=descends)]
 
 
 # ---------------------------------------------------------------------------------------- shell
@@ -468,16 +588,163 @@ def _expand(word: str, here: Path) -> list[Path]:
     return out
 
 
-def _segments(command: str) -> list[list[str]]:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    segments: list[list[str]] = [[]]
-    for tok in lexer:  # unbalanced quotes raise ValueError -> decide() blocks the call
-        if tok in _SEPARATORS:
-            segments.append([])
-        else:
-            segments[-1].append(tok)
-    return [seg for seg in segments if seg]
+def _cut_body(text: str, start: int, word: str, strip: bool) -> tuple[str, int]:
+    """(heredoc body, index after its terminating line) for a body starting at start. A body that is never closed
+    runs to the end of the text."""
+    lines: list[str] = []
+    while True:
+        stop = text.find("\n", start)
+        line = text[start:] if stop < 0 else text[start:stop]
+        if (line.lstrip("\t") if strip else line) == word:
+            return "\n".join(lines), len(text) if stop < 0 else stop + 1
+        lines.append(line)
+        if stop < 0:
+            return "\n".join(lines), len(text)
+        start = stop + 1
+
+
+def _heredocs(command: str) -> tuple[list[str], str, list[str]]:
+    """Split command into logical lines (at newlines outside quotes) and cut every heredoc body out of them.
+    Returns the lines (the `<<WORD` operators stay), the text `$(...)` and backticks are searched in (an unquoted
+    delimiter's body expands them before the command runs; a quoted one's is read as lines instead), and the
+    bodies, which _bash_files reads apart (_prose): an apostrophe in a body would break the tokeniser. Nothing is
+    ever dropped, so a `<<` that is no heredoc (`$((1<<X))`) hides nothing."""
+    lines: list[str] = []
+    scan: list[str] = []
+    bodies: list[str] = []
+    pending: list[tuple[str, bool, bool]] = []  # (delimiter, strip tabs, quoted) of operators awaiting a body
+    start = pos = kept = 0  # start: text not yet in a line; kept: text not yet in scan
+    while (m := _HEREDOC.search(command, pos)) is not None:
+        pos = m.end()
+        if m.group() == "\n":
+            lines.append(command[start:m.start()])
+            start = pos
+            if pending:  # the bodies follow, one after the other
+                scan.append(command[kept:pos])
+                for word, strip, quoted in pending:
+                    body, end = _cut_body(command, pos, word, strip)
+                    bodies.append(body)
+                    if not quoted:
+                        scan.append(command[pos:end])
+                    pos = end
+                pending, start, kept = [], pos, pos
+        elif m.group().startswith("<<"):
+            pending.append((m["qword"] or m["word"], bool(m["tabs"]), bool(m["q"] or m["esc"])))
+    lines.append(command[start:])
+    scan.append(command[kept:])
+    return lines, "".join(scan), bodies
+
+
+def _prose(body: str) -> list[tuple[list[str], bool, bool]]:
+    """A heredoc body as command segments, whatever reads it (a shell down a pipe, `source /dev/stdin`, xargs, or
+    plain cat): split at ; & | ( ) and backticks, words by str.split with their quotes stripped. Never shlex:
+    prose has stray quotes and must not raise. It over-reads (a python comment naming grep is a search) and never
+    under-reads a script. The True marks a body line: no cd failure, no eval or -c recursion on it."""
+    out: list[tuple[list[str], bool, bool]] = []
+    piped = False  # the separator before the words being read was a pipe
+    for line in body.splitlines():
+        for part in _PROSE_SPLIT.split(line):
+            if _PROSE_SPLIT.fullmatch(part):
+                piped = piped or part in _PIPES
+                continue
+            words = [w for w in (x.strip("'\"") for x in part.split()) if w]
+            if words:
+                out.append((words, piped, True))
+                piped = False
+    return out
+
+
+def _feeds_a_shell(segs: list[tuple[list[str], bool, bool]]) -> bool:
+    """True if a command evals its input or a pipe feeds text to a shell, `source`, `.`, `eval` or xargs: what
+    looks like an argument of echo or printf may then run, so _NAMING excuses nothing."""
+    for argv, piped, _prose_line in segs:
+        i, fed = _command_word(argv)
+        name = (Path(argv[i]).name or argv[i]) if i < len(argv) else ""
+        if name == "eval" or (piped and (fed or name in _SINKS)):
+            return True
+    return False
+
+
+def _command_word(argv: list[str]) -> tuple[int, bool]:
+    """(index of the command a segment runs, whether xargs feeds it): skips `VAR=x` words, shell keywords (`do`,
+    `then`) and the wrappers in _PREFIXES with their options. len(argv) if it runs none (`command -v rg` only
+    looks a name up)."""
+    i, fed = 0, False
+    while i < len(argv):
+        name = Path(argv[i]).name
+        if _ASSIGNMENT.match(argv[i]):
+            i += 1
+            continue
+        if name not in _PREFIXES:
+            break
+        fed, i = fed or name == "xargs", i + 1
+        while i < len(argv) and argv[i].startswith("-") and argv[i] != "-":
+            opt, i = argv[i], i + 1
+            if opt == "--":
+                break
+            if opt.startswith("--"):
+                i += opt in _LONG_VALUE
+                continue
+            if name == "command" and set(opt) & set("vV"):
+                return len(argv), fed
+            for k, c in enumerate(opt[1:], 1):
+                if c in _PREFIXES[name]:
+                    i += k == len(opt) - 1  # the value is the next word unless attached
+                    break
+        if name == "timeout" and i < len(argv) and _DURATION.match(argv[i]):
+            i += 1
+    return i, fed
+
+
+def _find_paths(args: list[str]) -> list[str]:
+    """The start paths of a `find` command line (args: the words after `find`), up to its first expression."""
+    paths: list[str] = []
+    for a in args:
+        if a in ("-H", "-L", "-P"):
+            continue
+        if a.startswith("-") or a in ("!", "("):
+            break
+        paths.append(a)
+    return paths
+
+
+def _search_word(argv: list[str], start: int) -> Optional[tuple[int, bool]]:
+    """(index of the search command in argv, whether it is `git grep`) for a segment whose command word is at
+    start; None if that command is not one. A search behind another command is _bash_files' business."""
+    if start >= len(argv):
+        return None
+    name = Path(argv[start]).name
+    if name in _SEARCH_COMMANDS:
+        return start, False
+    if name == "git":
+        i = start + 1
+        while i < len(argv) and argv[i].startswith("-"):  # git's own options come before the subcommand
+            i += 2 if argv[i] in ("-C", "-c", "--git-dir", "--work-tree", "--namespace") else 1
+        if i < len(argv) and argv[i] == "grep":
+            return i, True
+    return None
+
+
+def _segments(lines: list[str]) -> list[tuple[list[str], bool]]:
+    """(words, whether a pipe feeds it) for each command in the logical lines (_heredocs), split at ; & | ( )."""
+    out: list[tuple[list[str], bool]] = []
+    piped = False  # the separator before the command being read was a pipe
+    for line in lines:
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        seg: list[str] = []
+        for tok in lexer:  # unbalanced quotes raise ValueError -> decide() blocks the call
+            if set(tok) <= _SEPARATORS:
+                if seg:
+                    out.append((seg, piped))
+                    seg, piped = [], False
+                piped = piped or tok in _PIPES
+            else:
+                seg.append(tok)
+        if seg:
+            out.append((seg, piped))
+            piped = False
+    return out
 
 
 def _git_blobs(argv: list[str], here: Path) -> Optional[str]:
@@ -495,33 +762,46 @@ def _git_blobs(argv: list[str], here: Path) -> Optional[str]:
     return "\n".join(texts) or None
 
 
-def _bash_files(command: str, cwd: Path, depth: int = 0,
-                inherited: Optional[dict[str, list[str]]] = None) -> tuple[list[Path], list[str]]:
-    """(files the command could print, extra text it could print such as git blobs)."""
+def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dict[str, list[str]]] = None,
+                named_ok: bool = True) -> tuple[list[Path], list[str]]:
+    """(files the command could print, extra text it could print such as git blobs). named_ok False: the text is
+    run as a command (a substitution's output), so _NAMING excuses nothing."""
     files: list[Path] = []
     texts: list[str] = []
     if depth > 3:
         raise ValueError("command nested too deep to check")
+    lines, scan, bodies = _heredocs(command)  # bodies are cut out of what is tokenised and read apart (_prose)
     values = _assignments(command, inherited or {})  # nested bodies inherit even unexported names: more paths
-    for m in _SUBSHELL.finditer(command):  # $(...) and `...` run first: check their bodies too
-        sub_files, sub_texts = _bash_files(m.group(1) or m.group(2) or "", cwd, depth + 1, values)
+    for m in _SUBSHELL.finditer(scan):  # $(...) and `...` run first (not in a quoted heredoc): check their bodies too
+        sub_files, sub_texts = _bash_files(m.group(1) or m.group(2) or "", cwd, depth + 1, values, False)
         files, texts = files + sub_files, texts + sub_texts
+    segs = [(argv, piped, False) for argv, piped in _segments(lines)] + [s for body in bodies for s in _prose(body)]
+    # `D=dir; cat $D/f`, `R=HEAD:.env; git show $R`
+    segs = [([w for t in argv for w in _words(t, values)], piped, prose) for argv, piped, prose in segs]
+    sink = _feeds_a_shell(segs)
+    if sink:  # `echo 'grep -r x .' | sh`: its quoted words are commands
+        segs = [([w for t in argv for w in t.split() or [t]], piped, prose) for argv, piped, prose in segs]
+    exempt = named_ok and not sink
+    env_opts = any("GREP_OPTIONS" in where for where in (command, values, os.environ))  # may add -r to a grep
     here = cwd
     reads, named = False, []  # a reader anywhere makes every named file count (`for f in a b; do cat "$f"`)
-    for argv in _segments(command):
-        argv = [w for t in argv for w in _words(t, values)]  # `D=dir; cat $D/f`, `R=HEAD:.env; git show $R`
+    for argv, piped, prose in segs:
         names = [Path(t).name for t in argv]
+        start, fed = _command_word(argv)
         if names[0] == "cd":
-            if len(argv) > 2:
+            if len(argv) > 2 and not prose:
                 raise ValueError("cd to a directory that depends on a branch")  # can't tell which: block
-            here = _resolve(argv[1], here) if len(argv) > 1 else Path.home()
+            if len(argv) <= 2:
+                here = _resolve(argv[1], here) if len(argv) > 1 else Path.home()
             continue
-        if names[0] in ("eval", "exec", "watch") and len(argv) > 1:
-            sub_files, sub_texts = _bash_files(" ".join(argv[1:]), here, depth + 1, values)
+        if not prose and names[0] in ("eval", "exec", "watch") and len(argv) > 1:
+            sub_files, sub_texts = _bash_files(" ".join(argv[1:]), here, depth + 1, values, False)
             files, texts = files + sub_files, texts + sub_texts
             continue
-        body = next((argv[j + 1] for i, n in enumerate(names) if n in _SHELLS  # sudo / env ... bash -x -c BODY
-                     for j in range(i + 1, len(argv) - 1) if _SHELL_C.match(argv[j])), None)
+        body = None  # sudo / env ... bash -x -c BODY
+        if not prose:
+            body = next((argv[j + 1] for i, n in enumerate(names) if n in _SHELLS
+                         for j in range(i + 1, len(argv) - 1) if _SHELL_C.match(argv[j])), None)
         if body is not None:
             sub_files, sub_texts = _bash_files(body, here, depth + 1, values)
             files, texts = files + sub_files, texts + sub_texts
@@ -535,10 +815,14 @@ def _bash_files(command: str, cwd: Path, depth: int = 0,
                 texts.append(blob)
             files += [base / t.split(":", 1)[1] for t in argv[2:]  # rev:path -> also the working-tree file
                       if ":" in t and not t.startswith("-") and "://" not in t]
-        for i, n in enumerate(names):
-            if n in _SEARCH_COMMANDS:
-                files += _search_command(argv[i:], base)
-                break
+        found = _search_word(argv, start)
+        if found is not None:
+            files += _search_command(argv[found[0]:], base, piped, fed, found[1], env_opts)
+        elif start < len(argv) and not (exempt and names[start] in _NAMING):
+            i = next((i for i, n in enumerate(names) if n in _SEARCH_COMMANDS), None)
+            if i is not None:  # behind a command we don't know (flock, parallel, find -exec): never stdin
+                scoped = ["grep", "-r", *_find_paths(argv[start + 1:])] if names[start] == "find" else argv[i:]
+                files += _search_command(scoped, base, piped, tree=True, env_opts=env_opts)
         reads = reads or any(n in _READ_COMMANDS for n in names) or "<" in argv
         named += [p for w in argv for p in _expand(w, base)]
     if reads:
