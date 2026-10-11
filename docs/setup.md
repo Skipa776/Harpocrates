@@ -59,7 +59,7 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
    The example lists only part of the list in section 2; extend it with the rest. Turning on the sandbox changes how every shell command runs. Try it in one project first with `/sandbox`.
 
 **What the hook costs.**
-- **Edits:** Claude Code allows Edit only on a file it has read with its built-in Read. So Claude can't edit a file the hook refuses, and needs to change it some other way or with your help.
+- **Edits:** Edit, Write and NotebookEdit on a file that holds a secret get the same "Harpocrates:" prompt as a read, even in accept-edits mode. Yes lets Claude read and change it; in modes with no one to answer, the edit is refused and Claude has to ask you to make it. Only the target file is scanned, not the new content being written (FR-READ-04, M2).
 - **How often:** on 1,000 random files from 16 open-source repos, the hook refused 30 (3.0%). Almost all were `generic` false alarms, such as a hash or a test fixture.
 - **Speed:** about 0.05–0.15 s per call.
 
