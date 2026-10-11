@@ -133,6 +133,7 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | FR-READ-02 | Typed placeholders `<<HARPO:type:hash4>>`, identical for the same secret within a session | Same secret in two files gets the same placeholder | M1 |
 | FR-READ-03 | Setup docs and config for each Full-tier harness that deny the built-in read tool on sensitive paths and route reads to `safe_read` | Fresh machine setup in under 5 minutes, verified by someone else | M1 |
 | FR-READ-04 | Warn when the agent writes a placeholder into a file | Write containing a placeholder produces a visible warning | M2 |
+| FR-READ-05 | The read hook lets through user-allowlisted paths (`harpocrates allow`, each use logged) and, on Claude Code, prompts the user instead of refusing other secret-bearing reads; the agent can't edit the allowlist | Allowlisted path passes and is logged; prompt names every flagged file; no prompt without a human (bypass modes deny) | M1 |
 
 **Egress gate (harpo-gate)**
 

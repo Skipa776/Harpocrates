@@ -104,11 +104,13 @@ def claude_code_settings() -> dict:
     """Lines for ~/.claude/settings.json. `//**/` anchors at the filesystem root, so a rule in user
     settings covers every project and any file outside the working directory."""
     deny = [f"Read(//**/{name})" for name in SENSITIVE_FILES] + [f"Read({d}/**)" for d in SENSITIVE_HOME_DIRS]
+    deny.append("Edit(~/.harpocrates/**)")  # only the user edits the allowlist; Edit rules cover Write too
     command, _ = mcp_server()
     # Content-aware: also blocks built-in reads of any other file that holds a secret (Harpocrates/hooks.py).
-    hook = {"type": "command", "command": shlex.join([command, "-m", "Harpocrates.hooks"])}
+    # --ask: prompt the user for those instead of refusing outright, unless the path is allowlisted.
+    hook = {"type": "command", "command": shlex.join([command, "-m", "Harpocrates.hooks", "--ask"])}
     return {"permissions": {"deny": deny, "allow": list(MCP_TOOLS)},
-            "hooks": {"PreToolUse": [{"matcher": "Read|Grep|Bash", "hooks": [hook]}]}}
+            "hooks": {"PreToolUse": [{"matcher": "Read|Grep|Bash|Edit|MultiEdit|Write|NotebookEdit", "hooks": [hook]}]}}
 
 
 def codex_config() -> str:
@@ -167,10 +169,13 @@ def setup_instructions(harness: str) -> str:
 4. Check: start `claude` in a repo with a .env and ask it to show the file. The built-in Read is
    refused, and safe_read returns <<HARPO:...>> placeholders instead of the values.
 
-The "hooks" entry scans every file before a built-in Read, a content Grep, or a Bash command such as
-`cat` touches it, and refuses the call if the file holds a secret, pointing the agent to safe_read.
-Cost: Claude can't Edit a refused file, since Edit needs a built-in Read first (about 3% of ordinary
-source files, mostly false alarms). Limit: a script that opens files itself gets through; the egress
+The "hooks" entry scans every file before a built-in Read, Edit or Write, a content Grep, or a Bash
+command such as `cat` touches it. If the file holds a secret you get a "Harpocrates:" permission prompt
+naming it, even in accept-edits mode; Yes lets Claude read and change it, No keeps the values out and
+the agent can use safe_read. A folder of known false alarms (hashes, build
+output) can be allowed for good with `harpocrates allow <path>`; each pass is logged in
+~/.harpocrates/allow.log. The deny rules above still win over the allowlist.
+Limit: a script that opens files itself gets through; the egress
 gate covers that. For OS-level blocking of the secret paths, see the sandbox step in docs/setup.md."""
     if harness == "codex":
         return f"""Codex CLI: route reads of secret files through safe_read

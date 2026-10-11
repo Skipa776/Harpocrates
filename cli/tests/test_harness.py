@@ -61,8 +61,8 @@ def test_fr_read_03_claude_code_denies_every_sensitive_path() -> None:
         assert f"Read({d}/**)" in deny, d
     assert set(cfg["permissions"]["allow"]) == {"mcp__harpocrates__safe_read", "mcp__harpocrates__safe_grep"}
     (entry,) = cfg["hooks"]["PreToolUse"]
-    assert entry["matcher"] == "Read|Grep|Bash"
-    assert entry["hooks"][0]["command"].endswith("-m Harpocrates.hooks")
+    assert entry["matcher"] == "Read|Grep|Bash|Edit|MultiEdit|Write|NotebookEdit"
+    assert entry["hooks"][0]["command"].endswith("-m Harpocrates.hooks --ask")
     assert "timeout" not in entry["hooks"][0]  # a timed-out hook allows the call; keep Claude's 600 s
     command, args = mcp_server()
     assert args == ["-m", "Harpocrates.mcp.server"] and Path(command).exists()

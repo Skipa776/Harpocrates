@@ -400,6 +400,26 @@ def setup(
         raise typer.Exit(code=2) from exc
 
 
+@app.command()
+def allow(
+    path: Optional[Path] = typer.Argument(None, help="File or folder the agent may read even if it holds secrets."),
+    list_: bool = typer.Option(False, "--list", help="Show the allowlist."),
+) -> None:
+    """Let agents read a path that Harpocrates would otherwise flag (FR-READ-05). Every use is logged."""
+    from Harpocrates import allowlist
+
+    if list_ or path is None:
+        typer.echo("\n".join(map(str, allowlist.entries())) or "(empty)")
+        typer.echo(f"Edit {allowlist.ALLOW_FILE} to remove entries.")
+        return
+    try:
+        added = allowlist.add(path)
+    except OSError as exc:
+        typer.echo(f"✗ {path}: {exc.strerror or 'not found'}", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo(f"Allowed {added}. Uses are logged to {allowlist.LOG_FILE}.")
+
+
 def main() -> None:
     """Main entry point for CLI."""
     app()
