@@ -27,13 +27,15 @@ LOG_FILE = Path.home() / ".harpocrates" / "allow.log"
 # exempt), so a repo directory of that name over-blocks `git -C .../harpocrates log --grep allow`. A
 # mention of the directory (`.harp`, also `~/.harp*`) passes only when it is a plain read: no output
 # redirect, substitution or heredoc, and every command word in _READ_ONLY. Fail closed on anything else.
-# Known gap: a full glob (`~/.*/allow`) matches neither _DIR nor _ALLOW_CMD; only the Edit deny rule
-# covers it, and only for file tools.
+# A dot-name containing a glob or brace character (`~/.*`, `~/.h*`, `.[h]arp...`, `.{a,b}`, `.?arp...`) also
+# counts as a mention, so it needs a plain read too. Known gap: a name built at runtime (variables, command
+# substitution, printf) matches nothing; that is the script gap above. Matching runs on the raw command and on
+# a normalised copy (see _normalise). Accepted over-block: `rm -rf .[a-z]*cache`.
 _ALLOW_CMD = re.compile(
     r"\bharpocrates(?:\.cli)?\b(?!/)[^;&|\n]*\ballow\b"  # harpocrates / python -m Harpocrates.cli ... allow
     r"|(?:\$\([^)]*\)|`[^`]*`|\$\{?\w+\}?)\s*['\"]?allow\b"  # $(which harpocrates) allow
     r"|\ballowlist\s*\.\s*add\b", re.I)
-_DIR = re.compile(r"\.harp", re.I)
+_DIR = re.compile(r"""\.harp|(?:^|[/\s'"=~])\.[^/\s'";&|]*[*?\[{]""", re.I)
 _UNSAFE_TEXT = re.compile(r">|\$\(|`|<\(|<<")
 _READ_ONLY = frozenset(
     "cat ls head tail wc stat file du grep egrep fgrep diff cmp md5 md5sum shasum sha256sum nl cut echo printf "
@@ -101,7 +103,41 @@ def _read_only(command: str) -> bool:
         return False
 
 
+_ANSI_C = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.S)
+_ESCAPE = re.compile(r"\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|[0-7]{1,3}|.)", re.S)
+_SIMPLE_ESC = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "f": "\f", "v": "\v"}
+# On the normalised text: the allow file by name, a glob char right before `arpocrates` (or `h?arpocrates`),
+# or dotglob/globdots next to any glob, all count as a mention of the directory.
+_MENTION_NORM = re.compile(r"arpocrates/allow\b|[*?\]]h?arpocrates", re.I)
+_DOTGLOB = re.compile(r"dotglob|globdots", re.I)
+
+
+def _decode_escape(m: re.Match[str]) -> str:
+    code = m.group(1)
+    if code[0] in "xu" and len(code) > 1:
+        return chr(int(code[1:], 16))
+    if code[0] in "01234567":
+        return chr(int(code, 8) & 0xFF)
+    return _SIMPLE_ESC.get(code, code)
+
+
+def _normalise(command: str) -> str:
+    """Spelling tricks undone: $'...' escapes decoded, then backslashes, quotes, braces and commas removed,
+    so `.h\\arpocrates`, `.ha""rpocrates`, `{.,}harpocrates` and `$'\\056harpocrates'` read as `.harpocrates`."""
+    decoded = _ANSI_C.sub(lambda m: _ESCAPE.sub(_decode_escape, m.group(1)), command)
+    return re.sub(r"[\\'\"{},]", "", decoded)
+
+
+def _mentions_dir(command: str, norm: str) -> bool:
+    return bool(_DIR.search(command) or _DIR.search(norm) or _MENTION_NORM.search(norm)
+                or (_DOTGLOB.search(norm) and re.search(r"[*?\[]", norm)))
+
+
 def touches(command: str) -> bool:
     """Whether a shell command could change the allowlist: it runs `harpocrates allow`, or mentions the
-    ~/.harpocrates directory in anything but a provably read-only command."""
-    return bool(_ALLOW_CMD.search(command)) or (bool(_DIR.search(command)) and not _read_only(command))
+    ~/.harpocrates directory (also in a quoted, escaped, braced or globbed spelling) in anything but a
+    provably read-only command."""
+    norm = _normalise(command)
+    if _ALLOW_CMD.search(command) or _ALLOW_CMD.search(norm):
+        return True
+    return _mentions_dir(command, norm) and not _read_only(command)
