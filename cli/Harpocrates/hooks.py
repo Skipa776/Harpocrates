@@ -30,6 +30,7 @@ stores; a secret in an ignored file with an ordinary name can pass `grep -r` (se
 """
 from __future__ import annotations
 
+import errno
 import fnmatch
 import glob
 import json
@@ -37,6 +38,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -61,8 +63,18 @@ _SEARCH_COMMANDS = {"grep", "egrep", "fgrep", "rg", "ag", "ack"}
 _NAMES_ONLY = {"-l", "--files-with-matches", "-L", "--files-without-match", "-c", "--count", "--files",
                "-q", "--quiet", "--count-matches"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "fish", "ksh"}
-_ENV_DUMP = re.compile(r"(?<![\w./-])(?:env|printenv|compgen)(?![\w./-])|\b(?:export|declare|typeset)\s+-p\b"
-                       r"|(?:^|[;&|(`]\s*)set\s*(?:$|[;&|)`])|/proc/[^\s]*environ")
+# An environment dump: `env`, `printenv`, `compgen` anywhere as a word (`echo env | xargs`, `$SHELL -c env`, `\\env`,
+# `/usr/bin/env` and `alias e=env` all run it), `export` bare or with -p/-x, `declare`/`typeset`/`readonly`/`local`
+# with -p/-x, a bare `set`, `ps e...` (BSD option e prints each process's environment), /proc/*/environ. Not counted,
+# as code and not a command: `env` followed by `=`, `:`, `,` or `]` (`env=os.environ`, a YAML or JSON key, a list),
+# or preceded by a word character, dot or dash (`my_env`, `.env`, `--env`), or the argument of a call (`dict(env)`;
+# a bare `(env)` or `$(env)` still counts). Trade-off: `f(a, env)` and a path such as `proj/env` count, and a
+# file or key named env in prose does too, which refuses only while the environment holds a flagged variable.
+_ENV_NAME = r"(?:env|printenv|compgen)(?![\w./-])(?![\"']?\s*[:=,\]])"
+_ENV_OTHER = (r"\b(?:export|declare|typeset|readonly|local)\s+-[a-zA-Z]*[px]"
+              r"|(?:^|[;&|(`\n]\s*)(?:set|export|declare|typeset|readonly)[ \t]*(?:$|[;&|)`\n])"
+              r"|/proc/[^\s]*environ|(?<![\w./-])ps\s+[a-zA-Z]*e[a-zA-Z]*(?![\w.=/-])")
+_ENV_DUMP = re.compile(r"(?<![\w.(-])" + _ENV_NAME + r"|(?:^|[^\w.)\]])\(\s*" + _ENV_NAME + "|" + _ENV_OTHER)
 _SEPARATORS = set(";&|()")  # a token made only of these ends a command (shlex groups them: `&&`, `|&`, `;;`)
 _PIPES = {"|", "|&"}
 _GREPS = {"grep", "egrep", "fgrep"}
@@ -81,13 +93,25 @@ _LONG_VALUE = {"--user", "--group", "--host", "--prompt", "--chdir", "--role", "
                "--max-procs", "--max-chars", "--adjustment"}
 _DURATION = re.compile(r"\d+(\.\d+)?[smhd]?$")
 _UNRESOLVED = re.compile(r"[*?\[{`$]")  # a word the hook can't turn into paths: glob, brace, backtick, any $
-_SINKS = _SHELLS | {"source", ".", "eval", "xargs"}  # a pipe into one of these runs its input as commands
+_SINKS = _SHELLS | {"source", ".", "eval", "xargs", "parallel"}  # a pipe into one of these runs its input as commands
 _PROSE_SPLIT = re.compile(r"(\|&|\|\||&&|[|&;()`])")  # what ends a command in a heredoc body
 _HEREDOC = re.compile(
     r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?<!\S)#[^\n]*"""  # quotes, escapes and comments hide what they hold
     r"""|(?<!<)<<(?!<)(?P<tabs>-?)[ \t]*"""
     r"""(?:(?P<q>['"])(?P<qword>[^\n]+?)(?P=q)|(?P<esc>\\?)(?P<word>[^\s;&|()<>'"\\]+))"""
     r"|\n", re.S)
+# A reader's operand that is a variable or a substitution (`cat "$f"`, `cat $(ls)`, backticks): the file names come from
+# elsewhere, so every word in the command counts as read. A `$` inside an awk or sed program (it has spaces) is no operand.
+_DYNAMIC = re.compile(r"""[^\s'"]*(?:\$[\w@*#?!]|\$\{|\$$|`)[^\s'"]*""")
+_CLI_MODULE = re.compile(r"Harpocrates(\.cli(\.__main__)?)?$")
+SCAN_REFUSAL = ("harpocrates scan prints secret values. Use mcp__harpocrates__scan_file or scan_text, which return "
+                "findings without values.")
+SCAN_UNCHECKABLE = SCAN_REFUSAL + " (git history and --show-secrets can't be checked)"
+
+
+class _ScanUncheckableError(Exception):
+    """An agent-run scan with --history (reads commits) or --show-secrets (prints the values): no work-tree check
+    covers it, so the call is refused outright."""
 _SHELL_C = re.compile(r"^-[a-zA-Z]*c[a-zA-Z]*$")
 _SUBSHELL = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
 _ENV_REF = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
@@ -136,6 +160,46 @@ def _left() -> float:
     return min(MATCH_TIMEOUT, max(_deadline - time.monotonic(), 0.1))
 
 
+_ABSENT = {errno.ENOENT, errno.ENOTDIR, errno.ENAMETOOLONG}  # a name that can't be on disk (ENAMETOOLONG: a 300-char word)
+
+
+def _mode(path: Path) -> Optional[int]:
+    """st_mode of path, None if it names nothing (_ABSENT). Any other failure (EACCES behind a mode-000 directory,
+    ELOOP, EIO) raises: the path may be the secret file, so the caller fails closed (_types: \"unreadable\")."""
+    try:
+        return os.stat(path).st_mode
+    except OSError as exc:
+        if exc.errno in _ABSENT:
+            return None
+        raise
+
+
+def _isfile(path: Path) -> bool:
+    """True if path is a regular file, or if the hook can't tell (a stat error that is not _ABSENT): such a path goes
+    on to _types, which refuses it as unreadable. Only the existence probes use this; a read that fails on a file
+    that is there still raises, and decide() blocks on it."""
+    try:
+        mode = _mode(path)
+    except OSError:
+        return True
+    return mode is not None and stat.S_ISREG(mode)
+
+
+def _isdir(path: Path) -> bool:
+    try:
+        mode = _mode(path)
+    except OSError:
+        return False  # _isfile claims it (as a file to refuse)
+    return mode is not None and stat.S_ISDIR(mode)
+
+
+def _exists(path: Path) -> bool:
+    try:
+        return _mode(path) is not None
+    except OSError:
+        return True
+
+
 def _types(path: Path, redactor, grep_args: Optional[dict] = None) -> Optional[list[str]]:
     """Secret types in a file, [] if none, None if it isn't a scannable text file (missing, a directory,
     binary). An oversize file counts as unscannable-but-risky and is reported as ["unscanned"], except for
@@ -143,7 +207,11 @@ def _types(path: Path, redactor, grep_args: Optional[dict] = None) -> Optional[l
     from Harpocrates.read import MAX_BYTES, SNIFF_BYTES, _read_text, text_encoding
 
     _tick()
-    if not path.is_file():
+    try:
+        mode = _mode(path)
+    except OSError:
+        return ["unreadable"]  # can't even stat it: it may be the secret file, so refuse rather than pass
+    if mode is None or not stat.S_ISREG(mode):
         return None
     # Binary (a NUL in the first 8 KiB, as _read_text sniffs) passes whatever its size, before the size check:
     # a big executable named in a command (`.venv/bin/tool --version`) is no secret store. Trade-off: a binary
@@ -235,7 +303,11 @@ def _first_flagged(paths: Iterable[Path], cwd: Path, grep_args: Optional[dict] =
     approved = grants.granted(session_id)
     passed: list[Path] = []
     for path in dict.fromkeys(paths):
-        if allowlist.allowed(path):
+        try:
+            listed = allowlist.allowed(path)
+        except (OSError, RuntimeError):  # RuntimeError: resolve() on a symlink loop
+            listed = False  # can't stat it: not allowlisted; _types then refuses it as unreadable
+        if listed:
             passed.append(path)
             continue
         if approved and str(path.resolve()) in approved:
@@ -243,7 +315,8 @@ def _first_flagged(paths: Iterable[Path], cwd: Path, grep_args: Optional[dict] =
         found = _types(path, redactor, grep_args)
         if found:
             shown = allowlist.printable(str(path.relative_to(cwd) if path.is_relative_to(cwd) else path))
-            return (shown, "unscanned (over the size limit)" if found == ["unscanned"] else ", ".join(found)), passed
+            kinds = {"unscanned": "unscanned (over the size limit)", "unreadable": "unreadable (can't be checked)"}
+            return (shown, kinds.get(found[0], found[0]) if len(found) == 1 else ", ".join(found)), passed
     return None, passed
 
 
@@ -457,7 +530,7 @@ def _scope(root: Path, full: bool = False, git_dir: bool = False) -> list[Path]:
     directory with no tracked files.
     Links to directories are followed (_walk). git_dir adds the files of .git (_git_internals), for the shell
     searches that descend into it."""
-    if root.is_file():
+    if _isfile(root):
         return [root]
     ls = ["ls-files", "-z", "--others", "--exclude-standard"]
     ignored_root = _git(root, "check-ignore", ".", ok=(0, 1)) != b""  # prints "." if ignored; None on error
@@ -474,9 +547,9 @@ def _scope(root: Path, full: bool = False, git_dir: bool = False) -> list[Path]:
             if secret_names and not name.endswith("/") and not _SENSITIVE.match(name.rsplit("/", 1)[-1]):
                 continue
             path = root / name
-            if path.is_dir():  # a nested repo or submodule (git lists it as one entry), or a link to a directory
+            if _isdir(path):  # a nested repo or submodule (git lists it as one entry), or a link to a directory
                 files += _walk(path, secret_names, git_dir, seen)
-            elif path.is_file():
+            elif _isfile(path):
                 files.append(path)
             if len(files) > MAX_SCOPE_FILES:
                 raise _OutOfTimeError  # too wide to vouch for: deny
@@ -493,7 +566,7 @@ def _matching(pattern: Optional[str], roots: list[Path], rg_flags: list[str], py
     timeout and a matcher error."""
     from Harpocrates.read import MAX_BYTES
 
-    roots = [r for r in roots if r.exists()]
+    roots = [r for r in roots if _exists(r)]
     full = "-g" in rg_flags  # a Grep glob can name files .gitignore hides: the fallback scope is the whole tree
     rg = shutil.which("rg")
     run = {"capture_output": True, "encoding": "utf-8", "errors": "surrogateescape"}  # a name may not be UTF-8
@@ -540,7 +613,7 @@ def _paths(output: str, roots: list[Path], full: bool = False) -> list[Path]:
     """NUL-separated matcher output (a file name may contain a newline). Anything that isn't a file
     means the output can't be trusted: fall back to the whole scope."""
     paths = [Path(p) for p in output.split("\0") if p]
-    return paths if all(p.is_file() for p in paths) else [f for r in roots for f in _scope(r, full)]
+    return paths if all(_isfile(p) for p in paths) else [f for r in roots for f in _scope(r, full)]
 
 
 def _grep_flags(args: dict) -> tuple[list[str], int]:
@@ -622,14 +695,14 @@ def _search_command(argv: list[str], here: Path, piped: bool = False, tree: bool
     head = opts[:opts.index("--")] if "--" in opts else opts
     flags = [a for a in head if a.startswith("-")]
     words = [a for a in head if not a.startswith("-")] + opts[len(head) + 1:]
-    roots = [r for r in (_resolve(a, here) for a in words) if r.exists()]
+    roots = [r for r in (_resolve(a, here) for a in words) if _exists(r)]
     recursive = name in _GREPS and (env_opts or _recursive(head))
     operands = words if any(_names_pattern(a) for a in flags) else words[1:]  # else the first word is the pattern
     if not roots and not (tree or git or recursive or any(_UNRESOLVED.search(a) for a in operands)
                           or (name not in _GREPS and not piped)):
         return []  # reads stdin
     descends = not git and _reads_git(name, flags, recursive)
-    return [f for r in (roots or [here]) if r.exists() for f in _scope(r, git_dir=descends)]
+    return [f for r in (roots or [here]) if _exists(r) for f in _scope(r, git_dir=descends)]
 
 
 # ---------------------------------------------------------------------------------------- shell
@@ -870,13 +943,33 @@ def _copy_dirs(name: str, args: list[str], here: Path) -> list[Path]:
     words = [a for a in args if not a.startswith("-")]
     targeted = any(a.startswith("--target") or (a[:1] == "-" and a[1:2] != "-" and "t" in a[1:]) for a in args)
     sources = words if name not in _TARGET_LAST or targeted else words[:-1]
-    return [f for w in sources for p in _expand(w, here) if p.is_dir() for f in _scope(p)]
+    return [f for w in sources for p in _expand(w, here) if _isdir(p) for f in _scope(p)]
+
+
+def _scan_operands(argv: list[str]) -> Optional[list[str]]:
+    """The non-option words after `scan` if this command runs `harpocrates scan` (the script, or `python -m
+    Harpocrates[.cli]`, behind any wrapper); None if it doesn't, or only asks for --help."""
+    for i, tok in enumerate(argv):
+        if Path(tok).name == "harpocrates":
+            rest = argv[i + 1:]
+        elif tok == "-m" and i + 1 < len(argv) and _CLI_MODULE.match(argv[i + 1]):
+            rest = argv[i + 2:]
+        else:
+            continue
+        if "scan" in rest and not {"--help", "-h"} & set(rest):
+            after = rest[rest.index("scan") + 1:]
+            if any(a == "--history" or a.startswith("--show-secrets") for a in after):
+                raise _ScanUncheckableError
+            return [a for a in after if not a.startswith("-")]
+    return None
 
 
 def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dict[str, list[str]]] = None,
-                named_ok: bool = True) -> tuple[list[Path], list[str]]:
+                named_ok: bool = True, scans: Optional[list[Path]] = None) -> tuple[list[Path], list[str]]:
     """(files the command could print, extra text it could print such as git blobs). named_ok False: the text is
-    run as a command (a substitution's output), so _NAMING excuses nothing."""
+    run as a command (a substitution's output), so _NAMING excuses nothing. scans: collects the files an agent-run
+    `harpocrates scan` would print values from (a recursive reader of its operands, default `.`: scoped like a
+    recursive search, same cap); _bash refuses those with its own message."""
     files: list[Path] = []
     texts: list[str] = []
     if depth > 3:
@@ -884,7 +977,7 @@ def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dic
     lines, scan, bodies = _heredocs(command)  # bodies are cut out of what is tokenised and read apart (_prose)
     values = _assignments(command, inherited or {})  # nested bodies inherit even unexported names: more paths
     for m in _SUBSHELL.finditer(scan):  # $(...) and `...` run first (not in a quoted heredoc): check their bodies too
-        sub_files, sub_texts = _bash_files(m.group(1) or m.group(2) or "", cwd, depth + 1, values, False)
+        sub_files, sub_texts = _bash_files(m.group(1) or m.group(2) or "", cwd, depth + 1, values, False, scans)
         files, texts = files + sub_files, texts + sub_texts
     segs = [(argv, piped, False) for argv, piped in _segments(lines)] + [s for body in bodies for s in _prose(body)]
     # `D=dir; cat $D/f`, `R=HEAD:.env; git show $R`
@@ -895,7 +988,14 @@ def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dic
     exempt = named_ok and not sink
     env_opts = any("GREP_OPTIONS" in where for where in (command, values, os.environ))  # may add -r to a grep
     here = cwd
-    reads, named = False, []  # a reader anywhere makes every named file count (`for f in a b; do cat "$f"`)
+    # Words count as read for the commands that read files themselves (a reader of stdin only, `| tail -3`, promotes
+    # nothing of another command's: `pytest tests/x.py | tail -1`). Everything named counts (reads_all) when a
+    # reader takes a variable or substitution (`for f in a b; do cat "$f"; done`) or xargs feeds it names.
+    # A pipe into an interpreter (sink: a shell, source, eval, xargs, parallel) runs whatever it is fed, so there the
+    # old command-wide rule applies: any reader makes every named word count (`echo f | sed 's/^/cat /' | sh`).
+    reading: list[Path] = []
+    named: list[Path] = []
+    reads_all = any_reader = False
     for argv, piped, prose in segs:
         names = [Path(t).name for t in argv]
         start, fed = _command_word(argv)
@@ -906,7 +1006,7 @@ def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dic
                 here = _resolve(argv[1], here) if len(argv) > 1 else Path.home()
             continue
         if not prose and names[0] in ("eval", "exec", "watch") and len(argv) > 1:
-            sub_files, sub_texts = _bash_files(" ".join(argv[1:]), here, depth + 1, values, False)
+            sub_files, sub_texts = _bash_files(" ".join(argv[1:]), here, depth + 1, values, False, scans)
             files, texts = files + sub_files, texts + sub_texts
             continue
         body = None  # sudo / env ... bash -x -c BODY
@@ -914,7 +1014,7 @@ def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dic
             body = next((argv[j + 1] for i, n in enumerate(names) if n in _SHELLS
                          for j in range(i + 1, len(argv) - 1) if _SHELL_C.match(argv[j])), None)
         if body is not None:
-            sub_files, sub_texts = _bash_files(body, here, depth + 1, values)
+            sub_files, sub_texts = _bash_files(body, here, depth + 1, values, True, scans)
             files, texts = files + sub_files, texts + sub_texts
             continue
         base = here
@@ -934,13 +1034,22 @@ def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dic
             if i is not None:  # behind a command we don't know (flock, parallel, find -exec): never stdin
                 scoped = ["grep", "-r", *_find_paths(argv[start + 1:])] if names[start] == "find" else argv[i:]
                 files += _search_command(scoped, base, piped, tree=True, env_opts=env_opts)
-        reads = reads or any(n in _READ_COMMANDS for n in names) or "<" in argv
-        named += [p for w in argv for p in _expand(w, base)]
+        if scans is not None and start < len(argv) and not (exempt and names[start] in _NAMING):
+            operands = _scan_operands(argv)
+            if operands is not None:
+                roots = [p for w in operands for p in _expand(w, base) if _exists(p)]
+                scans += [f for r in (roots or [base]) for f in _scope(r)]  # a flag's value is no path: default `.`
+        words = [p for w in argv for p in _expand(w, base)]
+        named += words
+        if any(n in _READ_COMMANDS for n in names) or "<" in argv:
+            any_reader = True
+            reading += words
+            reads_all = reads_all or any(_DYNAMIC.fullmatch(w) for w in argv) or (
+                fed and start < len(argv) and names[start] in _READ_COMMANDS)
         if start < len(argv) and names[start] in _COPY_COMMANDS:
             files += _copy_dirs(names[start], argv[start + 1:], base)
-    if reads:
-        files += named
-    return [f for f in files if f.is_file()], texts
+    files += named if reads_all or (sink and any_reader) else reading
+    return [f for f in files if _isfile(f)], texts
 
 
 def _env_secrets() -> list[str]:
@@ -976,11 +1085,17 @@ def _bash(command: str, cwd: Path) -> int:
     env_reason = _check_env(command)
     if env_reason:
         return _deny(env_reason)
-    files, texts = _bash_files(command, cwd)
+    scans: list[Path] = []
+    try:
+        files, texts = _bash_files(command, cwd, scans=scans)
+    except _ScanUncheckableError:
+        return _deny(SCAN_UNCHECKABLE)
     for text in texts:
         if Redactor().redact(text) != text:
             return _deny("That git object contains secrets. Read the working-tree file with "
                          "mcp__harpocrates__safe_read instead.")
+    if _first_flagged([f for f in scans if _isfile(f)], cwd)[0] is not None:
+        return _deny(SCAN_REFUSAL)
     return _check_files(files, "safe_read", cwd, "Bash")
 
 

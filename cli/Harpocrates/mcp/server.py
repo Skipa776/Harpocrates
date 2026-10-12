@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from Harpocrates.core.classification import secret_type
 from Harpocrates.core.detector import detect_file, detect_text
 from Harpocrates.core.result import Finding
 from Harpocrates.read import Redactor
@@ -52,119 +53,106 @@ def _check_path(path: Path) -> None:
         raise ValueError(f"Refusing to scan special file: {path}")
 
 
-@mcp.tool()
-def scan_text(
-    text: str,
-    include_token: bool = False,
-    include_contributions: bool = False,
-) -> List[Dict[str, Any]]:
+# One redactor per server process: the MCP session. Its HMAC key keeps placeholders stable
+# within the session and differs across sessions (FR-READ-02, SEC-02).
+_redactor = Redactor()
+
+
+def _safe_finding(f: Finding) -> Dict[str, Any]:
+    """Agent-safe view of a finding (SEC-02).
+
+    Carries type, severity, confidence, location and a session-keyed placeholder, never the
+    token, the source snippet, entropy, the free-text category_reason (it can quote the match),
+    or any hash of the value other than the 4-hex HMAC placeholder.
+    Trade-off: agents lose snippet context; they can call safe_read on the file instead.
     """
-    Scan a text blob for secrets using regex + entropy detection.
+    return {
+        "type": f.type,
+        "severity": f.severity.value,
+        "evidence": f.evidence.value,
+        "confidence": f.confidence,
+        "category": f.category,
+        "in_comment": f.in_comment,
+        "file": f.file,
+        "line": f.line,
+        "column": f.token_start + 1 if f.token_start is not None else None,
+        "placeholder": _redactor.placeholder(f.token or "", secret_type(f.category)),
+    }
 
-    Note: `include_token=False` redacts the `token` field only. The `snippet`
-    field contains the raw source line and may still include the matched secret.
-    Do not log or store findings in contexts where the snippet must be redacted.
 
-    Each finding includes:
-      - `category`: violation classification (e.g., "password", "api_token",
-        "connection_string", "jwt", "private_key", "generic_secret"). Use this
-        field to decide remediation (rotate password vs revoke token vs
-        regenerate keypair).
-      - `category_reason`: human-readable explanation of how the category
-        was inferred. Surface this in agent-facing UIs.
-
-    Args:
-        text: The text content to scan.
-        include_token: If True, include the raw matched token in each finding
-                       (default False — token field is redacted).
-        include_contributions: If True, each finding gains an `explanation` key
-                               with TreeSHAP per-feature contributions. Loads
-                               xgboost lazily — only pay the cost when needed.
-                               Requires xgboost: pip install 'harpocrates[train]'.
-
-    Returns:
-        A list of finding dicts with type, severity, evidence, file, line,
-        snippet, entropy, confidence, category, category_reason.
-        Token is included only if include_token=True.
-        Explanation is included only if include_contributions=True.
-    """
-    findings: List[Finding] = detect_text(text)
-    if not include_contributions:
-        return [f.to_json_dict(include_token=include_token) for f in findings]
-
-    # Lazy import — xgboost never loaded on the default scan path.
+def _with_explanations(findings: List[Finding], text: Optional[str]) -> List[Dict[str, Any]]:
+    # Lazy import: xgboost never loaded on the default scan path.
     from Harpocrates.ml.context import extract_context_from_finding
     from Harpocrates.ml.explain import explain_finding
 
     result = []
     for f in findings:
-        ctx = extract_context_from_finding(f, full_content=text)
+        ctx = (extract_context_from_finding(f, full_content=text) if text is not None
+               else extract_context_from_finding(f))
         explanation = explain_finding(f, ctx)
-        d = f.to_json_dict(include_token=include_token)
-        d["explanation"] = explanation.to_dict() if explanation else None
+        d = _safe_finding(f)
+        if explanation:
+            ed = explanation.to_dict()
+            ed.pop("finding_id", None)  # derived from the token; not needed by agents
+            d["explanation"] = ed
+        else:
+            d["explanation"] = None
         result.append(d)
     return result
 
 
 @mcp.tool()
+def scan_text(text: str, include_contributions: bool = False) -> List[Dict[str, Any]]:
+    """
+    Scan a text blob for secrets using regex + entropy detection.
+
+    Secret values are never returned. Each finding has: type, severity, evidence,
+    confidence, category (use it to choose remediation: rotate password vs revoke token vs
+    regenerate keypair), in_comment, file, line, column and placeholder
+    (<<HARPO:type:hash4>>, stable within this session).
+
+    Args:
+        text: The text content to scan.
+        include_contributions: If True, each finding gains an `explanation` key
+                               with TreeSHAP per-feature contributions. Requires
+                               xgboost: pip install 'harpocrates[train]'.
+    """
+    findings: List[Finding] = detect_text(text)
+    if not include_contributions:
+        return [_safe_finding(f) for f in findings]
+    return _with_explanations(findings, text)
+
+
+@mcp.tool()
 def scan_file(
     path: str,
-    include_token: bool = False,
     max_bytes: Optional[int] = None,
     include_contributions: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Scan a file on disk for secrets using regex + entropy detection.
 
-    Reads at most 10 MB regardless of `max_bytes` to prevent resource
-    exhaustion. Refuses to open special files (FIFOs, sockets, devices).
+    Reads at most 10 MB regardless of `max_bytes`. Refuses special files (FIFOs, sockets,
+    devices). Runs with the filesystem scope of the user who launched the server; symlinks
+    are followed.
 
-    The harpocrates-mcp process has the same filesystem read scope as the
-    user who launched it — symlinks are followed and any readable file may
-    be scanned. Callers are responsible for passing safe paths.
-
-    Note: `include_token=False` redacts the `token` field only. The `snippet`
-    field contains the raw source line and may still include the matched secret.
-
-    Each finding includes `category` and `category_reason` fields — see
-    scan_text docstring for details.
+    Secret values are never returned; findings have the same fields as scan_text.
 
     Args:
         path: Absolute path to the file to scan.
-        include_token: If True, include the raw matched token (default False).
         max_bytes: Cap on bytes read. Capped at 10 MB regardless of this value.
-        include_contributions: If True, each finding gains an `explanation` key
-                               with TreeSHAP per-feature contributions. Loads
-                               xgboost lazily. Requires xgboost: pip install 'harpocrates[train]'.
+        include_contributions: As in scan_text.
 
     Returns:
         List of finding dicts. Empty list if the path does not exist or is binary.
-        Explanation is included only if include_contributions=True.
     """
     resolved = Path(path)
     _check_path(resolved)
     cap = min(max_bytes, _MAX_SCAN_BYTES) if max_bytes is not None else _MAX_SCAN_BYTES
     findings: List[Finding] = detect_file(resolved, max_bytes=cap)
     if not include_contributions:
-        return [f.to_json_dict(include_token=include_token) for f in findings]
-
-    # Lazy import — xgboost never loaded on the default scan path.
-    from Harpocrates.ml.context import extract_context_from_finding
-    from Harpocrates.ml.explain import explain_finding
-
-    result = []
-    for f in findings:
-        ctx = extract_context_from_finding(f)
-        explanation = explain_finding(f, ctx)
-        d = f.to_json_dict(include_token=include_token)
-        d["explanation"] = explanation.to_dict() if explanation else None
-        result.append(d)
-    return result
-
-
-# One redactor per server process: the MCP session. Its HMAC key keeps placeholders stable
-# within the session and differs across sessions (FR-READ-02, SEC-02).
-_redactor = Redactor()
+        return [_safe_finding(f) for f in findings]
+    return _with_explanations(findings, None)
 
 
 @mcp.tool()

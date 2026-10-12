@@ -367,7 +367,8 @@ def test_pem_file_preserves_url_bodies(tmp_path: Path) -> None:
 
 def test_env_assignment_regex_skips_when_critical_regex_matched(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text("OPENAI_API_KEY=***REMOVED***\n")
+    key = "sk-" + "abc-" * 5 + "XYZ"  # hyphenated short form, built at runtime
+    env_file.write_text(f"OPENAI_API_KEY={key}\n")
     findings = detect_file(env_file)
     # The OPENAI_API_KEY_LEGACY HIGH regex should fire; no duplicate ENV_ASSIGNMENT
     env_assignment_findings = [f for f in findings if f.type == "ENV_ASSIGNMENT"]

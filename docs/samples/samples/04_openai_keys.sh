@@ -15,7 +15,9 @@
 export OPENAI_API_KEY="sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL"
 
 # Legacy / short format with hyphens in body — NEW detection in v0.4
-export OPENAI_KEY_LEGACY="***REMOVED***"
+# Built at runtime ("sk-" + five "abc-" groups + "XYZ") so the repo holds no key
+# literal; see TESTING_GUIDE.txt, Feature 4, for how to scan the expanded value.
+export OPENAI_KEY_LEGACY="sk-$(printf 'abc-%.0s' 1 2 3 4 5)XYZ"
 
 # Project-scoped key
 export OPENAI_PROJ_KEY="sk-proj-xK9mN3pQ7rS2tV8wY1zAT3cE0gH4jL6nP9qT3uW7yB"

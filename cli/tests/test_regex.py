@@ -155,9 +155,12 @@ def test_hashicorp_vault_token() -> None:
 
 
 def test_openai_legacy_key_matches_short_form() -> None:
-    """***REMOVED*** style keys with hyphens in the body."""
+    """Short-form keys with hyphen-joined groups in the body.
+
+    Built at runtime so no scanner-flaggable key literal is committed.
+    """
     pattern = HIGH_SIGNATURES["OPENAI_API_KEY_LEGACY"]
-    assert pattern.search("***REMOVED***")
+    assert pattern.search("sk-" + "abc-" * 5 + "XYZ")  # hyphenated short form
     assert pattern.search("sk-" + "a" * 16)              # minimum 16 chars
     assert pattern.search("sk-" + "a-b_C" * 5)           # hyphens and underscores
 
@@ -210,7 +213,7 @@ def test_openai_legacy_detected_at_high_severity() -> None:
     from Harpocrates.core.detector import detect_text
     from Harpocrates.core.result import EvidenceType, Severity
 
-    key = "***REMOVED***"
+    key = "sk-" + "abc-" * 5 + "XYZ"  # hyphenated short form, built at runtime
     findings = detect_text(f'OPENAI_API_KEY="{key}"\n')
     legacy = [f for f in findings if f.type == "OPENAI_API_KEY_LEGACY"]
     assert legacy, "Expected OPENAI_API_KEY_LEGACY finding"

@@ -137,8 +137,8 @@ File: samples/04_openai_keys.sh  (Bash)
 WHAT CHANGED:
   The existing OpenAI pattern only matched the current 48-char format
   (sk-[alphanumeric]{48}) and the project-scoped sk-proj-... format.
-  Legacy and short OpenAI keys like ***REMOVED*** were
-  silently missed.
+  Legacy and short OpenAI keys ("sk-" followed by 16+ letters, digits,
+  hyphens or underscores, often hyphen-joined groups) were silently missed.
 
   A new pattern OPENAI_API_KEY_LEGACY was added to HIGH_SIGNATURES:
     sk-[A-Za-z0-9_-]{16,}
@@ -150,11 +150,17 @@ WHAT TO VERIFY:
 
   EXPECTED FINDINGS:
     Line 15  current-format key  → severity: CRITICAL, category: openai_key
-    Line 18  legacy/short key    → severity: HIGH,     category: openai_key
-    Line 21  proj-scoped key     → severity: CRITICAL, category: openai_key
+    Line 23  proj-scoped key     → severity: CRITICAL, category: openai_key
+
+  The legacy/short key on line 20 is built at runtime so the repository
+  holds no key literal. Scan its expanded value:
+    ( . docs/samples/samples/04_openai_keys.sh
+      echo "OPENAI_KEY_LEGACY=\"$OPENAI_KEY_LEGACY\"" ) > /tmp/legacy_key.sh
+    harpocrates scan /tmp/legacy_key.sh
+    Line 1   legacy/short key    → severity: HIGH,     category: openai_key
 
   VERIFY THAT:
-    - The legacy key on line 6 IS detected (it was missed before v0.4)
+    - The expanded legacy key IS detected (it was missed before v0.4)
     - Legacy key severity is HIGH not CRITICAL (broader pattern = lower confidence)
     - Current-format keys remain CRITICAL
 

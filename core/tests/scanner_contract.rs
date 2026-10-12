@@ -133,7 +133,8 @@ fn supports_every_python_signature_family() {
         ("HASHICORP_VAULT_TOKEN", format!("hvs.{}", "a".repeat(90))),
         (
             "OPENAI_API_KEY_LEGACY",
-            "***REMOVED***".to_owned(),
+            // Built at runtime: a hyphenated short-form key, never a committed literal.
+            format!("sk-{}XYZ", "abc-".repeat(5)),
         ),
     ];
 
