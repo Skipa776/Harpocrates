@@ -19,7 +19,7 @@ from Harpocrates import harness, install
 from Harpocrates.cli import app
 
 PY = sys.executable
-ADD_LINE = f"mcp add --scope user harpocrates -- {PY} -m Harpocrates.mcp.server"
+ADD_LINE = f"mcp add --scope user harpocrates -- {PY} {harness.python_flag()} -m Harpocrates.mcp.server"
 CLAUDE_START, CLAUDE_END = "<!-- harpocrates:start -->", "<!-- harpocrates:end -->"
 TOML_START, TOML_END = "# >>> harpocrates >>>", "# <<< harpocrates <<<"
 
@@ -442,6 +442,40 @@ def test_fr_install_01_uninstall_leaves_an_mcp_server_the_user_registered(home: 
     install.uninstall_harnesses(["claude-code"])
     assert (home.parent / "claude.state").exists()
     assert not any(c.startswith("mcp remove") for c in calls(fake_claude))
+
+
+def test_fr_install_01_record_names_the_interpreter_and_old_records_stay_valid(home: Path, fake_claude: Path) -> None:
+    install.install_harnesses(["claude-code", "codex"])
+    path = home / ".harpocrates" / "install.json"
+    assert record(home)["python"] == sys.executable and Path(record(home)["python"]).is_absolute()
+    assert record(home)["python_args"] == [harness.python_flag()]
+    assert record(home)["version"] == 1
+    old = {k: v for k, v in record(home).items() if k not in ("python", "python_args")}  # from before they existed
+    path.write_text(json.dumps(old, indent=2) + "\n")
+    assert ours(install.install_harnesses(["claude-code", "codex"]))
+    assert record(home)["python"] == sys.executable  # a reinstall adds it
+    path.write_text(json.dumps(old, indent=2) + "\n")
+    assert ours(install.uninstall_harnesses(["claude-code", "codex"]))  # and an old record uninstalls as before
+    assert not path.exists()
+
+
+def test_sec_hijack_reinstall_replaces_hook_commands_and_mcp_registration_that_lack_the_flag(
+        home: Path, fake_claude: Path) -> None:
+    flag = harness.python_flag()
+    old_pre = f"{PY} -m Harpocrates.hooks --ask"
+    old_post = f"{PY} -m Harpocrates.hooks --post"
+    old_hook = lambda c: {"hooks": [{"type": "command", "command": c}]}  # noqa: E731
+    write_json(home / ".claude" / "settings.json", {"hooks": {
+        "PreToolUse": [old_hook(old_pre)], "PostToolUse": [old_hook(old_post)],
+        "SessionEnd": [old_hook(old_post)]}})
+    (home.parent / "claude.state").write_text(f"mcp add --scope user harpocrates -- {PY} -m Harpocrates.mcp.server\n")
+    assert ours(install.install_harnesses(["claude-code"]))
+    text = json.dumps(settings_of(home))
+    assert old_pre not in text and old_post not in text
+    commands = [h["command"] for entries in settings_of(home)["hooks"].values() for e in entries for h in e["hooks"]]
+    assert commands and all(f"{flag} -m Harpocrates.hooks" in c for c in commands)
+    assert calls(fake_claude)[-1] == ADD_LINE and f"{PY} {flag} -m Harpocrates.mcp.server" in ADD_LINE
+    assert sorted(record(home)["claude-code"]["replaced"]) == sorted({old_pre, old_post})
 
 
 def test_fr_install_01_unreadable_record_blocks_install_but_not_uninstall(home: Path) -> None:

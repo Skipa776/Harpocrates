@@ -41,15 +41,40 @@ def _gate_verifier():
     return OnnxVerifier(layer="gate")  # recall-first threshold (FR-CORE-06)
 
 
+SNIFF_BYTES = 8192
+
+
+def text_encoding(head: bytes) -> Optional[str]:
+    """The codec of a file that is text in UTF-16 or UTF-32 (a byte order mark, or NULs on one parity of the bytes:
+    ASCII-heavy UTF-16 has them on every other byte); None for UTF-8 and for real binary. Such a file is full of
+    NULs yet reads as plain text once decoded, so treating it as binary would let a secret through (hooks.py) or hide
+    the file from safe_read. Trade-off: binary with the same NUL pattern is decoded and scanned as text, which can
+    only cost a false positive. Both parities mostly NUL (executables, zero fill) stay binary."""
+    if head[:4] in (b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"):
+        return "utf-32"
+    if head[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return "utf-16"
+    even, odd = head[0::2], head[1::2]
+    if not even or not odd:
+        return None
+    low, high = even.count(0) / len(even), odd.count(0) / len(odd)
+    if high >= 0.5 and low <= 0.1:
+        return "utf-16-le"
+    if low >= 0.5 and high <= 0.1:
+        return "utf-16-be"
+    return None
+
+
 def _read_text(path: Path) -> str:
     if not path.is_file():  # also false for FIFOs, sockets and devices, which could block
         raise ValueError(f"not a regular file: {path}")
     if path.stat().st_size > MAX_BYTES:
         raise ValueError(f"file over {MAX_BYTES} bytes, not read: {path}")
     data = path.read_bytes()
-    if b"\x00" in data[:8192]:
+    encoding = text_encoding(data[:SNIFF_BYTES])
+    if encoding is None and b"\x00" in data[:SNIFF_BYTES]:
         raise ValueError(f"binary file, not read: {path}")
-    return data.decode("utf-8", errors="replace")
+    return data.decode(encoding or "utf-8", errors="replace")
 
 
 class Redactor:

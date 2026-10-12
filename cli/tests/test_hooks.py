@@ -412,6 +412,24 @@ def test_fr_read_03_hook_oversize_stays_refused_elsewhere(repo, capsys, tmp_path
     assert code == 0 and _denied(out) and "over the size limit" in out
 
 
+def test_fr_read_03_hook_oversize_binary_passes_oversize_text_refused(repo, capsys, tmp_path: Path) -> None:
+    """A big executable named in a command (`.venv/bin/tool --version | cat`) is binary: it passes like images and
+    PDFs, whatever its size. An oversize TEXT file is still refused."""
+    from Harpocrates.read import MAX_BYTES
+
+    binary = tmp_path / "tool"
+    binary.write_bytes(b"\x7fELF\x00" + b"\x01" * 1000)
+    with binary.open("ab") as f:
+        f.truncate(MAX_BYTES + 1024 * 1024)  # ~11 MB, NUL-filled
+    text = tmp_path / "big.txt"
+    text.write_bytes(b"filler line\n" * ((MAX_BYTES + 1024 * 1024) // 12))
+    assert binary.stat().st_size > MAX_BYTES and text.stat().st_size > MAX_BYTES
+    assert _run(_bash(tmp_path, "./tool --version | cat"), capsys) == (0, "")
+    assert _run(_bash(tmp_path, "cat tool"), capsys) == (0, "")
+    code, out = _run(_bash(tmp_path, "cat big.txt"), capsys)
+    assert code == 0 and _denied(out) and "over the size limit" in out
+
+
 @pytest.mark.parametrize("ripgrep", [True, False])
 def test_fr_read_03_hook_grep_glob_reaches_ignored_files(repo, capsys, tmp_path: Path,
                                                          monkeypatch: pytest.MonkeyPatch, ripgrep: bool) -> None:
@@ -843,3 +861,51 @@ def test_fr_read_03_hook_git_dir_lfs_content_is_in_scope(repo, capsys, tmp_path:
     (root / rel).write_text(f"GITHUB_TOKEN={_canary_token(canaries)}\n")
     code, out = _run(_bash(root, "grep -r foo ."), capsys)
     assert code == 0 and _denied(out) and rel in out
+
+def _utf16_variants(text: str) -> dict[str, bytes]:
+    return {
+        "le-bom": b"\xff\xfe" + text.encode("utf-16-le"),
+        "be-bom": b"\xfe\xff" + text.encode("utf-16-be"),
+        "le": text.encode("utf-16-le"),
+        "be": text.encode("utf-16-be"),
+    }
+
+
+@pytest.mark.parametrize("variant", ["le-bom", "be-bom", "le", "be"])
+def test_fr_read_03_hook_scans_utf16_files_instead_of_passing_them_as_binary(repo, capsys, tmp_path: Path,
+                                                                             variant: str) -> None:
+    root, canaries = repo
+    rel = sorted({c["file"] for c in canaries})[0]
+    (tmp_path / "notes16.txt").write_bytes(_utf16_variants((root / rel).read_text())[variant])
+    (tmp_path / "clean16.txt").write_bytes(_utf16_variants("hello world, nothing here\n" * 20)[variant])
+    for event in ({"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": "notes16.txt"}},
+                  _bash(tmp_path, "cat notes16.txt"), _bash(tmp_path, "head -n 3 notes16.txt | cat")):
+        code, out = _run(event, capsys)
+        assert code == 0 and _denied(out), (variant, event)
+        assert not any(c["value"][:12] in out for c in canaries)
+    assert _run(_bash(tmp_path, "cat clean16.txt"), capsys) == (0, "")  # UTF-16 without a secret still passes
+
+
+def test_fr_read_03_hook_utf16_oversize_is_refused_not_passed(repo, capsys, tmp_path: Path,
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    import Harpocrates.read as read
+
+    monkeypatch.setattr(read, "MAX_BYTES", 4096)
+    (tmp_path / "big16.txt").write_bytes(_utf16_variants("filler line\n" * 600)["le-bom"])
+    code, out = _run(_bash(tmp_path, "cat big16.txt"), capsys)
+    assert code == 0 and _denied(out) and "over the size limit" in out
+
+
+def test_fr_read_03_hook_binary_secret_store_name_is_refused(repo, capsys, tmp_path: Path) -> None:
+    """The binary pass is for executables and images: a file named like a secret store (SENSITIVE_FILES) never gets
+    it, since a NUL in front of the text would otherwise hide it."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    for name in (".env", "prod.pem", "id_rsa"):
+        (tmp_path / name).write_bytes(b"\x00" + f"GITHUB_TOKEN={token}\n".encode())
+        for event in ({"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": name}},
+                      _bash(tmp_path, f"cat {name}")):
+            code, out = _run(event, capsys)
+            assert code == 0 and _denied(out) and token[:12] not in out, (name, event)
+    (tmp_path / "blob.bin").write_bytes(b"\x00" + f"GITHUB_TOKEN={token}\n".encode())
+    assert _run(_bash(tmp_path, "cat blob.bin"), capsys) == (0, "")  # an ordinary binary name still passes

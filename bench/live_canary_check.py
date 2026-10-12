@@ -68,7 +68,7 @@ def codex_cmd(repo: Path, prompt: str, guard: bool) -> list[str]:
     fs_entries = [f"{json.dumps(d)}=\"deny\"" for d in harness.SENSITIVE_HOME_DIRS]
     fs_entries.append(f"{json.dumps(':workspace_roots')}={workspace}")
     perm_table = "{extends=\":workspace\",filesystem={" + ",".join(fs_entries) + "}}"
-    hook_cmd = json.dumps(shlex.join([cmd, "-m", "Harpocrates.hooks"]))
+    hook_cmd = json.dumps(shlex.join([cmd, harness.python_flag(), "-m", "Harpocrates.hooks"]))
     hook_table = f'[{{matcher="^Bash$",hooks=[{{type="command",command={hook_cmd}}}]}}]'
     return [*base, "-c", 'default_permissions="harpocrates"',
             "-c", f"mcp_servers.harpocrates={mcp_table}",

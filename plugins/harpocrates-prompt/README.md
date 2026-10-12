@@ -55,6 +55,42 @@ In a Claude Code terminal session:
 Then choose a scope. The plugin is active in that session straight away, and
 under the user scope in every session after.
 
+## Manage the allowlist from the chat box
+
+The plugin adds a `/harpocrates` slash command that drives the Harpocrates CLI's
+allowlist (the paths and names Claude may read even when they hold secrets):
+
+```
+Harpocrates allowlist (only you can change it; every use is logged)
+/harpocrates allow <path>            allow one file or folder
+/harpocrates allow --name <name>     allow a folder or file name in every project
+/harpocrates remove <path>           remove a path
+/harpocrates remove --name <name>    remove a name
+/harpocrates allowlist               show the list
+```
+
+`/harpocrates` alone (or `help`) prints this help. A relative path is resolved
+against the session's folder and a leading `~` against your home folder. Put a
+path that contains spaces in quotes: `/harpocrates allow "My Project/.env"`.
+`allow --name` for a broad name such as `src` asks you first ("Allow it
+everywhere" or "Cancel"); only that exact choice goes ahead.
+
+**Only you can change the allowlist.** `allow` and `remove` run only when you
+press Enter in the chat box. Any other origin (another plugin, the SDK, the
+Remote Control bridge, a run started by the model, a background task or a
+schedule) gets "Only you can change the Harpocrates allowlist: type /harpocrates
+in the chat box." and nothing is changed. Help and the listing change nothing,
+so they run for any origin. The plugin never writes the allowlist itself: it
+runs the CLI with the Python interpreter that `harpocrates install` recorded
+(`"python"` and `"python_args"`, `-P` or `-I`, in the install record under
+`~/.harpocrates`), as `<python> <flag> -m Harpocrates.cli allow ...` (the flag
+keeps the project folder off the import path), started by argument list and not
+through a shell, and shows its answer as plain text. It never looks for
+`harpocrates` on your `PATH`, so a look-alike earlier in `PATH` or in a project
+cannot run. With no record, or no absolute `python` in it, it replies "Run
+`harpocrates install` first" and runs nothing. The answer is never put in front
+of the model.
+
 ## What it looks like
 
 ```

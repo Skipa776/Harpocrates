@@ -52,7 +52,11 @@ _READ_COMMANDS = {"cat", "head", "tail", "less", "more", "bat", "nl", "sed", "aw
                   "hexdump", "base64", "tac", "cut", "sort", "uniq", "diff", "jq", "yq", "type", "Get-Content",
                   "cp", "dd", "paste", "column", "fold", "rev", "tee", "xargs", "zcat", "zless", "pr", "fmt",
                   "expand", "join", "comm", "source", ".", "blame", "annotate",
-                  "mv", "ln", "rsync", "install"}  # mv/ln: moving a file into an allowlisted folder
+                  "mv", "ln", "rsync", "install", "tar", "zip", "ditto"}  # mv/ln: moving a file into an allowlisted folder
+# Commands that read every file under a directory argument (cp -r DIR dst, tar -cf a.tar DIR). _TARGET_LAST: the
+# last word is where they write, which they don't read (unless -t/--target-directory moves it elsewhere).
+_COPY_COMMANDS = {"cp", "mv", "rsync", "install", "ln", "tar", "zip", "ditto"}
+_TARGET_LAST = {"cp", "mv", "rsync", "install", "ln", "ditto"}
 _SEARCH_COMMANDS = {"grep", "egrep", "fgrep", "rg", "ag", "ack"}
 _NAMES_ONLY = {"-l", "--files-with-matches", "-L", "--files-without-match", "-c", "--count", "--files",
                "-q", "--quiet", "--count-matches"}
@@ -136,11 +140,23 @@ def _types(path: Path, redactor, grep_args: Optional[dict] = None) -> Optional[l
     """Secret types in a file, [] if none, None if it isn't a scannable text file (missing, a directory,
     binary). An oversize file counts as unscannable-but-risky and is reported as ["unscanned"], except for
     the Grep tool (grep_args), which prints only matching lines: those are judged instead (_printed_types)."""
-    from Harpocrates.read import MAX_BYTES, _read_text
+    from Harpocrates.read import MAX_BYTES, SNIFF_BYTES, _read_text, text_encoding
 
     _tick()
     if not path.is_file():
         return None
+    # Binary (a NUL in the first 8 KiB, as _read_text sniffs) passes whatever its size, before the size check:
+    # a big executable named in a command (`.venv/bin/tool --version`) is no secret store. Trade-off: a binary
+    # file is never scanned; secrets inside binaries were already not scanned when under the limit. Two
+    # exceptions: UTF-16/32 text (text_encoding) goes on to be decoded and scanned, and a file named like a secret
+    # store (SENSITIVE_FILES) never passes as binary, since a NUL in front of the text would hide it: refused.
+    try:
+        with path.open("rb") as f:
+            head = f.read(SNIFF_BYTES)
+        if b"\x00" in head and text_encoding(head) is None:
+            return ["unscanned"] if _SENSITIVE.match(path.name) else None
+    except OSError:
+        pass  # unreadable: fall through to the size check and read below, which behave as before
     if path.stat().st_size > MAX_BYTES:
         return _printed_types(path, grep_args, redactor) if grep_args else ["unscanned"]
     try:
@@ -510,7 +526,7 @@ def _matching(pattern: Optional[str], roots: list[Path], rg_flags: list[str], py
     arg = json.dumps({"pattern": pattern, "flags": py_flags | re.M, "files": list(map(str, scope)),
                       "max_bytes": MAX_BYTES})
     try:
-        proc = subprocess.run([sys.executable, "-c", _PY_MATCHER, arg], timeout=_left(), **run)
+        proc = subprocess.run([sys.executable, "-I", "-c", _PY_MATCHER, arg], timeout=_left(), **run)
     except subprocess.TimeoutExpired:
         _tick()
         return scope
@@ -844,6 +860,19 @@ def _git_blobs(argv: list[str], here: Path) -> Optional[str]:
     return "\n".join(texts) or None
 
 
+def _copy_dirs(name: str, args: list[str], here: Path) -> list[Path]:
+    """Files under the directories a copy, move, link or archive command takes in, judged like a recursive search
+    of each (same _scope, same cap, same fail-closed): `cp -r DIR graphify-out/y` would otherwise launder a secret
+    into an allowlisted folder, since only files named as arguments were read. Every non-option word counts, option
+    values included (over-reads: `tar -C DIR` scans DIR). A copy's last word is its target, left out unless a
+    -t/--target-directory (or any short cluster holding t) may have moved it; trade-off: `cp x existing-dir` is not
+    scanned for the secrets already in existing-dir, which this command doesn't read."""
+    words = [a for a in args if not a.startswith("-")]
+    targeted = any(a.startswith("--target") or (a[:1] == "-" and a[1:2] != "-" and "t" in a[1:]) for a in args)
+    sources = words if name not in _TARGET_LAST or targeted else words[:-1]
+    return [f for w in sources for p in _expand(w, here) if p.is_dir() for f in _scope(p)]
+
+
 def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dict[str, list[str]]] = None,
                 named_ok: bool = True) -> tuple[list[Path], list[str]]:
     """(files the command could print, extra text it could print such as git blobs). named_ok False: the text is
@@ -907,6 +936,8 @@ def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dic
                 files += _search_command(scoped, base, piped, tree=True, env_opts=env_opts)
         reads = reads or any(n in _READ_COMMANDS for n in names) or "<" in argv
         named += [p for w in argv for p in _expand(w, base)]
+        if start < len(argv) and names[start] in _COPY_COMMANDS:
+            files += _copy_dirs(names[start], argv[start + 1:], base)
     if reads:
         files += named
     return [f for f in files if f.is_file()], texts

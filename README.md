@@ -2,9 +2,9 @@
 
 <h1 align="center">Harpocrates</h1>
 
-Harpocrates is a secrets scanner: regex patterns for known credential formats, Shannon entropy for high-randomness tokens, and an ML model that decides on the rest. It also ships a read tool for AI coding agents (Claude Code, Codex): the agent reads a file with every detected secret replaced by a placeholder such as `<<HARPO:api_token:3f9a>>`, so it can work with the file without the credential reaching it through that tool. Detection misses and shell reads the hook doesn't cover are listed under [What has been tested](#install).
-
-The model is bundled in the package and scanning makes no network calls. The egress gate — a proxy that scans every provider-bound request — is the next milestone (M2) and is not shipped yet.
+Harpocrates is a secrets scanner. It combines regex patterns for known credential formats, Shannon entropy for high-randomness tokens, and a bundled ML model that decides on the rest, with no network calls.
+It is also a guard that keeps secrets out of AI coding agents (Claude Code, Codex): the agent reads secret-bearing files through a tool that replaces each detected secret with a placeholder, so it can work with the file without the credential reaching it through that tool.
+Detection misses and shell reads the hook doesn't cover are listed under [How agent protection works](#how-agent-protection-works). The egress gate, a proxy that scans every provider-bound request, is the next milestone (M2) and is not shipped yet.
 
 ## Model card
 
@@ -36,7 +36,135 @@ Known limits:
 
 Evaluation data was never used for training. The benchmark has been scored for several model versions, so it is now retired for choosing models; future models are selected on leave-one-LLM-family-out validation and real-code alarm rates.
 
-## Harpocrates vs other scanners
+## Install
+
+### 1. Scanner CLI
+
+Install the scanner and run it on a folder. The ML model is included.
+
+```bash
+pip install harpocrates            # the scanner CLI (ML model included)
+harpocrates scan .
+```
+
+### 2. Protect your AI agent (Claude Code, Codex)
+
+This adds the read tool and the hooks that keep the agent off secrets. The PyPI release with this flow is pending, so install the CLI from source:
+
+```bash
+pip install git+https://github.com/Skipa776/harpocrates
+harpocrates install                  # every detected harness: Claude Code and/or Codex
+harpocrates install --claude-code    # or name one: --codex
+harpocrates install --dry-run        # show what would change; write and run nothing
+harpocrates uninstall                # removes exactly what `install` added; backups stay
+```
+
+`harpocrates install` sets up three things: deny rules for files named like secrets, the MCP registration, and a content-aware hook that refuses built-in and shell reads of any file holding a secret and points the agent to `safe_read`.
+
+Codex needs one manual step: start `codex`, type `/hooks`, and trust the Harpocrates hook once. `harpocrates setup` lists detected harnesses and prints the manual steps for each instead of writing them.
+
+Setup steps are in [docs/setup.md](docs/setup.md). What the setup does and doesn't protect is in [docs/threat-model.md](docs/threat-model.md).
+
+### 3. Claude Code plugin (optional)
+
+In Claude Code, run:
+
+```
+/plugin marketplace add Skipa776/harpocrates
+/plugin install harpocrates-prompt --marketplace Skipa776/harpocrates
+```
+
+The plugin shows the "edit without secret protection" question as a styled card and adds `/harpocrates` allowlist commands to the chat box. It needs the CLI hook from step 2.
+
+### 4. Pre-commit hook (optional)
+
+Add to `.pre-commit-config.yaml`, then run `pre-commit install`:
+
+```yaml
+repos:
+  - repo: https://github.com/Skipa776/Harpocrates
+    rev: v1.2.0
+    hooks:
+      - id: harpocrates
+        args: ["--ignore", "graphify-out,*.lock"]   # optional
+```
+
+## How agent protection works
+
+With step 2 in place, the agent is kept off secrets like this:
+
+- A read of a file that holds a secret is refused, with no prompt. The agent uses `safe_read` or `safe_grep` instead, and the secrets come back as placeholders.
+- Editing such a file asks once per file and session. Yes allows built-in Read and Edit of that file until the session ends.
+- An edit that would write a placeholder is refused.
+- Codex is refuse-only: its hooks can't ask, so a Codex edit to such a file is refused and you make that edit yourself.
+
+### What has been tested
+
+In three live Claude Code runs on one canary repo (seed 7), none of the 15 planted canaries reached the agent. In a control run without Harpocrates, 8 of 15 did. That result is narrower than it sounds:
+
+- **The runs were cooperative.** The agent picked `Read`, `cat` and `nl`, which the hook blocks. In the task run, the hook made about 4 decisions, one per file the task asked for. The other 7 canaries were in files that were never requested.
+- **This is too small to estimate a leak rate.** 0 of 15 bounds it below about 18% at 95% confidence only if the canaries were independent trials, and they aren't.
+- **The shell hook covers a fixed list of read commands.** A program that opens files itself gets through: `python -c "print(open('app.yaml').read())"`, `perl`, `vim -es`, `find -exec cat`, and `xargs cat` fed by a pipe were all allowed in testing. An agent that reads files this way, by choice or because a prompt injection told it to, sees every secret.
+
+The egress gate (M2) is the layer meant to catch what the hook misses. Until it ships, treat the read tool as protection against accidental exposure, not against an agent trying to read a secret.
+
+## Allowlist
+
+A file or folder that holds secrets but that you want the agent to read can be allowed. In a terminal:
+
+- `harpocrates allow PATH` allows a file or folder. A folder covers everything under it.
+- `harpocrates allow --name NAME` allows a folder or file name in every project, such as `graphify-out`.
+- `--remove` takes one off the list and `--list` shows it.
+
+With the Claude Code plugin, the same works from the chat box: `/harpocrates allow <path>`, `/harpocrates allow --name <name>`, `/harpocrates remove …` and `/harpocrates allowlist`. These run only when you type them there.
+
+Only you can change the allowlist. The agent's own commands that call `harpocrates allow` or touch `~/.harpocrates` are refused. Names that look like secret files, credential folders, `.harpocrates`, wildcards and path separators are refused too. Every use of an allowlisted path is logged to `~/.harpocrates/allow.log`. See [docs/setup.md](docs/setup.md#allowlisting-paths-and-names).
+
+## Using the scanner
+
+Scan a folder:
+
+```bash
+harpocrates scan ./my_project              # the ML model always runs
+harpocrates scan ./my_project --json       # pipe-friendly JSON output
+harpocrates scan ./my_project --fail-on high
+harpocrates scan ./my_project --history
+harpocrates scan ./my_project --engine rust   # needs cargo build --release --manifest-path core/Cargo.toml
+```
+
+`--engine rust` changes only how fast regex and entropy candidates are found; the ML step is the same Python code. On this repository (295 files, Apple M3 Pro) the Python engine takes 9.4 s, Rust with one worker 144 ms, and Rust with 8 workers 100 ms. Nearly all of the speedup comes from Rust itself: 66x single-threaded, with parallel workers adding 1.4x. On this repository the two engines currently disagree by 2 findings (1,098 vs 1,096), and that mismatch hasn't been diagnosed yet.
+
+Exclude files and directories with `--ignore`, a comma-separated list:
+
+```bash
+harpocrates scan . --ignore "graphify-out,tests"            # directories by name
+harpocrates scan . --ignore "*.json,*.min.js"               # files by glob
+harpocrates scan . --ignore "graphify-out,*.lock,fixtures"  # both
+```
+
+- A pattern without a wildcard matches a file or directory name exactly, at any depth. `graphify-out` skips that directory wherever it appears.
+- A pattern with `*`, `?` or `[` is a glob matched against each name in the path.
+- Patterns can't contain `/`: `app/static` matches nothing, so use `static`, which skips every directory with that name.
+- Skipped by default: `.git`, `node_modules`, virtual environments, `dist`, `build`, `target`, caches, IDE folders, compiled files, archives and images. Symlinks are never followed.
+- There is no ignore file yet, and `.gitignore` isn't read.
+
+## MCP tools and placeholders
+
+The MCP server listens on stdio (`harpocrates-mcp`, requires Python 3.10+) and exposes four tools:
+
+- `scan_text` / `scan_file` — scan a string or a file, return findings.
+- `safe_read` — file contents with every detected secret replaced by a placeholder such as `<<HARPO:api_token:3f9a>>`.
+- `safe_grep` — search results produced after redaction, so a search can't reveal a secret.
+
+Placeholder design:
+
+- The tag is an HMAC of the value under a random 32-byte key that exists only in memory for the session. A plain hash would let anyone who sees the placeholder test guesses offline, which is cheap for a short password, and would give a secret the same tag across sessions.
+- The same secret gets the same placeholder throughout a session, so the agent can tell repeated uses apart from different values. Values are never restored.
+- The tag is 4 hex characters (16 bits). That keeps it short and reveals little about the value, but two different secrets of the same type can collide: about 1% likely with 36 such secrets in a session, 50% with 300. A collision makes the agent think two secrets are the same. Since values are never restored, it can't leak or misplace a secret.
+
+Failure handling: if the model can't load, for example because its hash doesn't match, `safe_read` and `safe_grep` redact every candidate, the hook refuses files that contain any candidate, and `harpocrates scan` exits 2. There is no fallback to an older model.
+
+## Benchmarks
 
 Five scanners, same files, full scans. Two test sets, never used for training or tuning: a 4,352-record benchmark written by LLMs that generated none of the training data (half the records carry a secret, half a harmless look-alike), and 3,000 records from 42 permissively licensed GitHub repos with fake secrets inserted and real high-entropy strings as negatives. Recall and precision columns are benchmark first, then open-source code.
 
@@ -107,110 +235,6 @@ Recommended setup: Harpocrates as the pre-commit hook and AI-agent gate (widest 
 
 How these numbers were produced, and their known biases, is in [Methods](#methods). Reproduce the real-world cases with `bench/readme_examples.py`.
 
-## Install
-
-```bash
-pip install harpocrates            # the scanner CLI (ML model included)
-harpocrates scan .
-```
-
-Optional read tool for AI agents (Claude Code, Codex). The PyPI release with this flow is pending, so install the CLI from source:
-
-```bash
-pip install git+https://github.com/Skipa776/harpocrates
-harpocrates install                  # every detected harness: Claude Code and/or Codex
-harpocrates install --claude-code    # or name one: --codex
-harpocrates install --dry-run        # show what would change; write and run nothing
-harpocrates uninstall                # removes exactly what `install` added; backups stay
-```
-
-Codex needs one manual step: start `codex`, type `/hooks`, and trust the Harpocrates hook once. `harpocrates setup` lists detected harnesses and prints the manual steps for each instead of writing them.
-
-The optional Claude Code plugin draws the edit prompt as a styled card. It needs the CLI hook above. In Claude Code:
-
-```
-/plugin marketplace add Skipa776/harpocrates
-/plugin install harpocrates-prompt --marketplace Skipa776/harpocrates
-```
-
-Agent setup steps are in [docs/setup.md](docs/setup.md); what the setup does and doesn't protect is in [docs/threat-model.md](docs/threat-model.md). The setup has three parts: deny rules for files named like secrets, the MCP registration, and a content-aware hook that refuses built-in and shell reads of any file holding a secret and points the agent to `safe_read`.
-
-How the agent is kept off secrets:
-
-- A read of a file that holds a secret is refused, with no prompt. The agent uses `safe_read` or `safe_grep` instead, and the secrets come back as placeholders.
-- Editing such a file asks once per file and session. Yes allows built-in Read and Edit of that file until the session ends.
-- An edit that would write a placeholder is refused.
-- Codex is refuse-only: its hooks can't ask, so a Codex edit to such a file is refused and you make that edit yourself.
-
-**What has been tested.** In three live Claude Code runs on one canary repo (seed 7), none of the 15 planted canaries reached the agent. In a control run without Harpocrates, 8 of 15 did. That result is narrower than it sounds:
-
-- **The runs were cooperative.** The agent picked `Read`, `cat` and `nl`, which the hook blocks. In the task run, the hook made about 4 decisions, one per file the task asked for. The other 7 canaries were in files that were never requested.
-- **This is too small to estimate a leak rate.** 0 of 15 bounds it below about 18% at 95% confidence only if the canaries were independent trials, and they aren't.
-- **The shell hook covers a fixed list of read commands.** A program that opens files itself gets through: `python -c "print(open('app.yaml').read())"`, `perl`, `vim -es`, `find -exec cat`, and `xargs cat` fed by a pipe were all allowed in testing. An agent that reads files this way, by choice or because a prompt injection told it to, sees every secret.
-
-The egress gate (M2) is the layer meant to catch what the hook misses. Until it ships, treat the read tool as protection against accidental exposure, not against an agent trying to read a secret.
-
-Pre-commit hook — add to `.pre-commit-config.yaml`, then run `pre-commit install`:
-
-```yaml
-repos:
-  - repo: https://github.com/Skipa776/Harpocrates
-    rev: v1.2.0
-    hooks:
-      - id: harpocrates
-        args: ["--ignore", "graphify-out,*.lock"]   # optional
-```
-
-Usage:
-
-```bash
-harpocrates scan ./my_project              # the ML model always runs
-harpocrates scan ./my_project --json       # pipe-friendly JSON output
-harpocrates scan ./my_project --fail-on high
-harpocrates scan ./my_project --history
-harpocrates scan ./my_project --engine rust   # needs cargo build --release --manifest-path core/Cargo.toml
-```
-
-`--engine rust` changes only how fast regex and entropy candidates are found; the ML step is the same Python code. On this repository (295 files, Apple M3 Pro) the Python engine takes 9.4 s, Rust with one worker 144 ms, and Rust with 8 workers 100 ms. Nearly all of the speedup comes from Rust itself: 66x single-threaded, with parallel workers adding 1.4x. On this repository the two engines currently disagree by 2 findings (1,098 vs 1,096), and that mismatch hasn't been diagnosed yet.
-
-Exclude files and directories with `--ignore`, a comma-separated list:
-
-```bash
-harpocrates scan . --ignore "graphify-out,tests"            # directories by name
-harpocrates scan . --ignore "*.json,*.min.js"               # files by glob
-harpocrates scan . --ignore "graphify-out,*.lock,fixtures"  # both
-```
-
-- A pattern without a wildcard matches a file or directory name exactly, at any depth. `graphify-out` skips that directory wherever it appears.
-- A pattern with `*`, `?` or `[` is a glob matched against each name in the path.
-- Patterns can't contain `/`: `app/static` matches nothing, so use `static`, which skips every directory with that name.
-- Skipped by default: `.git`, `node_modules`, virtual environments, `dist`, `build`, `target`, caches, IDE folders, compiled files, archives and images. Symlinks are never followed.
-- There is no ignore file yet, and `.gitignore` isn't read.
-
-The MCP server listens on stdio (`harpocrates-mcp`, requires Python 3.10+) and exposes four tools:
-
-- `scan_text` / `scan_file` — scan a string or a file, return findings.
-- `safe_read` — file contents with every detected secret replaced by a placeholder such as `<<HARPO:api_token:3f9a>>`.
-- `safe_grep` — search results produced after redaction, so a search can't reveal a secret.
-
-Placeholders:
-
-- The tag is an HMAC of the value under a random 32-byte key that exists only in memory for the session. A plain hash would let anyone who sees the placeholder test guesses offline, which is cheap for a short password, and would give a secret the same tag across sessions.
-- The same secret gets the same placeholder throughout a session, so the agent can tell repeated uses apart from different values. Values are never restored.
-- The tag is 4 hex characters (16 bits). That keeps it short and reveals little about the value, but two different secrets of the same type can collide: about 1% likely with 36 such secrets in a session, 50% with 300. A collision makes the agent think two secrets are the same. Since values are never restored, it can't leak or misplace a secret.
-
-Failure handling: if the model can't load, for example because its hash doesn't match, `safe_read` and `safe_grep` redact every candidate, the hook refuses files that contain any candidate, and `harpocrates scan` exits 2. There is no fallback to an older model.
-
-## Past versions
-
-- **v1.2.0** (model v17): higher recall, read tool for AI agents, calibrated confidence. `--ml` was removed so the model always runs (drop `--ml` from scripts and pre-commit `args`; it is now an error); the REST API, LLM verifier, and legacy training CLI were removed.
-- **v0.4:** redesigned 64-feature vector, TreeSHAP `--explain`, severity calibration.
-- **v0.3:** retrained on 62k samples, comment scanning, violation categories.
-- **v0.2:** XGBoost + ONNX model, MCP server, pre-commit hook.
-- **v0.1:** initial regex + entropy pipeline.
-
-Full notes for each release are in that tag's README, for example `git show v0.4.0:README.md`.
-
 ## Methods
 
 ### Test sets
@@ -247,6 +271,16 @@ Two held-out sets. Neither was used for training, and neither was used to choose
 - **Recall ceiling.** 95.5% of benchmark secrets and 99.5% of open-source secrets become candidates at all; no threshold can recover the rest.
 
 These sets are not published yet: the open-source set contains third-party code and is rebuilt from the pinned list instead. Dataset provenance is in [docs/data.md](docs/data.md).
+
+## Past versions
+
+- **v1.2.0** (model v17): higher recall, read tool for AI agents, calibrated confidence. `--ml` was removed so the model always runs (drop `--ml` from scripts and pre-commit `args`; it is now an error); the REST API, LLM verifier, and legacy training CLI were removed.
+- **v0.4:** redesigned 64-feature vector, TreeSHAP `--explain`, severity calibration.
+- **v0.3:** retrained on 62k samples, comment scanning, violation categories.
+- **v0.2:** XGBoost + ONNX model, MCP server, pre-commit hook.
+- **v0.1:** initial regex + entropy pipeline.
+
+Full notes for each release are in that tag's README, for example `git show v0.4.0:README.md`.
 
 ## Contributing
 
