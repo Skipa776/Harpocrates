@@ -74,6 +74,24 @@ None of these channels is meant to carry prompt content, but Guard can't verify 
 - **Codex:** `analytics.enabled = false`, and leave `otel.exporter` unset.
 - **Verify the routing.** The planned doctor command (FR-INSTALL-02, M2) will send a canary through each harness and warn if traffic bypassed the gate.
 
+## Residual risk 4: approved edits and the allowlist
+
+**Risk.** Two things let a secret-bearing file reach the model on purpose (FR-READ-05, FR-READ-06).
+
+**Edit grants.** On Claude Code, editing a file that holds a secret asks you first. If you approve, that file's current and future secrets go to the provider as-is for the rest of the session, through built-in Read and Edit of that one file.
+- A grant is recorded only after the edit actually ran (PostToolUse), so a declined prompt leaves nothing.
+- Grants live in `~/.harpocrates/grants/<session>.json`. They expire after 24 hours or when the session ends.
+- A grant never covers Bash. A shell command that would print the file is still refused.
+
+**Allowlist.** Paths in `~/.harpocrates/allow` (`harpocrates allow PATH`) pass the read hook even when they hold secrets, for every session until you remove them. Each pass is logged to `allow.log`, never the content.
+
+**Why Guard can't fully fix it.**
+- A script that writes the grant file or the allowlist itself can forge an entry. This is the same class as the script gap above. The hook refuses shell commands that visibly touch `~/.harpocrates`, and the settings deny Edit and Write there, but a script that builds the path at runtime gets past both.
+- A grant names a path, not a file's content. If the file is replaced during the session (for example by `git checkout`), the grant still applies to the new file.
+- Codex has no edit prompt. Its edits to such a file are refused, and you make them yourself.
+
+**What helps:** approve edits only for files you accept sending to the provider, and keep the allowlist short.
+
 ## Also out of scope
 
 These are listed in the design doc's non-goals:

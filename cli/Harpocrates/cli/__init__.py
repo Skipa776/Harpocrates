@@ -400,6 +400,41 @@ def setup(
         raise typer.Exit(code=2) from exc
 
 
+def _install_run(remove: bool, claude_code: bool, codex: bool, dry_run: bool) -> None:
+    from Harpocrates import install as _install
+
+    targets = [t for t, wanted in (("claude-code", claude_code), ("codex", codex)) if wanted]
+    if not targets:
+        targets = _install.detected_targets()
+        if not targets:
+            typer.echo("No Claude Code or Codex CLI detected. Name one: --claude-code or --codex.", err=True)
+            raise typer.Exit(code=1)
+    reports = (_install.uninstall_harnesses if remove else _install.install_harnesses)(targets, dry_run)
+    typer.echo(_install.render(reports, dry_run, remove))  # plain echo: rich would eat [brackets] as markup
+    if _install.failed(reports):
+        raise typer.Exit(code=1)
+
+
+@app.command("install")
+def install_cmd(
+    claude_code: bool = typer.Option(False, "--claude-code", help="Install for Claude Code."),
+    codex: bool = typer.Option(False, "--codex", help="Install for Codex CLI."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write and run nothing."),
+) -> None:
+    """Write the read-tool setup into each harness's own config (FR-INSTALL-01). No flag: every detected harness."""
+    _install_run(False, claude_code, codex, dry_run)
+
+
+@app.command("uninstall")
+def uninstall_cmd(
+    claude_code: bool = typer.Option(False, "--claude-code", help="Uninstall from Claude Code."),
+    codex: bool = typer.Option(False, "--codex", help="Uninstall from Codex CLI."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write and run nothing."),
+) -> None:
+    """Remove exactly what `harpocrates install` added; everything else and the backups stay."""
+    _install_run(True, claude_code, codex, dry_run)
+
+
 @app.command()
 def allow(
     path: Optional[Path] = typer.Argument(None, help="File or folder the agent may read even if it holds secrets."),

@@ -16,6 +16,7 @@ import re
 import shlex
 import time
 from pathlib import Path
+from typing import Optional
 
 ALLOW_FILE = Path.home() / ".harpocrates" / "allow"
 LOG_FILE = Path.home() / ".harpocrates" / "allow.log"
@@ -106,9 +107,10 @@ def _read_only(command: str) -> bool:
 _ANSI_C = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.S)
 _ESCAPE = re.compile(r"\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|[0-7]{1,3}|.)", re.S)
 _SIMPLE_ESC = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "f": "\f", "v": "\v"}
-# On the normalised text: the allow file by name, a glob char right before `arpocrates` (or `h?arpocrates`),
-# or dotglob/globdots next to any glob, all count as a mention of the directory.
-_MENTION_NORM = re.compile(r"arpocrates/allow\b|[*?\]]h?arpocrates", re.I)
+# On the normalised text: the allow file or the grants dir (FR-READ-06) by name, a glob char right before
+# `arpocrates` (or `h?arpocrates`), or dotglob/globdots next to any glob, all count as a mention of the directory.
+# `grants` must end the name: the module cli/Harpocrates/grants.py is no mention.
+_MENTION_NORM = re.compile(r"arpocrates/(?:allow\b|grants(?![\w.-]))|[*?\]]h?arpocrates", re.I)
 _DOTGLOB = re.compile(r"dotglob|globdots", re.I)
 
 
@@ -133,11 +135,21 @@ def _mentions_dir(command: str, norm: str) -> bool:
                 or (_DOTGLOB.search(norm) and re.search(r"[*?\[]", norm)))
 
 
-def touches(command: str) -> bool:
-    """Whether a shell command could change the allowlist: it runs `harpocrates allow`, or mentions the
-    ~/.harpocrates directory (also in a quoted, escaped, braced or globbed spelling) in anything but a
-    provably read-only command."""
+def _inside_state_dir(cwd: Optional[Path]) -> bool:
+    """Whether the working directory is ~/.harpocrates or under it (links resolved): a command run there names
+    its files without the directory, so the text alone shows nothing."""
+    if cwd is None:
+        return False
+    state = (Path.home() / ".harpocrates").resolve()  # looked up per call so a test can move HOME
+    real = cwd.resolve()
+    return real == state or real.is_relative_to(state)
+
+
+def touches(command: str, cwd: Optional[Path] = None) -> bool:
+    """Whether a shell command could change the allowlist or the session grants: it runs `harpocrates allow`, or
+    mentions the ~/.harpocrates directory (also in a quoted, escaped, braced or globbed spelling), or runs with
+    that directory as its working directory (cwd), in anything but a provably read-only command."""
     norm = _normalise(command)
     if _ALLOW_CMD.search(command) or _ALLOW_CMD.search(norm):
         return True
-    return _mentions_dir(command, norm) and not _read_only(command)
+    return (_mentions_dir(command, norm) or _inside_state_dir(cwd)) and not _read_only(command)

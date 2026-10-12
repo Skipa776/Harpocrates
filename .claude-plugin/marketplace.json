@@ -1,0 +1,12 @@
+{
+  "name": "harpocrates",
+  "owner": { "name": "Skipa776" },
+  "description": "Claude Code plugins for Harpocrates, the local boundary that keeps secrets out of AI coding agents.",
+  "plugins": [
+    {
+      "name": "harpocrates-prompt",
+      "source": "./plugins/harpocrates-prompt",
+      "description": "A styled Claude Code dialog for Harpocrates edit-without-secret-protection prompts."
+    }
+  ]
+}

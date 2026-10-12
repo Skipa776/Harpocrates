@@ -114,15 +114,33 @@ pip install harpocrates            # the scanner CLI (ML model included)
 harpocrates scan .
 ```
 
-Optional read tool for AI agents:
+Optional read tool for AI agents (Claude Code, Codex). The PyPI release with this flow is pending, so install the CLI from source:
 
 ```bash
-pip install "harpocrates[mcp]"
-harpocrates setup                  # shows detected agent harnesses
-harpocrates setup claude-code      # or: codex — prints the config to add
+pip install git+https://github.com/Skipa776/harpocrates
+harpocrates install                  # every detected harness: Claude Code and/or Codex
+harpocrates install --claude-code    # or name one: --codex
+harpocrates install --dry-run        # show what would change; write and run nothing
+harpocrates uninstall                # removes exactly what `install` added; backups stay
+```
+
+Codex needs one manual step: start `codex`, type `/hooks`, and trust the Harpocrates hook once. `harpocrates setup` lists detected harnesses and prints the manual steps for each instead of writing them.
+
+The optional Claude Code plugin draws the edit prompt as a styled card. It needs the CLI hook above. In Claude Code:
+
+```
+/plugin marketplace add Skipa776/harpocrates
+/plugin install harpocrates-prompt --marketplace Skipa776/harpocrates
 ```
 
 Agent setup steps are in [docs/setup.md](docs/setup.md); what the setup does and doesn't protect is in [docs/threat-model.md](docs/threat-model.md). The setup has three parts: deny rules for files named like secrets, the MCP registration, and a content-aware hook that refuses built-in and shell reads of any file holding a secret and points the agent to `safe_read`.
+
+How the agent is kept off secrets:
+
+- A read of a file that holds a secret is refused, with no prompt. The agent uses `safe_read` or `safe_grep` instead, and the secrets come back as placeholders.
+- Editing such a file asks once per file and session. Yes allows built-in Read and Edit of that file until the session ends.
+- An edit that would write a placeholder is refused.
+- Codex is refuse-only: its hooks can't ask, so a Codex edit to such a file is refused and you make that edit yourself.
 
 **What has been tested.** In three live Claude Code runs on one canary repo (seed 7), none of the 15 planted canaries reached the agent. In a control run without Harpocrates, 8 of 15 did. That result is narrower than it sounds:
 
