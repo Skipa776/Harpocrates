@@ -1,0 +1,9 @@
+{
+  "name": "harpocrates-prompt",
+  "version": "1.0.0",
+  "description": "Asks about Harpocrates edit-without-secret-protection prompts in a styled card: the file, the secret kinds and what allowing means, above a Keep secrets protected / Allow edits this session choice.",
+  "author": { "name": "Skipa776" },
+  "homepage": "https://github.com/Skipa776/harpocrates",
+  "repository": "https://github.com/Skipa776/harpocrates",
+  "license": "MIT"
+}

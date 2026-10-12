@@ -10,11 +10,16 @@ Fail closed: both harnesses treat a hook crash or timeout as "allow", so every e
 command, a search pattern it can't evaluate safely, and running out of its time budget all exit 2, which
 blocks the call. Run as `python -m Harpocrates.hooks` with the hook event JSON on stdin.
 
-FR-READ-05: paths on the user's allowlist (Harpocrates/allowlist.py) pass, each use logged. With `--ask`
-(Claude Code only) a secret-bearing read or edit prompts the user instead of being refused, naming every flagged
-file. Trade-off: an approved prompt sends those values to the provider; that is the user's explicit call.
-The prompt only happens in modes where a human answers it; any other mode (bypassPermissions, dontAsk, an
-unknown one) gets the refusal. Codex runs without --ask: its handling of "ask" isn't verified.
+FR-READ-05: paths on the user's allowlist (Harpocrates/allowlist.py) pass, each use logged.
+FR-READ-06: reads never prompt. A Read, Grep or Bash call that would expose a secret-bearing file is refused in every
+mode. With `--ask` (Claude Code only) an edit of such a file (Edit, MultiEdit, Write, NotebookEdit) asks the user
+instead, in the modes where a human answers; any other mode gets the refusal. Yes lets Claude read and edit that one
+path with its built-in tools for the rest of the session, never through Bash (Harpocrates/grants.py). The grant is
+recorded by `python -m Harpocrates.hooks --post` (PostToolUse, PostToolUseFailure, SessionEnd): those fire only for a
+call that ran, so a No never reaches them. Trade-off: an approved edit sends those values to the provider; that is
+the user's explicit call. An edit that would leave a Harpocrates placeholder in the file that it did not hold before
+is denied in every mode, granted or not: it would swap a real secret for a fake value. Codex runs without --ask: its
+handling of "ask" isn't verified.
 
 ponytail: Bash coverage is best effort. It follows `sh -c` bodies, `$(...)`, backticks, `cd`, `git -C`,
 globs, `~` and `$VAR` paths, `git show rev:path`, and the environment. A script that opens files itself
@@ -87,7 +92,6 @@ _ASSIGN_ANY = re.compile(r"(?<![\w$])([A-Za-z_]\w*)(\+?)=(\"[^\"]*\"|'[^']*'|[^\
 _SENSITIVE = re.compile("|".join(map(fnmatch.translate, SENSITIVE_FILES)))  # file names, matched with .match
 MAX_SCOPE_FILES = 2000  # a search wider than this is denied rather than scanned: safe_grep handles it
 MAX_WORDS = 64  # spellings one shell word may take once variables are filled in; more is denied
-MAX_ASK_FILES = 20  # more secret files than this in one call is refused, not put to the user unread
 MATCH_TIMEOUT = 5.0  # seconds for one pattern match over a tree (runs in a child process)
 BUDGET = 25.0  # seconds for the whole decision; Codex's documented example hook timeout is 30
 _deadline = float("inf")
@@ -203,44 +207,122 @@ def _ask(reason: str) -> int:
     return 0
 
 
-def _check_files(paths: Iterable[Path], tool: str, cwd: Path, event_tool: str = "Read",
-                 action: str = "read", grep_args: Optional[dict] = None) -> int:
-    from Harpocrates import allowlist
+def _first_flagged(paths: Iterable[Path], cwd: Path, grep_args: Optional[dict] = None,
+                   session_id: object = None) -> tuple[Optional[tuple[str, str]], list[Path]]:
+    """((name to show, secret types) of the first file that holds a secret, or None), and the allowlisted paths
+    that passed on the way. Not scanned: a path on the user's allowlist, and one the user granted in this session
+    (session_id, FR-READ-06). A grant names one real path; a search that reaches other files still checks them."""
+    from Harpocrates import allowlist, grants
     from Harpocrates.read import Redactor
 
     redactor = Redactor()
-    flagged: list[str] = []
+    approved = grants.granted(session_id)
     passed: list[Path] = []
     for path in dict.fromkeys(paths):
         if allowlist.allowed(path):
             passed.append(path)
             continue
+        if approved and str(path.resolve()) in approved:
+            continue
         found = _types(path, redactor, grep_args)
         if found:
             shown = allowlist.printable(str(path.relative_to(cwd) if path.is_relative_to(cwd) else path))
-            kinds = "unscanned (over the size limit)" if found == ["unscanned"] else ", ".join(found)
-            flagged.append(f"{shown} ({kinds})")
-            if not _can_ask:
-                break  # refusing anyway: the first file is enough
-    ask = _can_ask and len(flagged) <= MAX_ASK_FILES
-    if not flagged or ask:  # the call may run: log the allowlist uses (not on a refusal)
-        for path in passed:
-            allowlist.log_use(path, event_tool)
-    if not flagged:
+            return (shown, "unscanned (over the size limit)" if found == ["unscanned"] else ", ".join(found)), passed
+    return None, passed
+
+
+def _check_files(paths: Iterable[Path], tool: str, cwd: Path, event_tool: str = "Read",
+                 grep_args: Optional[dict] = None, session_id: object = None) -> int:
+    """Refuse a read of a file that holds a secret (FR-READ-06: never a prompt). Bash passes no session_id: a
+    grant covers the built-in tools only."""
+    from Harpocrates import allowlist
+
+    hit, passed = _first_flagged(paths, cwd, grep_args, session_id)
+    if hit is not None:
+        return _deny(f"{hit[0]} ({hit[1]}) contains secrets. Use mcp__harpocrates__{tool} instead: it returns the "
+                     "same content with each secret replaced by a <<HARPO:type:hash>> placeholder.")
+    for path in passed:  # the call may run: log the allowlist uses (not on a refusal)
+        allowlist.log_use(path, event_tool)
+    return 0
+
+
+def _placeholders(text: str) -> Counter:
+    return Counter(m.group(0) for m in _PLACEHOLDER_TYPE.finditer(text))
+
+
+def _current(path: Path) -> Optional[str]:
+    """The text an edit starts from: "" for a file that doesn't exist yet, None if it can't be compared (over the
+    size limit, a directory, unreadable). Read here to judge the result; never printed."""
+    from Harpocrates.read import MAX_BYTES
+
+    try:
+        if path.stat().st_size > MAX_BYTES:
+            return None
+        with open(path, encoding="utf-8", errors="replace", newline="") as f:  # newline="": as the tool matches it
+            return f.read()
+    except FileNotFoundError:
+        return ""
+    except OSError:
+        return None
+
+
+def _adds_placeholder(tool: str, args: dict, path: Path) -> bool:
+    """True if the edit would leave a Harpocrates placeholder in the file that it did not hold before: writing one
+    swaps a real secret for a fake value. The result is judged, not the new text alone, because a placeholder can
+    be built from two edits (`<<HAR` now, the rest beside it later) or from two MultiEdit steps. Edit and MultiEdit
+    are applied as the tool does (replace_all honoured, each step on the last one's result); Write is compared with
+    the file it replaces. A placeholder the file already holds may stay or move (docs that quote one); a copy of it,
+    or another, may not (compared as a multiset). A step that can't be applied here (old_string absent, or the file
+    not comparable) falls back to its new text alone, which errs towards deny."""
+    if tool == "NotebookEdit":
+        source = args.get("new_source")
+        source = "".join(part for part in source if isinstance(part, str)) if isinstance(source, list) else source
+        return isinstance(source, str) and bool(_PLACEHOLDER_TYPE.search(source))
+    before = _current(path)
+    if tool == "Write":
+        content = args.get("content")
+        if not isinstance(content, str):
+            return False
+        return bool(_PLACEHOLDER_TYPE.search(content)) if before is None else bool(
+            _placeholders(content) - _placeholders(before))
+    after = before
+    for step in (args.get("edits") or ()) if tool == "MultiEdit" else (args,):
+        if not isinstance(step, dict) or not isinstance(step.get("new_string"), str):
+            continue
+        old, new = step.get("old_string"), step["new_string"]
+        if after is not None and isinstance(old, str) and old in after:
+            after = after.replace(old, new, -1 if step.get("replace_all") else 1)
+        elif _PLACEHOLDER_TYPE.search(new):
+            return True
+    return before is not None and bool(_placeholders(after) - _placeholders(before))
+
+
+def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
+    """Edit, MultiEdit, Write or NotebookEdit (the tool result echoes the edited file back to the model).
+    Deny an edit that would add a placeholder first (_adds_placeholder; any mode, granted or not). Then a
+    secret-bearing file asks the user
+    when a human can answer, after recording the call as pending so `--post` can turn Yes into a grant; with no
+    session_id or tool_use_id to record it under, or no human, it is refused (fail closed)."""
+    from Harpocrates import allowlist, grants
+
+    path = cwd / os.path.expanduser(args.get("file_path") or args["notebook_path"])
+    if _adds_placeholder(tool, args, path):
+        return _deny("That edit would write a Harpocrates placeholder into the file, replacing a real secret with a "
+                     "fake value. Edit around the secret, or ask the user to change it.")
+    session_id = event.get("session_id")
+    hit, passed = _first_flagged([path], cwd, None, session_id)
+    if hit is None:
+        for allowed in passed:
+            allowlist.log_use(allowed, tool)
         return 0
-    if ask:
-        listed = "\n".join(f"  {f}" for f in flagged)
-        caveat = (" Shell commands are checked on a best effort basis: this one may read files not listed."
-                  if event_tool == "Bash" else "")
-        return _ask(f"Harpocrates: Claude wants to {action} files that contain secrets:\n{listed}\n"
-                    f"Allowing sends these values to the model provider as-is.{caveat} Choose No to keep them out; "
-                    f"Claude can use mcp__harpocrates__{tool}, which redacts them. To always allow a path, "
-                    "run `harpocrates allow <path>` in your own terminal.")
-    if action != "read":
-        return _deny(f"{flagged[0]} contains secrets, and a built-in edit shows its content to the model. "
-                     "Ask the user to make this change.")
-    return _deny(f"{flagged[0]} contains secrets. Use mcp__harpocrates__{tool} instead: it returns the same "
-                 "content with each secret replaced by a <<HARPO:type:hash>> placeholder.")
+    shown, kinds = hit
+    if _can_ask and grants.add_pending(session_id, event.get("tool_use_id"), path, tool):
+        return _ask(f"Harpocrates: Claude wants to edit {shown} without secret protection. It contains secrets "
+                    f"({kinds}). Allowing lets Claude read and edit this file with its built-in tools for the rest "
+                    "of this session; these values go to the model provider as-is. Choose No to keep them "
+                    "protected: Claude can still read it with mcp__harpocrates__safe_read.")
+    return _deny(f"{shown} ({kinds}) contains secrets, and a built-in edit shows its content to the model. "
+                 "Ask the user to make this change.")
 
 
 # ---------------------------------------------------------------------------------------- searching
@@ -857,7 +939,7 @@ def _bash(command: str, cwd: Path) -> int:
     from Harpocrates import allowlist
     from Harpocrates.read import Redactor
 
-    if allowlist.touches(command):
+    if allowlist.touches(command, cwd):
         return _deny("Only the user can change the Harpocrates allowlist. Ask them to run "
                      "`harpocrates allow <path>` in their own terminal.")
     env_reason = _check_env(command)
@@ -884,14 +966,14 @@ def decide(raw: str, ask: bool = False) -> int:
         cwd = Path(event.get("cwd") or ".")
         _can_ask = ask and event.get("permission_mode") in _PROMPTING_MODES
         if tool == "Read":
-            return _check_files([cwd / args["file_path"]], "safe_read", cwd)
+            return _check_files([cwd / args["file_path"]], "safe_read", cwd, session_id=event.get("session_id"))
         if tool == "Grep" and args.get("output_mode") == "content":
-            return _check_files(_grep_tool(args, cwd), "safe_grep", cwd, "Grep", grep_args=args)
+            return _check_files(_grep_tool(args, cwd), "safe_grep", cwd, "Grep", grep_args=args,
+                                session_id=event.get("session_id"))
         if tool == "Bash":
             return _bash(args.get("command", ""), cwd)
-        if tool in _EDIT_TOOLS:  # the tool result echoes the edited file back to the model
-            path = os.path.expanduser(args.get("file_path") or args["notebook_path"])
-            return _check_files([cwd / path], "safe_read", cwd, tool, action="read and change")
+        if tool in _EDIT_TOOLS:
+            return _edit(tool, args, cwd, event)
         return 0
     except _OutOfTimeError:
         return _deny("Too many files to check for secrets in time. Use mcp__harpocrates__safe_grep or "
@@ -902,7 +984,33 @@ def decide(raw: str, ask: bool = False) -> int:
         return 2
 
 
+def post(raw: str) -> int:
+    """`--post` entry point (PostToolUse, PostToolUseFailure, SessionEnd): turn the pending edit of this tool_use_id
+    into a grant, or drop the session's grants. A failed tool still ran, so it grants (an Edit that fails on "not
+    read yet" is what lets the Read through); an interrupt does not. Only the event name decides (a stray PreToolUse
+    event never grants), and the event must name an edit tool, the one the hook asked about (grants.promote). It only records: it prints nothing and never raises (a crash here must not reach the harness)."""
+    try:
+        from Harpocrates import grants
+
+        event = json.loads(raw)
+        name, session_id = event.get("hook_event_name"), event.get("session_id")
+        if name == "SessionEnd":
+            grants.clear(session_id)
+        elif (name in ("PostToolUse", "PostToolUseFailure") and not event.get("is_interrupt")
+              and event.get("tool_name") in _EDIT_TOOLS):
+            grants.promote(session_id, event.get("tool_use_id"), event.get("tool_name"))
+    except Exception:  # noqa: BLE001
+        pass
+    return 0
+
+
 def main() -> None:
+    if "--post" in sys.argv[1:]:
+        try:
+            post(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
+        except BaseException:  # noqa: BLE001 - recording only: no exit code but 0 for the harness
+            pass
+        sys.exit(0)
     try:
         code = decide(sys.stdin.buffer.read().decode("utf-8", errors="replace"), ask="--ask" in sys.argv[1:])
     except BaseException:  # noqa: BLE001 - anything that escapes would exit 1, which harnesses treat as allow

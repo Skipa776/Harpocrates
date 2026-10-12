@@ -6,12 +6,42 @@ What this protects today, and what it doesn't, is in the [threat model](threat-m
 
 ## 1. Install
 
+There are two install paths. The PyPI release with this flow is pending, so until it ships, install from source:
+
 ```bash
-pip install "harpocrates[mcp]"
-harpocrates setup            # lists detected harnesses and their support tier
+pip install git+https://github.com/Skipa776/harpocrates      # CLI
+# or, for development from a clone:
+pip install -e ".[mcp]"
 ```
 
-`harpocrates setup claude-code` or `harpocrates setup codex` prints the exact config for this machine. That config includes the path of the Python interpreter that runs the MCP server, so it keeps working from a virtual environment and from agents launched from an IDE. The sections below explain what that config does. Writing it into the harness's files for you, with a backup, comes with the M2 installer (FR-INSTALL-01).
+**CLI path (FR-INSTALL-01).** Then write the setup into each agent's own config:
+
+```bash
+harpocrates install                  # every detected harness: Claude Code and/or Codex
+harpocrates install --claude-code    # or name one
+harpocrates install --dry-run        # show what would change; write and run nothing
+harpocrates uninstall                # removes exactly what `install` added; backups stay
+```
+
+`install` writes:
+
+- **Claude Code:** `~/.claude/settings.json` gets the deny rules, the `safe_read`/`safe_grep` allow rules, and the `PreToolUse`, `PostToolUse`, `PostToolUseFailure` and `SessionEnd` hooks. The MCP server is registered with `claude mcp add --scope user`. A note goes into `~/.claude/CLAUDE.md`.
+- **Codex CLI:** a marked block in `~/.codex/config.toml` (the MCP server and the `harpocrates` permission profile). A note goes into `~/.codex/AGENTS.md`.
+
+Each edited file is backed up once as `<file>.harpocrates.bak`. A file that can't be parsed, or that already defines a conflicting setting, makes `install` refuse that harness and write nothing for it.
+
+**Codex, one manual step.** Codex runs a new or changed hook only after you trust it. Start `codex`, type `/hooks`, and trust the Harpocrates hook once.
+
+**Claude Code plugin (optional).** The plugin draws the edit prompt as a styled card. It needs the CLI hook above. In Claude Code:
+
+```
+/plugin marketplace add Skipa776/harpocrates
+/plugin install harpocrates-prompt --marketplace Skipa776/harpocrates
+```
+
+See [plugins/harpocrates-prompt/README.md](../plugins/harpocrates-prompt/README.md).
+
+**Printing the config by hand.** `harpocrates setup` lists detected harnesses and their support tier. `harpocrates setup claude-code` or `harpocrates setup codex` prints the manual steps for that harness, with the path of the Python interpreter that runs the MCP server, so the config keeps working from a virtual environment and from agents launched from an IDE. Sections 3 and 4 explain what each step does.
 
 ## 2. Paths that are denied
 
@@ -23,6 +53,8 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 **The trade-off is deliberate.** The list also catches files that are usually safe, such as `.env.example`, `id_rsa.pub`, a registry-only `.npmrc`, or an unrelated `*.key` file. Blocking them costs little, because the agent still reads them through `safe_read` and gets the same text back with nothing to redact. A narrower list would let a real secret file through the built-in tools.
 
 ## 3. Claude Code
+
+`harpocrates install --claude-code` does steps 1 to 3. To do them by hand:
 
 1. **Register the read tool for every project:**
 
@@ -58,8 +90,9 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 
    The example lists only part of the list in section 2; extend it with the rest. Turning on the sandbox changes how every shell command runs. Try it in one project first with `/sandbox`.
 
-**What the hook costs.**
-- **Edits:** Edit, Write and NotebookEdit on a file that holds a secret get the same "Harpocrates:" prompt as a read, even in accept-edits mode. Yes lets Claude read and change it; in modes with no one to answer, the edit is refused and Claude has to ask you to make it. Only the target file is scanned, not the new content being written (FR-READ-04, M2).
+**Reads and edits (FR-READ-06).**
+- **Reads:** built-in Read, Grep, and Bash commands such as `cat` that would print a file holding a secret are refused, with no prompt. The agent reads that file with `safe_read` or `safe_grep`, and the secrets come back as placeholders.
+- **Edits:** Edit, Write and NotebookEdit on a file that holds a secret ask you once per file and session ("edit without secret protection"), even in accept-edits mode. Yes allows built-in Read and Edit of that one file until the session ends. In modes with no one to answer, the edit is refused and Claude has to ask you to make it. An edit that would write a placeholder is refused. Only the target file is scanned, not the new content being written (FR-READ-04, M2).
 - **How often:** on 1,000 random files from 16 open-source repos, the hook refused 30 (3.0%). Almost all were `generic` false alarms, such as a hash or a test fixture.
 - **Speed:** about 0.05–0.15 s per call.
 
@@ -68,17 +101,23 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 - `cd` and `git -C`, globs, `~` and `$VAR` paths, and `if=FILE` arguments;
 - `git show rev:path`, which it fetches read-only to scan;
 - `grep`, `rg`, and `git grep` searches. Their pattern is never evaluated: attached flags, inversion (`-v`), and basic-regex syntax all change which lines print. Every file in scope counts unless the search prints only names (`-l`, `--files`, `-c`). In a repo with a flagged file, a shell search is refused, and the agent uses the Grep tool or `safe_grep`;
+  - A search is caught behind any wrapper (`sudo`, `timeout`, `caffeinate`, `xargs`, `find -exec grep`). Commands that only name a program (`which rg`, `man grep`) are not searches, unless their output is piped into a shell. A `grep` that reads a pipe is not a file search.
+  - **Scope.** A recursive search inside a git work tree covers the files git lists (tracked, and untracked but not ignored), plus ignored files named like secret stores (the list in section 2). If the search root is itself ignored, ignore rules were written since the last commit, or git fails, every file counts instead. Trade-off: a secret in a git-ignored file with an ordinary name can pass `grep -r`. Reading that file directly is still checked.
+  - Directory symlinks are followed. `grep -r` and `-R`, and `rg --hidden`, also cover `.git/` (config and logs, not packed objects).
+- Heredoc bodies, which are checked line by line as commands;
 - `env`, `printenv`, and `$VAR` references to environment variables that hold secrets. The refusal names the variable, never its value.
 
-**What still gets through until the egress gate ships:** a script that opens files itself (`python x.py`, `node -e`), `find -exec`, `xargs` fed by a pipe, and `git diff` or `git log -p` output.
+**What still gets through until the egress gate ships:** a script that opens files itself (`python x.py`, `node -e`), `find -exec cat`, `xargs cat` fed by a pipe, a here-string into a shell (`bash <<< '...'`), `zgrep`, `ugrep` and `pcregrep`, and `git diff` or `git log -p` output.
 
-**The Grep tool.** Its input is structured, so the hook checks only the files its pattern matches. Install [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) so those matches are exactly what Claude's Grep would find. Without it, the hook uses Python's regex engine in a child process with a 5-second limit. A pattern it can't evaluate the same way counts as matching every file in scope, and so does a timeout: grep's basic-regex syntax and POSIX classes like `[[:alpha:]]` both fall into this. A search over more than 2,000 files is refused outright, and the agent should use `safe_grep` on a narrower path.
+**The Grep tool.** Its input is structured, so the hook checks only the files its pattern matches. Install [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) so those matches are exactly what Claude's Grep would find. Without it, the hook uses Python's regex engine in a child process with a 5-second limit. A pattern it can't evaluate the same way counts as matching every file in scope, and so does a timeout: grep's basic-regex syntax and POSIX classes like `[[:alpha:]]` both fall into this. A search over more than 2,000 files is refused outright, after the scoping above. The agent should use `safe_grep` on a narrower path.
 
 **Failure behavior.** Any error, an unparseable command, or passing its 25-second budget makes the hook block the call. It never fails open.
 
 **Check:** in a repo with a `.env`, ask Claude to show the file. The built-in Read is refused, and the answer contains placeholders instead of values.
 
 ## 4. Codex CLI
+
+`harpocrates install --codex` does steps 1 and 2, and prints the trust step below. To do them by hand:
 
 1. **Merge the printed TOML into `~/.codex/config.toml`.** It does three things:
    - It registers `[mcp_servers.harpocrates]`.
@@ -90,6 +129,8 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 2. **Add the printed note to `~/.codex/AGENTS.md`.**
 
 3. **Trust the hook.** The printed config also adds a `PreToolUse` hook for `Bash`. It is the same content-aware check as Claude Code's: before a shell command, it refuses commands that would print a file holding a secret, including ordinarily named files like `config/settings.py`. Codex runs a new or changed hook only after you review it, so start `codex`, type `/hooks`, and trust the Harpocrates hook.
+
+**Edits in Codex are refuse-only.** Codex's hooks can't ask you yet, so a Codex edit to a file that holds a secret is refused, and you make that edit yourself.
 
 **Check:**
 
