@@ -49,10 +49,10 @@ harpocrates scan .
 
 ### 2. Protect your AI agent (Claude Code, Codex)
 
-This adds the read tool and the hooks that keep the agent off secrets. The PyPI release with this flow is pending, so install the CLI from source:
+This adds the read tool and the hooks that keep the agent off secrets. Install the CLI (it includes the read tool and the hooks):
 
 ```bash
-pip install git+https://github.com/Skipa776/harpocrates
+pip install "harpocrates[mcp]"
 harpocrates install                  # every detected harness: Claude Code and/or Codex
 harpocrates install --claude-code    # or name one: --codex
 harpocrates install --dry-run        # show what would change; write and run nothing
@@ -83,7 +83,7 @@ Add to `.pre-commit-config.yaml`, then run `pre-commit install`:
 ```yaml
 repos:
   - repo: https://github.com/Skipa776/Harpocrates
-    rev: v1.2.0
+    rev: v1.3.0
     hooks:
       - id: harpocrates
         args: ["--ignore", "graphify-out,*.lock"]   # optional
@@ -274,6 +274,7 @@ These sets are not published yet: the open-source set contains third-party code 
 
 ## Past versions
 
+- **v1.3.0:** agent protection reworked: reads of secret-bearing files are refused (use `safe_read`), edits ask once per file and session; `harpocrates install` / `uninstall` for Claude Code and Codex; allowlist names (`harpocrates allow --name`); Claude Code plugin `harpocrates-prompt` with `/harpocrates` allowlist commands; hook hardening.
 - **v1.2.0** (model v17): higher recall, read tool for AI agents, calibrated confidence. `--ml` was removed so the model always runs (drop `--ml` from scripts and pre-commit `args`; it is now an error); the REST API, LLM verifier, and legacy training CLI were removed.
 - **v0.4:** redesigned 64-feature vector, TreeSHAP `--explain`, severity calibration.
 - **v0.3:** retrained on 62k samples, comment scanning, violation categories.

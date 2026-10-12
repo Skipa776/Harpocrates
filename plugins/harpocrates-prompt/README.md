@@ -33,11 +33,10 @@ behalf, so install only plugins you trust.
 ## Requirements
 
 The Harpocrates CLI hook must be installed, because it is what produces the
-verdict this plugin asks about. The PyPI release that carries this hook is
-pending; until it is out, install the CLI from source:
+verdict this plugin asks about. Install the CLI (it includes the read tool and the hooks):
 
 ```
-pip install git+https://github.com/Skipa776/harpocrates
+pip install "harpocrates[mcp]"
 harpocrates install
 ```
 
