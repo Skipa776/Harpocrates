@@ -6,10 +6,10 @@ What this protects today, and what it doesn't, is in the [threat model](threat-m
 
 ## 1. Install
 
-There are two install paths. The PyPI release with this flow is pending, so until it ships, install from source:
+There are two install paths. Install the CLI (it includes the read tool and the hooks):
 
 ```bash
-pip install git+https://github.com/Skipa776/harpocrates      # CLI
+pip install "harpocrates[mcp]"      # CLI
 # or, for development from a clone:
 pip install -e ".[mcp]"
 ```
