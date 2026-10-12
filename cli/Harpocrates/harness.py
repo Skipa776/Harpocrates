@@ -3,7 +3,8 @@
 The config only denies the harness's built-in reads of secret-bearing paths and registers the
 harpocrates MCP server, whose safe_read and safe_grep return those files redacted. Neither harness
 applies its read-deny rules to MCP servers, so safe_read can still open what the built-in tools can't.
-`harpocrates setup <harness>` prints it; writing it into the harness's own files is FR-INSTALL-01 (M2).
+`harpocrates setup <harness>` prints it; `harpocrates install` writes it into the harness's own files
+(FR-INSTALL-01, Harpocrates/install.py).
 """
 from __future__ import annotations
 
@@ -30,6 +31,9 @@ AGENT_NOTE = (
     "tools. Read them with the harpocrates MCP tools safe_read and safe_grep; secrets come back as "
     "<<HARPO:type:hash>> placeholders. Never try to recover a placeholder's value."
 )
+# Claude Code asks the user before an edit of such a file (FR-READ-06); Codex has no edit prompt.
+CLAUDE_NOTE = AGENT_NOTE + " To edit such a file, use Edit directly: the user is asked once per file and session."
+CODEX_NOTE = AGENT_NOTE + " Ask the user to edit such files."
 # ponytail: flip when the egress gate ships (M2); until then no harness has more than the read tool.
 GATE_AVAILABLE = False
 
@@ -95,32 +99,57 @@ def tier_report(found: dict[str, bool]) -> str:
     return "\n".join(lines)
 
 
+def python_flag() -> str:
+    """The interpreter flag every generated `python -m Harpocrates...` command carries. `python -m` puts the
+    current directory first on sys.path, and the current directory is the agent-controlled project, so a planted
+    `Harpocrates/` package there would run in place of ours (a hook that exits 0 is an allow). -P (3.11+) drops only
+    that entry and keeps user site-packages; older Pythons have no -P, so -I (isolated mode, which also drops the
+    user site and PYTHON* variables) is the closest."""
+    return "-P" if sys.version_info >= (3, 11) else "-I"
+
+
 def mcp_server() -> tuple[str, list[str]]:
     """This interpreter running the MCP server, so it works from any venv and from IDE-launched agents."""
-    return sys.executable, ["-m", "Harpocrates.mcp.server"]
+    return sys.executable, [python_flag(), "-m", "Harpocrates.mcp.server"]
+
+
+def guarded_hook(python: str, *flags: str) -> str:
+    """A PreToolUse hook command that fails closed. Harnesses read only exit 2 as a block, so a removed venv
+    (exit 127) or a crash (1) would let the call through. The hook itself exits 0 or 2, so `|| exit 2` changes
+    nothing else. The explicit `sh -c` works whether the harness runs the string in a shell or splits it into argv;
+    the python path travels as $0, so spaces and quotes in it are safe. --post hooks stay bare: they must never block."""
+    script = " ".join(['"$0"', python_flag(), "-m", "Harpocrates.hooks", *flags, "||", "exit", "2"])
+    return shlex.join(["sh", "-c", script, python])
 
 
 def claude_code_settings() -> dict:
     """Lines for ~/.claude/settings.json. `//**/` anchors at the filesystem root, so a rule in user
     settings covers every project and any file outside the working directory."""
     deny = [f"Read(//**/{name})" for name in SENSITIVE_FILES] + [f"Read({d}/**)" for d in SENSITIVE_HOME_DIRS]
+    deny.append("Edit(~/.harpocrates/**)")  # only the user edits the allowlist; Edit rules cover Write too
     command, _ = mcp_server()
     # Content-aware: also blocks built-in reads of any other file that holds a secret (Harpocrates/hooks.py).
-    hook = {"type": "command", "command": shlex.join([command, "-m", "Harpocrates.hooks"])}
+    # --ask: an edit of such a file prompts the user instead of being refused (reads are always refused, FR-READ-06).
+    hook = {"type": "command", "command": guarded_hook(command, "--ask")}
+    # --post records a Yes: PostToolUse/PostToolUseFailure fire only for an edit that ran, SessionEnd drops the grants.
+    post = {"type": "command", "command": shlex.join([command, python_flag(), "-m", "Harpocrates.hooks", "--post"])}
+    edits = "Edit|MultiEdit|Write|NotebookEdit"
     return {"permissions": {"deny": deny, "allow": list(MCP_TOOLS)},
-            "hooks": {"PreToolUse": [{"matcher": "Read|Grep|Bash", "hooks": [hook]}]}}
+            "hooks": {"PreToolUse": [{"matcher": f"Read|Grep|Bash|{edits}", "hooks": [hook]}],
+                      "PostToolUse": [{"matcher": edits, "hooks": [post]}],
+                      "PostToolUseFailure": [{"matcher": edits, "hooks": [post]}],
+                      "SessionEnd": [{"hooks": [post]}]}}
 
 
-def codex_config() -> str:
+def codex_config_parts() -> tuple[str, str]:
     """Lines for ~/.codex/config.toml. The profile limits sandboxed shell commands; Codex doesn't apply
     profiles to MCP servers, so safe_read still reads these paths. The PreToolUse hook is the same
     content-aware check as Claude Code's: it refuses shell commands that would print a file holding a secret."""
     command, args = mcp_server()
     files = "\n".join(f'"**/{name}" = "deny"' for name in SENSITIVE_FILES)
     dirs = "\n".join(f'"{d}" = "deny"' for d in SENSITIVE_HOME_DIRS)
-    return f"""default_permissions = "harpocrates"
-
-[mcp_servers.harpocrates]
+    root = 'default_permissions = "harpocrates"\n'
+    tables = f"""[mcp_servers.harpocrates]
 command = {json.dumps(command, ensure_ascii=False)}
 args = {json.dumps(args, ensure_ascii=False)}
 
@@ -135,14 +164,22 @@ glob_scan_max_depth = 8
 [permissions.harpocrates.filesystem.":workspace_roots"]
 {files}
 
+# Deny-only: Codex parses a PreToolUse "ask" but doesn't support it and fails open, so this hook runs without ask mode.
 [[hooks.PreToolUse]]
 matcher = "^Bash$"
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
-command = {json.dumps(shlex.join([command, "-m", "Harpocrates.hooks"]), ensure_ascii=False)}
+command = {json.dumps(guarded_hook(command), ensure_ascii=False)}
 statusMessage = "Harpocrates: checking files for secrets"
 """
+    return root, tables
+
+
+def codex_config() -> str:
+    """The same lines in one piece, for `harpocrates setup codex`."""
+    root, tables = codex_config_parts()
+    return f"{root}\n{tables}"
 
 
 def setup_instructions(harness: str) -> str:
@@ -162,15 +199,19 @@ def setup_instructions(harness: str) -> str:
 
 3. Add this to ~/.claude/CLAUDE.md so the agent knows where to turn when a read is refused:
 
-   {AGENT_NOTE}
+   {CLAUDE_NOTE}
 
 4. Check: start `claude` in a repo with a .env and ask it to show the file. The built-in Read is
    refused, and safe_read returns <<HARPO:...>> placeholders instead of the values.
 
-The "hooks" entry scans every file before a built-in Read, a content Grep, or a Bash command such as
-`cat` touches it, and refuses the call if the file holds a secret, pointing the agent to safe_read.
-Cost: Claude can't Edit a refused file, since Edit needs a built-in Read first (about 3% of ordinary
-source files, mostly false alarms). Limit: a script that opens files itself gets through; the egress
+The "hooks" entry scans every file before a built-in Read, Edit or Write, a content Grep, or a Bash
+command such as `cat` touches it. If the file holds a secret, a read is refused with a pointer to
+safe_read / safe_grep, in every mode. Only an EDIT of such a file prompts you ("Harpocrates:" naming the
+file), once per file and session, even in accept-edits mode; Yes lets Claude change it (and read it
+as-is, so its values reach the provider), No leaves it untouched. A folder of known false alarms (hashes,
+build output) can be allowed for good with `harpocrates allow <path>`; each pass is logged in
+~/.harpocrates/allow.log. The deny rules above still win over the allowlist.
+Limit: a script that opens files itself gets through; the egress
 gate covers that. For OS-level blocking of the secret paths, see the sandbox step in docs/setup.md."""
     if harness == "codex":
         return f"""Codex CLI: route reads of secret files through safe_read
@@ -181,7 +222,7 @@ gate covers that. For OS-level blocking of the secret paths, see the sandbox ste
 {codex_config()}
 2. Add this to ~/.codex/AGENTS.md:
 
-   {AGENT_NOTE}
+   {CODEX_NOTE}
 
 3. Trust the hook: start `codex`, type /hooks, review the Harpocrates PreToolUse hook and trust it.
    Codex runs a new or changed hook only after this review.

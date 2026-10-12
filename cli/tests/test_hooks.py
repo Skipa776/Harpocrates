@@ -181,3 +181,731 @@ def test_fr_read_03_hook_rereview_cases(repo, capsys, monkeypatch: pytest.Monkey
              "tool_input": {"pattern": "AWS", "path": str(tmp_path), "output_mode": "content"}}
     code, out = _run(event, capsys)
     assert code == 0 and _denied(out)
+
+
+def test_fr_read_03_hook_bash_shell_variables(repo, capsys) -> None:
+    root, _ = repo  # a variable set earlier in the same command names the path its later words use
+    for cmd in ("D=.; grep -n docker $D/README.md", "export D=.; cat ${D}/README.md", "D=. && cat \"$D/README.md\""):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+    for cmd in ("D=config; cat $D/settings.py", "D=config && bash -c 'cat $D/settings.py'",
+                "D=.; grep -n x $D/config/settings.py", "declare D=config; cat $D/settings.py",
+                "local -r D=config; cat $D/settings.py",
+                # control flow isn't modelled: every value a name gets anywhere in the command is checked
+                "D=.; if true; then D=config; fi; cat $D/settings.py", "D=config; true || D=.; cat $D/settings.py",
+                "D=config; echo hi | D=.; cat $D/settings.py", "F='README.md config/settings.py'; cat $F",
+                "G='config/sett*'; cat $G", "D=.; D+=/config; cat $D/settings.py",
+                "F=config/settings.py; cat ${F:-x}", "F=config/settings.py; B=F; cat ${!B}",
+                "HOME=config; cat ~/settings.py"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+
+
+
+def test_fr_read_03_hook_git_show_shell_variables(repo, capsys, tmp_path: Path) -> None:
+    import subprocess
+
+    (tmp_path / "s.py").write_text("AWS_ACCESS_KEY_ID=AKIA" + "QZ7XK2PLM9RT4VWB" + "\n")
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "s.py"], check=True)
+    subprocess.run([*git, "commit", "-qm", "x"], check=True)
+    (tmp_path / "s.py").unlink()  # only the git object holds it now
+    for cmd in ("R=HEAD:s.py; git show $R", "R=HEAD; git show $R:s.py"):
+        code, out = _run(_bash(tmp_path, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+
+
+def _canary_token(canaries: list[dict]) -> str:
+    return next(c["value"] for c in canaries if c["kind"] == "github_token")
+
+
+def test_fr_read_03_hook_placeholder_text_is_not_a_secret(repo, capsys, tmp_path: Path) -> None:
+    """Docs and plans quote <<HARPO:type:hash>> placeholders; redacting them changes nothing, so Read passes.
+    A real secret next to one is still refused."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    ph = "<<HARPO:" + "generic:abcd>>"
+    (tmp_path / "plan.md").write_text(f"safe_read shows a secret as {ph}.\n")
+    (tmp_path / "mixed.md").write_text(f"Quoted before: {ph}\nGITHUB_TOKEN = \"{token}\"\n")
+    def read(name: str) -> dict:
+        return {"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": name}}
+    assert _run(read("plan.md"), capsys) == (0, "")
+    code, out = _run(read("mixed.md"), capsys)
+    assert code == 0 and _denied(out) and token[:12] not in out
+
+
+def _git_repo(root: Path, ignore: str, files: dict[str, str], tracked: tuple[str, ...] = ()) -> Path:
+    import subprocess
+
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+    (root / ".gitignore").write_text(ignore)
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    subprocess.run(["git", "-C", str(root), "add", ".gitignore", *tracked], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                    "commit", "-qm", "x", "--no-verify"], check=True, capture_output=True)  # rules are committed ones
+    return root
+
+
+def _filler(root: Path, rel: str, n: int = hooks.MAX_SCOPE_FILES + 1) -> None:
+    (root / rel).mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        (root / rel / f"f{i}.txt").write_text("x\n")
+
+
+def _grep_event(root: Path, pattern: str = "foo", **extra) -> dict:
+    return {"tool_name": "Grep", "cwd": str(root),
+            "tool_input": {"pattern": pattern, "path": str(root), "output_mode": "content", **extra}}
+
+
+def test_fr_read_03_hook_scope_skips_gitignored_files(repo, capsys, tmp_path: Path) -> None:
+    """In a git work tree a recursive shell search is scoped to the files git lists, so a gitignored
+    directory over MAX_SCOPE_FILES (.venv, target/, data/) no longer makes the call 'too wide'."""
+    root = _git_repo(tmp_path / "w", "junk/\n", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    _filler(root, "junk")
+    for cmd in ("grep -rn foo .", "rg -n foo", "git grep foo", "grep -rn foo src"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def test_fr_read_03_hook_scope_outside_git_is_unchanged(repo, capsys, tmp_path: Path,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """No work tree, no .gitignore to trust: every file counts, and over MAX_SCOPE_FILES is denied."""
+    monkeypatch.setattr(hooks, "_GIT_ENV", {**hooks._GIT_ENV, "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)})
+    root = tmp_path / "plain"
+    _filler(root, "junk")
+    code, out = _run(_bash(root, "grep -rn foo ."), capsys)
+    assert code == 0 and _denied(out) and "Too many files" in out
+
+
+@pytest.mark.parametrize("breakage", ["no git", "git stalls"])
+def test_fr_read_03_hook_scope_fails_closed_without_git(repo, capsys, tmp_path: Path,
+                                                        monkeypatch: pytest.MonkeyPatch, breakage: str) -> None:
+    """If git can't answer, the scope is the old full walk, never a smaller one."""
+    import subprocess
+
+    root = _git_repo(tmp_path / "w", "junk/\n", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    _filler(root, "junk")
+    if breakage == "no git":
+        monkeypatch.setattr(hooks, "_GIT_ENV", {**hooks._GIT_ENV, "PATH": str(tmp_path / "nowhere")})
+    else:
+        def stall(*_a, **kw):
+            raise subprocess.TimeoutExpired(cmd="git", timeout=kw.get("timeout", 0))
+        monkeypatch.setattr(hooks.subprocess, "run", stall)
+    code, out = _run(_bash(root, "grep -rn foo ."), capsys)
+    assert code == 0 and _denied(out) and "Too many files" in out
+
+
+@pytest.mark.parametrize("rel", [".env", "junk/deep/.env", "junk/deep/server.pem"])
+def test_fr_read_03_hook_scope_keeps_ignored_secret_named_files(repo, capsys, tmp_path: Path, rel: str) -> None:
+    """Trade-off: a git-ignored file is out of a recursive search's scope unless its name looks like a secret
+    store (SENSITIVE_FILES); those are still scanned, wherever they hide, for shell commands and Grep."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _git_repo(tmp_path / "w", ".env\njunk/\n*.pem\n", {rel: f"foo=1\nGITHUB_TOKEN={token}\n"})
+    for cmd in ("grep -rn foo .", "rg -n foo", "git grep foo"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and token[:12] not in out, cmd
+    code, out = _run(_grep_event(root), capsys)
+    assert code == 0 and _denied(out) and "safe_grep" in out and token[:12] not in out
+
+
+def test_fr_read_03_hook_scope_ignored_ordinary_file_is_accepted(repo, capsys, tmp_path: Path) -> None:
+    """ACCEPTED TRADE-OFF: a secret in a git-ignored file with an ordinary name (notes.local) no longer
+    makes a recursive shell grep or the Grep tool refuse; those searches skip ignored files, as ripgrep does.
+    Reading the file directly is still checked."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _git_repo(tmp_path / "w", "*.local\n", {"notes.local": f"foo\nGITHUB_TOKEN={token}\n",
+                                                   "src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    assert _run(_bash(root, "grep -rn foo ."), capsys) == (0, "")
+    assert _run(_grep_event(root), capsys) == (0, "")
+    read = {"tool_name": "Read", "cwd": str(root), "tool_input": {"file_path": "notes.local"}}
+    code, out = _run(read, capsys)
+    assert code == 0 and _denied(out)
+
+
+@pytest.mark.parametrize("tracked", [True, False])
+def test_fr_read_03_hook_scope_keeps_tracked_and_untracked_files(repo, capsys, tmp_path: Path, tracked: bool) -> None:
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _git_repo(tmp_path / "w", "junk/\n", {"config.py": f"foo = 1\nGITHUB_TOKEN = \"{token}\"\n"},
+                     tracked=("config.py",) if tracked else ())
+    for event in (_bash(root, "grep -rn foo ."), _grep_event(root)):
+        code, out = _run(event, capsys)
+        assert code == 0 and _denied(out) and "config.py" in out, event
+
+
+def test_fr_read_03_hook_scope_nested_repo_is_not_skipped(repo, capsys, tmp_path: Path) -> None:
+    """git lists an untracked nested repo as one directory entry: its files must still be in scope."""
+    import subprocess
+
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    subprocess.run(["git", "-C", str(root), "init", "-q", "vendor/lib"], check=True)
+    (root / "vendor/lib/cfg.py").write_text(f"GITHUB_TOKEN = \"{token}\"\n")
+    code, out = _run(_bash(root, "grep -rn foo ."), capsys)
+    assert code == 0 and _denied(out) and "cfg.py" in out
+
+
+def _oversize(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, hit: str, limit: int = 4096) -> Path:
+    import Harpocrates.read as read
+
+    monkeypatch.setattr(read, "MAX_BYTES", limit)
+    big = tmp_path / "big.jsonl"
+    big.write_text("filler line\n" * 400 + hit + "\n" + "filler line\n" * 50)
+    assert big.stat().st_size > limit
+    return big
+
+
+def test_fr_read_03_hook_grep_oversize_file_judged_by_printed_lines(repo, capsys, tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Grep tool prints only matching lines, so an oversize file whose matches are clean passes; the
+    same file with a secret on the matched line is refused."""
+    import shutil
+
+    if not shutil.which("rg"):
+        pytest.skip("the exact single-file match needs ripgrep; without it oversize files stay refused")
+    _, canaries = repo
+    token = _canary_token(canaries)
+    _oversize(monkeypatch, tmp_path, "needle ok=1")
+    assert _run(_grep_event(tmp_path, "needle"), capsys) == (0, "")
+    (tmp_path / "big.jsonl").write_text("needle " + token + "\n" + "filler line\n" * 500)
+    code, out = _run(_grep_event(tmp_path, "needle"), capsys)
+    assert code == 0 and _denied(out) and token[:12] not in out
+
+
+def test_fr_read_03_hook_grep_oversize_context_lines_are_scanned(repo, capsys, tmp_path: Path,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """-A/-B/-C/context print neighbours of a match: a secret on one of them must count."""
+    import shutil
+
+    if not shutil.which("rg"):
+        pytest.skip("needs ripgrep")
+    _, canaries = repo
+    token = _canary_token(canaries)
+    big = _oversize(monkeypatch, tmp_path, "needle ok=1")
+    big.write_text("filler line\n" * 400 + f"needle ok=1\nGITHUB_TOKEN={token}\n" + "filler line\n" * 50)
+    assert _run(_grep_event(tmp_path, "needle"), capsys) == (0, "")
+    for extra in ({"-A": 1}, {"-C": 1}, {"context": 2}):
+        code, out = _run(_grep_event(tmp_path, "needle", **extra), capsys)
+        assert code == 0 and _denied(out), extra
+
+
+def test_fr_read_03_hook_oversize_stays_refused_elsewhere(repo, capsys, tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read, Edit and shell commands can print the whole file, and an output over the limit, a missing ripgrep
+    or a pattern matching every line can't be vouched for: all keep the 'unscanned' refusal."""
+    import shutil
+
+    _oversize(monkeypatch, tmp_path, "needle ok=1")
+    for event in ({"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},
+                  {"tool_name": "Edit", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},
+                  _bash(tmp_path, "grep needle big.jsonl"), _bash(tmp_path, "cat big.jsonl"),
+                  _grep_event(tmp_path, "filler")):  # prints more than the limit
+        code, out = _run(event, capsys)
+        assert code == 0 and _denied(out) and "over the size limit" in out, event
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    code, out = _run(_grep_event(tmp_path, "needle"), capsys)
+    assert code == 0 and _denied(out) and "over the size limit" in out
+
+
+def test_fr_read_03_hook_oversize_binary_passes_oversize_text_refused(repo, capsys, tmp_path: Path) -> None:
+    """A big executable named in a command (`.venv/bin/tool --version | cat`) is binary: it passes like images and
+    PDFs, whatever its size. An oversize TEXT file is still refused."""
+    from Harpocrates.read import MAX_BYTES
+
+    binary = tmp_path / "tool"
+    binary.write_bytes(b"\x7fELF\x00" + b"\x01" * 1000)
+    with binary.open("ab") as f:
+        f.truncate(MAX_BYTES + 1024 * 1024)  # ~11 MB, NUL-filled
+    text = tmp_path / "big.txt"
+    text.write_bytes(b"filler line\n" * ((MAX_BYTES + 1024 * 1024) // 12))
+    assert binary.stat().st_size > MAX_BYTES and text.stat().st_size > MAX_BYTES
+    assert _run(_bash(tmp_path, "./tool --version | cat"), capsys) == (0, "")
+    assert _run(_bash(tmp_path, "cat tool"), capsys) == (0, "")
+    code, out = _run(_bash(tmp_path, "cat big.txt"), capsys)
+    assert code == 0 and _denied(out) and "over the size limit" in out
+
+
+@pytest.mark.parametrize("ripgrep", [True, False])
+def test_fr_read_03_hook_grep_glob_reaches_ignored_files(repo, capsys, tmp_path: Path,
+                                                         monkeypatch: pytest.MonkeyPatch, ripgrep: bool) -> None:
+    """A Grep glob overrides .gitignore (rg searches whatever it names), so the hook must look there too,
+    with ripgrep and, falling back to the full tree, without it."""
+    if not ripgrep:
+        monkeypatch.setattr(hooks.shutil, "which", lambda _name: None)
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _git_repo(tmp_path / "w", "*.local\n", {"notes.local": f"foo\nGITHUB_TOKEN={token}\n",
+                                                   "src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    code, out = _run(_grep_event(root, "foo", glob="*.local"), capsys)
+    assert code == 0 and _denied(out) and "notes.local" in out and token[:12] not in out
+
+
+def test_fr_read_03_hook_scope_ignored_root_is_walked(repo, capsys, tmp_path: Path) -> None:
+    """Naming a git-ignored directory is explicit, unlike meeting it inside `grep -r .`: that root, or a
+    subdirectory of it, is walked in full. The broad search over the repo still skips it."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _git_repo(tmp_path / "w", "junk/\n", {"junk/notes.txt": f"aws\nGITHUB_TOKEN={token}\n",
+                                                 "junk/sub/deep.txt": f"aws\nGITHUB_TOKEN={token}\n",
+                                                 "src/app.py": "print('aws')\n"}, tracked=("src/app.py",))
+    for cmd in ("grep -rn aws junk", "grep -rn aws junk/sub", "rg aws junk", "cd junk && grep -rn aws ."):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and token[:12] not in out, cmd
+    assert _run(_bash(root, "grep -rn aws ."), capsys) == (0, "")
+
+
+@pytest.mark.parametrize("trick", ["none", "edited .gitignore", "new .gitignore", "self-hiding .gitignore",
+                                   "info/exclude", "core.excludesFile", "xdg ignore"])
+def test_fr_read_03_hook_scope_ignores_rules_the_agent_wrote(repo, capsys, tmp_path: Path,
+                                                             monkeypatch: pytest.MonkeyPatch, trick: str) -> None:
+    """An ignore rule written after the last commit (.gitignore edits and new ones, .git/info/exclude, a
+    core.excludesFile, the XDG ignore file) must not shrink what `grep -r .` is checked against.
+    RESIDUAL: a rule the agent commits still hides files, the same class as the documented script gap."""
+    import subprocess
+
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _git_repo(tmp_path / "w", "junk/\n", {"config/base.py": "print('foo')\n"}, tracked=("config/base.py",))
+    (root / "config/settings.py").write_text(f"foo\nGITHUB_TOKEN = \"{token}\"\n")  # untracked, not ignored
+    if trick == "edited .gitignore":
+        (root / ".gitignore").write_text("junk/\n*.py\n")
+    elif trick == "new .gitignore":
+        (root / "config/.gitignore").write_text("settings.py\n")
+    elif trick == "self-hiding .gitignore":
+        (root / "config/.gitignore").write_text("*\n")
+    elif trick == "info/exclude":
+        (root / ".git/info/exclude").write_text("# local\n*.py\n")
+    elif trick == "core.excludesFile":
+        (tmp_path / "excludes").write_text("*.py\n")
+        subprocess.run(["git", "-C", str(root), "config", "core.excludesFile", str(tmp_path / "excludes")], check=True)
+    elif trick == "xdg ignore":
+        (tmp_path / "xdg/git").mkdir(parents=True)
+        (tmp_path / "xdg/git/ignore").write_text("*.py\n")
+        monkeypatch.setattr(hooks, "_GIT_ENV", {**hooks._GIT_ENV, "XDG_CONFIG_HOME": str(tmp_path / "xdg")})
+    code, out = _run(_bash(root, "grep -rn foo ."), capsys)
+    assert code == 0 and _denied(out) and "settings.py" in out and token[:12] not in out
+
+
+def test_fr_read_03_hook_scope_trusts_tool_cache_ignore_files(repo, capsys, tmp_path: Path) -> None:
+    """ruff, mypy and venv write a `*` .gitignore into their own untracked directory: it hides only that
+    directory, so it is not a reason to walk the whole tree."""
+    root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    _filler(root, ".ruff_cache")
+    (root / ".ruff_cache/.gitignore").write_text("*\n")
+    assert _run(_bash(root, "grep -rn foo ."), capsys) == (0, "")
+
+
+def test_fr_read_03_hook_scope_over_limit_in_git_is_denied(repo, capsys, tmp_path: Path) -> None:
+    root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    _filler(root, "many")  # untracked and not ignored: git lists them all
+    code, out = _run(_bash(root, "grep -rn foo ."), capsys)
+    assert code == 0 and _denied(out) and "Too many files" in out
+
+
+@pytest.mark.parametrize("glob, expect_denied", [("*.zzz *.py", True), ("*.zzz,*.py", True), ("*.{py,zzz}", True),
+                                                 ("{*.zzz,*.py}", True), ("*.zzz", False)])
+def test_fr_read_03_hook_grep_glob_is_split_like_the_tool(repo, capsys, tmp_path: Path, glob: str,
+                                                          expect_denied: bool) -> None:
+    """Claude Code splits `glob` on whitespace, then on commas unless the piece has braces, and passes each
+    piece as its own --glob: one raw string would match nothing and let a secret file through."""
+    import shutil
+
+    if not expect_denied and not shutil.which("rg"):
+        pytest.skip("without ripgrep the hook ignores globs and checks every file")
+    _, canaries = repo
+    token = _canary_token(canaries)
+    (tmp_path / "settings.py").write_text(f"foo\nGITHUB_TOKEN = \"{token}\"\n")
+    code, out = _run(_grep_event(tmp_path, "foo", glob=glob), capsys)
+    assert code == 0 and _denied(out) == expect_denied, glob
+
+
+@pytest.mark.parametrize("secret_at, extra", [("after", {"context": 2, "-A": 0}), ("before", {"context": 2, "-B": 0}),
+                                              ("after", {"-C": 2, "-A": 0})])
+def test_fr_read_03_hook_grep_oversize_context_flags_cannot_shrink_the_check(
+        repo, capsys, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret_at: str, extra: dict) -> None:
+    """rg lets -A/-B override -C, so the hook scans the widest context any of the flags could print."""
+    import shutil
+
+    if not shutil.which("rg"):
+        pytest.skip("needs ripgrep")
+    _, canaries = repo
+    token = _canary_token(canaries)
+    big = _oversize(monkeypatch, tmp_path, "needle ok=1")
+    pair = (f"GITHUB_TOKEN={token}\n", "needle ok=1\n")
+    big.write_text("filler line\n" * 400 + "".join(pair if secret_at == "before" else pair[::-1]) + "filler line\n" * 50)
+    code, out = _run(_grep_event(tmp_path, "needle", **extra), capsys)
+    assert code == 0 and _denied(out) and token[:12] not in out, extra
+
+
+def test_fr_read_03_hook_subprocess_timeouts_respect_budget(repo, capsys, tmp_path: Path,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chained 5 s timeouts must not outlast BUDGET: a hook that times out counts as allow."""
+    import subprocess
+
+    _, canaries = repo
+    root = _git_repo(tmp_path / "w", "", {"config.py": f"foo\nGITHUB_TOKEN={_canary_token(canaries)}\n"},
+                     tracked=("config.py",))
+    seen: list[float] = []
+    def stall(*_a, **kw):
+        seen.append(kw["timeout"])
+        raise subprocess.TimeoutExpired(cmd="stalled", timeout=kw["timeout"])
+    monkeypatch.setattr(hooks, "BUDGET", 2.0)
+    monkeypatch.setattr(hooks.subprocess, "run", stall)
+    for event in (_grep_event(root, "foo"), _bash(root, "grep -rn foo .")):
+        code, out = _run(event, capsys)
+        assert code == 0 and _denied(out)
+    assert seen and max(seen) <= 2.0
+
+
+def test_fr_read_03_hook_untrusted_matcher_output_falls_back_to_the_full_scope(
+        repo, capsys, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """If rg's file list can't be trusted, every file counts, and with a Grep glob that includes the ones
+    .gitignore hides."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("rg"):
+        pytest.skip("needs ripgrep")
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _git_repo(tmp_path / "w", "*.local\n", {"notes.local": f"foo\nGITHUB_TOKEN={token}\n",
+                                                   "src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    real = subprocess.run
+    def fake(argv, *a, **kw):
+        if Path(argv[0]).name == "rg":
+            return subprocess.CompletedProcess(argv, 0, stdout="/no/such/file\0", stderr="")
+        return real(argv, *a, **kw)
+    monkeypatch.setattr(hooks.subprocess, "run", fake)
+    code, out = _run(_grep_event(root, "foo", glob="*.local"), capsys)
+    assert code == 0 and _denied(out) and "notes.local" in out
+
+
+def test_fr_read_03_hook_grep_non_utf8_file_name(repo, capsys, tmp_path: Path) -> None:
+    """A file name that isn't UTF-8 must not crash the hook's decoding of rg's output."""
+    import os
+
+    _, canaries = repo
+    token = _canary_token(canaries)
+    try:
+        (tmp_path / os.fsdecode(b"bad\xff.py")).write_text(f"foo\nGITHUB_TOKEN={token}\n")
+    except OSError:
+        pytest.skip("this file system rejects non-UTF-8 names")
+    code, out = _run(_grep_event(tmp_path, "foo"), capsys)
+    assert code == 0 and _denied(out)
+
+
+# ---------------------------------------------------------------------- symlinks, .git, stdin readers, heredocs
+
+
+def _plain(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """A directory outside any work tree (git is kept from looking above tmp_path)."""
+    monkeypatch.setattr(hooks, "_GIT_ENV", {**hooks._GIT_ENV, "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)})
+    root = tmp_path / "plain"
+    root.mkdir()
+    (root / "README.md").write_text("nothing here\n")
+    return root
+
+
+@pytest.mark.parametrize("where, target", [("git", "outside"), ("plain", "outside"), ("git", "ignored")])
+def test_fr_read_03_hook_scope_follows_symlinked_directories(repo, capsys, tmp_path: Path,
+                                                             monkeypatch: pytest.MonkeyPatch, where: str,
+                                                             target: str) -> None:
+    """`grep -R`, BSD `grep -S` and `rg -L` follow a link to a directory: so does the scope, always (reading
+    more than the tool would is safe). A listed symlink that points to a directory is walked the same way."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    secret = f"foo\nGITHUB_TOKEN = \"{token}\"\n"
+    if where == "git":
+        root = _git_repo(tmp_path / "w", "junk/\n", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    else:
+        root = _plain(monkeypatch, tmp_path)
+    dest = root / "junk" if target == "ignored" else tmp_path / "outside"
+    dest.mkdir(exist_ok=True)
+    (dest / "notes.txt").write_text(secret)
+    (root / "lnk").symlink_to(dest, target_is_directory=True)
+    for cmd in ("grep -R foo .", "rg -L foo .", "grep -r foo .", "grep -rS foo ."):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and token[:12] not in out, cmd
+
+
+def test_fr_read_03_hook_rg_dash_l_follows_links_and_prints(repo, capsys) -> None:
+    """-L means --files-without-match to grep, ag and ack (names only) but --follow to rg, which prints lines."""
+    root, _ = repo
+    code, out = _run(_bash(root, "rg -L foo ."), capsys)
+    assert code == 0 and _denied(out)
+    for cmd in ("grep -L -r foo .", "grep -L foo README.md", "ag -L foo ."):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+@pytest.mark.parametrize("where", ["git", "plain"])
+def test_fr_read_03_hook_scope_symlink_loop_terminates(repo, capsys, tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch, where: str) -> None:
+    """Links back to a parent, to the root itself, and a pair that point at each other: the walk visits each real
+    directory once, so it returns, and the duplicate paths don't eat the MAX_SCOPE_FILES cap."""
+    if where == "git":
+        root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    else:
+        root = _plain(monkeypatch, tmp_path)
+    (root / "a").mkdir()
+    (root / "a/f.txt").write_text("foo\n")
+    (root / "a/up").symlink_to("..", target_is_directory=True)
+    (root / "self").symlink_to(".", target_is_directory=True)
+    (root / "x").mkdir()
+    (root / "y").mkdir()
+    (root / "x/to_y").symlink_to("../y", target_is_directory=True)
+    (root / "y/to_x").symlink_to("../x", target_is_directory=True)
+    for cmd in ("grep -R foo .", "rg -L foo", "grep -r foo a"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def _repo_with_remote_token(root: Path, token: str) -> Path:
+    root = _git_repo(root, "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    with (root / ".git/config").open("a") as fh:
+        fh.write(f"[remote \"origin\"]\n\turl = https://x:{token}@example.com/r.git\n")
+    return root
+
+
+def test_fr_read_03_hook_git_dir_is_in_scope_for_tools_that_descend(repo, capsys, tmp_path: Path) -> None:
+    """`grep -r .` reads .git/config, which can hold a token in a remote URL. Checked on this machine: grep -r/-R
+    descend into .git; rg does only with --hidden, -. or -uu; git grep never does. The Grep tool is not in play."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _repo_with_remote_token(tmp_path / "w", token)
+    for cmd in ("grep -r foo .", "grep -R foo", "grep -rn foo", "rg --hidden foo", "rg -uu foo .", "rg -. foo",
+                "xargs grep -r foo"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and ".git/config" in out and token[:12] not in out, cmd
+    for cmd in ("git grep foo", "rg foo .", "rg -n foo", "rg -u foo", "grep -n foo src/app.py", "grep -r foo src",
+                "git -C . grep foo"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def test_fr_read_03_hook_git_dir_in_nested_repo_is_in_scope(repo, capsys, tmp_path: Path,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    _, canaries = repo
+    root = _plain(monkeypatch, tmp_path)
+    _repo_with_remote_token(root / "inner", _canary_token(canaries))
+    code, out = _run(_bash(root, "grep -r foo ."), capsys)
+    assert code == 0 and _denied(out) and ".git/config" in out
+
+
+@pytest.mark.parametrize("rel", [".git/objects/ab/cdef", ".git/modules/sub/objects/ab/cdef"])
+def test_fr_read_03_hook_git_dir_objects_stay_out_of_scope(repo, capsys, tmp_path: Path, rel: str) -> None:
+    """Trade-off: .git/objects holds compressed data, and the cap would trip on any real repository, so a search
+    that descends into .git is not checked there."""
+    _, canaries = repo
+    root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(f"GITHUB_TOKEN={_canary_token(canaries)}\n")
+    assert _run(_bash(root, "grep -r foo ."), capsys) == (0, "")
+
+
+def test_fr_read_03_hook_stdin_readers_do_not_scan_the_tree(repo, capsys) -> None:
+    """A grep with no file operand and no recursion reads stdin; so does rg or ag after a pipe."""
+    root, _ = repo
+    for cmd in ("mypy x | grep error:", "echo hi | grep -v foo", "ls | grep -E 'a|b'", "ls | grep -A 3 error:",
+                "ls | grep -e a -e b", "ls | grep -n 'x.*y'", "ls | rg -n foo", "ls | ag foo", "ls | egrep foo",
+                "ls | grep foo -", "ls |& rg foo", "ls | head -3 | grep foo", "ls | rg -g '*.py' foo"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+    for cmd in ("grep -r foo", "grep -R foo", "grep -d recurse foo", "grep --recursive foo", "grep -rn foo",
+                "grep -nr foo", "rg foo", "rg foo | head", "ls | rg foo .", "ls | grep foo .", "ls | grep foo *",
+                "ls | grep foo $(echo x)", "ls | xargs grep foo", "ls | grep -e foo .",
+                "ls && rg foo", "echo x | git grep foo"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+
+
+def test_fr_read_03_hook_search_name_must_be_the_command(repo, capsys) -> None:
+    """`which rg`, `type grep`, `echo grep` name a search tool without running it. A search still counts
+    after wrappers, `VAR=x`, shell keywords and on any line of a script; behind a wrapper the hook doesn't know it
+    is scoped by its operands, else the tree (never taken for a stdin reader)."""
+    root, _ = repo
+    for cmd in ("which rg git", "echo grep", "command -v rg", "type grep", "whereis rg",
+                "git log --grep=foo --oneline", "echo hi | echo rg", "sudo which rg", "man grep",
+                "printf '%s\n' rg"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+    for cmd in ("sudo rg foo", "sudo -u root rg foo", "env FOO=1 grep -r foo .", "env -i rg foo", "command rg foo",
+                "nice -n 5 rg foo", "nohup rg foo", "time rg foo", "timeout 5 rg foo", "timeout -s KILL 5s rg foo",
+                "FOO=1 rg foo", "ls | xargs -n1 rg foo", "xargs -I {} grep foo {}", "git grep foo HEAD",
+                "git -C . grep foo HEAD", "git --no-pager grep foo HEAD", "echo hi\nrg foo", "cd . && rg foo",
+                "for d in a b; do rg foo; done", "if true; then rg foo; fi", "{ rg foo; }", "(rg foo)",
+                "echo hi # note\nrg foo", "ls |& grep -r foo", "sudo env FOO=1 nice rg foo",
+                # a wrapper the hook doesn't know hides nothing: a search name in the words still counts
+                "caffeinate grep -rn aws .", "flock /tmp/l grep -rn aws .", "script -q /dev/null grep -rn aws .",
+                "parallel grep -rn aws ::: .", "unbuffer grep -rn aws .", "find . -exec grep aws {} +",
+                "ls | unbuffer grep aws", "ls | caffeinate rg aws"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+
+
+def _secret_env(tmp_path: Path, token: str) -> Path:
+    (tmp_path / "secret.env").write_text(f"GITHUB_TOKEN={token}\n")
+    (tmp_path / "README.md").write_text("nothing here\n")
+    return tmp_path
+
+
+def test_fr_read_03_hook_heredoc_body_is_input_not_shell(repo, capsys, tmp_path: Path) -> None:
+    """A heredoc body is cut before the command is tokenised, so an apostrophe in it no longer raises (= exit 2,
+    'hook error; blocked'); it is then read as command lines (_prose), so prose that names no secret file passes."""
+    _, canaries = repo
+    root = _secret_env(tmp_path, _canary_token(canaries))
+    for cmd in ("python - <<'EOF'\nprint(\"it's\")\nEOF", "python - <<EOF\nprint(\"it's\")\nEOF\n",
+                "cat <<-EOF\n\tit's\n\tEOF", "cat <<\"EOF\" > notes.txt\nit's `not run`\nEOF",
+                "cat <<A <<B\none's\nA\ntwo's\nB", "cat <<< \"it's\"", "echo $((1<<3))", "echo 'a << b'",
+                "cat <<'EOF' > f.txt\nhello\nEOF", "git commit -m \"$(cat <<'EOF'\nfix: x\nEOF\n)\""):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def test_fr_read_03_hook_heredoc_shell_body_and_substitutions_are_checked(repo, capsys, tmp_path: Path) -> None:
+    """Whatever reads a heredoc may run it, so its body is checked as command lines, quoted delimiter or not; an
+    unquoted delimiter also expands `$(...)` and backticks first; commands after the heredoc are still judged."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    root = _secret_env(tmp_path, token)
+    for cmd in ("bash <<EOF\ncat secret.env\nEOF", "sudo bash <<'EOF'\ncat secret.env\nEOF",
+                "env FOO=1 sh -s <<-EOF\n\tcat secret.env\n\tEOF", "cat <<EOF\n$(cat secret.env)\nEOF",
+                "cat <<EOF\nline `cat secret.env`\nEOF", "python - <<'EOF'\nprint(\"it's\")\nEOF\ncat secret.env",
+                "cd . && bash <<'EOF'\ncat 'secret.env'\nEOF", "bash <<A <<B\ntrue\nA\ncat secret.env\nB",
+                "cat <<'EOF'\n$(cat secret.env)\nEOF", "cat <<\\EOF\n`cat secret.env`\nEOF"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and token[:12] not in out, cmd
+
+
+def test_fr_read_03_hook_heredoc_never_closed_is_read_to_the_end(repo, capsys, tmp_path: Path) -> None:
+    """No terminator line: the rest of the command is the body. No crash, and nothing slips through."""
+    _, canaries = repo
+    root = _secret_env(tmp_path, _canary_token(canaries))
+    for cmd in ("cat <<EOF\nbody", "cat <<EOF", "cat <<'EOF'\nit's\nEOF2", "echo $((1<<X))", "echo $((1<<3))"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+    code, out = _run(_bash(root, "cat <<EOF\nit's\ncat secret.env"), capsys)
+    assert code == 0 and _denied(out)
+
+
+def test_fr_read_03_hook_find_exec_search_is_scoped_to_find_paths(repo, capsys, tmp_path: Path) -> None:
+    """`find PATHS -exec grep ...` searches what find lists: its start paths, or the cwd if it names none."""
+    _, canaries = repo
+    root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    (root / "config.py").write_text(f"foo\nGITHUB_TOKEN = \"{_canary_token(canaries)}\"\n")
+    for cmd in ("find src -exec grep aws {} +", "find -L src -name '*.py' -ok rg aws {} \\;",
+                "find src -execdir grep aws {} \\;"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+    for cmd in ("find . -exec grep aws {} +", "find -exec grep aws {} +", "find src . -exec grep aws {} +",
+                "find config.py -exec grep aws {} +"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out) and "config.py" in out, cmd
+
+
+def test_fr_read_03_hook_heredoc_body_is_never_dropped(repo, capsys) -> None:
+    """Whatever reads a heredoc (a pipe into bash or sh, `source /dev/stdin`, a wrapper, `xargs cat`, or a `<<` that
+    is arithmetic and no heredoc at all) the body may run or name files, so it is read as command lines: plain
+    str.split, never shlex, so prose can't raise. A body that is never closed is read to the end."""
+    root, _ = repo
+    for cmd in ("echo $((1<<X))\ncat .env\nX", "(( x=1<<X ))\ncat .env\nX", "cat <<E | bash\ncat .env\nE",
+                "cat <<E | sh -\ncat .env\nE", "source /dev/stdin <<E\ncat .env\nE",
+                "caffeinate bash <<E\ncat .env\nE", 'bash -c "$(cat <<EOF\ncat .env\nEOF\n)"',
+                "xargs cat <<E\n.env\nE", "cat <<E\ncat .env", "cat <<'E'\ncd . && cat .env\nE",
+                "cat <<E | bash\nls; cat .env\nE", "cat <<E | bash\necho hi | grep -r aws .\nE",
+                "bash <<E\nbash -c 'cat .env'\nE", "bash <<E\nenv FOO=1 sudo grep -r aws .\nE",
+                "cat <<E | bash\n(cat .env)\nE", "cat <<E | bash\nfoo `cat .env`\nE"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+    for cmd in ("python - <<'EOF'\nprint(\"it's fine\")\nEOF", "cat <<'EOF' > f.txt\nhello\nEOF",
+                "git commit -m \"$(cat <<'EOF'\nfix: x\nEOF\n)\"", "cat <<E | bash\necho hi | grep -v x\nE",
+                "cat <<EOF\nit's a `quoted` (aside); done\nEOF"):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def test_fr_read_03_hook_naming_commands_do_not_cover_text_that_runs(repo, capsys) -> None:
+    """`echo grep` names a program, unless the text is run: piped into a shell, source, eval or xargs, or run
+    as the output of a substitution. Then it is a search like any other. Package managers are no exception."""
+    root, _ = repo
+    for cmd in ("echo grep -r aws . | sh", "printf grep -r aws . | bash", "echo 'grep -r aws .' | sh",
+                "echo grep -r aws . | xargs", "echo grep -r aws . | zsh", "echo grep -r aws . | dash",
+                "echo grep -r aws . | ksh", "echo grep -r aws . | fish", "echo grep -r aws . | source /dev/stdin",
+                "echo grep -r aws . | eval", "eval echo grep -r aws .", "$(echo grep -r aws .)",
+                "`echo grep -r aws .`", "bash -c \"$(echo grep -r aws .)\"", "npm exec -- rg aws .",
+                "brew info rg"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+    for cmd in ("echo grep -r aws . | cat", "echo grep | tr a-z A-Z", "which rg | head", "echo grep -r aws ."):
+        assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
+
+
+def test_fr_read_03_hook_stdin_shortcut_needs_words_that_cannot_name_files(
+        repo, capsys, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any `$` in a word (`$@`, `$'..'`, `$F`) may stand for a file name; GREP_OPTIONS can add -r to a plain grep.
+    Either turns the 'reads stdin' shortcut off."""
+    root, _ = repo
+    for cmd in ("GREP_OPTIONS=-r grep aws", "export GREP_OPTIONS=-r; grep aws", "set -- .env; grep aws \"$@\"",
+                "grep aws $'.env'", "grep aws $\".env\"", "ls | grep aws $F", "ls | grep -e aws $@",
+                "bash -c 'GREP_OPTIONS=-r grep aws'", "GREP_OPTIONS=-r; bash -c 'grep aws'"):
+        code, out = _run(_bash(root, cmd), capsys)
+        assert code == 0 and _denied(out), cmd
+    assert _run(_bash(root, "ls | grep aws"), capsys) == (0, "")
+    monkeypatch.setenv("GREP_OPTIONS", "-r")
+    code, out = _run(_bash(root, "ls | grep aws"), capsys)
+    assert code == 0 and _denied(out)
+
+
+@pytest.mark.parametrize("rel", [".git/lfs/objects/ab/cd/oid", ".git/lfs/tmp/blob"])
+def test_fr_read_03_hook_git_dir_lfs_content_is_in_scope(repo, capsys, tmp_path: Path, rel: str) -> None:
+    """.git/lfs holds the raw content of large files, so a search that descends into .git reads it."""
+    _, canaries = repo
+    root = _git_repo(tmp_path / "w", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(f"GITHUB_TOKEN={_canary_token(canaries)}\n")
+    code, out = _run(_bash(root, "grep -r foo ."), capsys)
+    assert code == 0 and _denied(out) and rel in out
+
+def _utf16_variants(text: str) -> dict[str, bytes]:
+    return {
+        "le-bom": b"\xff\xfe" + text.encode("utf-16-le"),
+        "be-bom": b"\xfe\xff" + text.encode("utf-16-be"),
+        "le": text.encode("utf-16-le"),
+        "be": text.encode("utf-16-be"),
+    }
+
+
+@pytest.mark.parametrize("variant", ["le-bom", "be-bom", "le", "be"])
+def test_fr_read_03_hook_scans_utf16_files_instead_of_passing_them_as_binary(repo, capsys, tmp_path: Path,
+                                                                             variant: str) -> None:
+    root, canaries = repo
+    rel = sorted({c["file"] for c in canaries})[0]
+    (tmp_path / "notes16.txt").write_bytes(_utf16_variants((root / rel).read_text())[variant])
+    (tmp_path / "clean16.txt").write_bytes(_utf16_variants("hello world, nothing here\n" * 20)[variant])
+    for event in ({"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": "notes16.txt"}},
+                  _bash(tmp_path, "cat notes16.txt"), _bash(tmp_path, "head -n 3 notes16.txt | cat")):
+        code, out = _run(event, capsys)
+        assert code == 0 and _denied(out), (variant, event)
+        assert not any(c["value"][:12] in out for c in canaries)
+    assert _run(_bash(tmp_path, "cat clean16.txt"), capsys) == (0, "")  # UTF-16 without a secret still passes
+
+
+def test_fr_read_03_hook_utf16_oversize_is_refused_not_passed(repo, capsys, tmp_path: Path,
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    import Harpocrates.read as read
+
+    monkeypatch.setattr(read, "MAX_BYTES", 4096)
+    (tmp_path / "big16.txt").write_bytes(_utf16_variants("filler line\n" * 600)["le-bom"])
+    code, out = _run(_bash(tmp_path, "cat big16.txt"), capsys)
+    assert code == 0 and _denied(out) and "over the size limit" in out
+
+
+def test_fr_read_03_hook_binary_secret_store_name_is_refused(repo, capsys, tmp_path: Path) -> None:
+    """The binary pass is for executables and images: a file named like a secret store (SENSITIVE_FILES) never gets
+    it, since a NUL in front of the text would otherwise hide it."""
+    _, canaries = repo
+    token = _canary_token(canaries)
+    for name in (".env", "prod.pem", "id_rsa"):
+        (tmp_path / name).write_bytes(b"\x00" + f"GITHUB_TOKEN={token}\n".encode())
+        for event in ({"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": name}},
+                      _bash(tmp_path, f"cat {name}")):
+            code, out = _run(event, capsys)
+            assert code == 0 and _denied(out) and token[:12] not in out, (name, event)
+    (tmp_path / "blob.bin").write_bytes(b"\x00" + f"GITHUB_TOKEN={token}\n".encode())
+    assert _run(_bash(tmp_path, "cat blob.bin"), capsys) == (0, "")  # an ordinary binary name still passes
