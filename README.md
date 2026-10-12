@@ -10,7 +10,7 @@ Detection misses and shell reads the hook doesn't cover are listed under [How ag
 
 - **Model:** v17 (detector v1.2)
 - **Architecture:** XGBoost (600 trees, depth 7), inference via ONNX Runtime. The input vector has 64 features, but the trees split on 53 of them. The 10 variable-name features are zeroed in training because they were a shortcut: removing them raised validation AUC. The model therefore judges the value and its surroundings, never the name (`pass`, `greeting` and `x` score alike). One more feature, `value_is_dotted_quad_or_host`, is never chosen.
-- **Distribution:** bundled in the package — no training needed, no network calls
+- **Distribution:** bundled in the package — no training needed, no network calls. Harpocrates turns off ONNX Runtime's built-in Microsoft telemetry, which is on by default since ONNX Runtime 1.31. If you import onnxruntime yourself before Harpocrates in the same process, export ORT_DISABLE_TELEMETRY=1.
 - **Training data:** synthetic + LLM-written code + real open-source negatives (157,066 candidate rows)
 - **Thresholds:** two operating points from one model:
   - commit `0.5559` — precision-first, used by `harpocrates scan`
@@ -47,6 +47,8 @@ pip install harpocrates            # the scanner CLI (ML model included)
 harpocrates scan .
 ```
 
+`harpocrates --version` prints the installed version.
+
 ### 2. Protect your AI agent (Claude Code, Codex)
 
 This adds the read tool and the hooks that keep the agent off secrets. Install the CLI (it includes the read tool and the hooks):
@@ -58,6 +60,8 @@ harpocrates install --claude-code    # or name one: --codex
 harpocrates install --dry-run        # show what would change; write and run nothing
 harpocrates uninstall                # removes exactly what `install` added; backups stay
 ```
+
+The first install takes a few minutes: it downloads ONNX Runtime and NumPy for the bundled model.
 
 `harpocrates install` sets up three things: deny rules for files named like secrets, the MCP registration, and a content-aware hook that refuses built-in and shell reads of any file holding a secret and points the agent to `safe_read`.
 

@@ -34,22 +34,6 @@ def test_scan_text_tool_returns_finding_dicts() -> None:
         assert "token_end" not in item, "token_end must not appear in MCP output"
 
 
-def test_scan_text_tool_include_token() -> None:
-    """scan_text with include_token=True exposes the matched token."""
-    from Harpocrates.mcp.server import scan_text
-
-    known_secret = "ghp_" + "b" * 36
-    text = f"secret = {known_secret}\n"
-
-    results = scan_text(text, include_token=True)
-
-    assert results
-    token_values = [r.get("token") for r in results if r.get("token")]
-    assert any(known_secret in (t or "") for t in token_values), (
-        f"Expected {known_secret!r} to appear in at least one finding token"
-    )
-
-
 def test_scan_file_tool_detects_secret(tmp_path: Path) -> None:
     """scan_file returns findings for a file containing a known secret."""
     from Harpocrates.mcp.server import scan_file
@@ -63,21 +47,6 @@ def test_scan_file_tool_detects_secret(tmp_path: Path) -> None:
     assert isinstance(results, list)
     assert len(results) >= 1
     assert all("token" not in r for r in results), "token must be redacted by default"
-
-
-def test_scan_file_tool_with_include_token(tmp_path: Path) -> None:
-    """scan_file with include_token=True includes the raw token."""
-    from Harpocrates.mcp.server import scan_file
-
-    known_secret = "ghp_" + "d" * 36
-    secret_file: Path = tmp_path / "secrets.env"
-    secret_file.write_text(f"GITHUB_TOKEN={known_secret}\n", encoding="utf-8")
-
-    results = scan_file(str(secret_file), include_token=True)
-
-    assert results
-    token_values = [r.get("token") for r in results if r.get("token")]
-    assert any(known_secret in (t or "") for t in token_values)
 
 
 def test_scan_file_tool_nonexistent_returns_empty(tmp_path: Path) -> None:

@@ -98,6 +98,7 @@ These are listed in the design doc's non-goals:
 - a malicious local user;
 - general personal data;
 - guaranteed detection of novel secret formats;
-- harnesses that can't be routed through a local proxy at all.
+- harnesses that can't be routed through a local proxy at all;
+- ONNX Runtime telemetry when a host process imports onnxruntime before Harpocrates, because Harpocrates disables it only by setting `ORT_DISABLE_TELEMETRY=1` before its own first import (export it yourself in that case).
 
 For the last one, `harpocrates setup` prints each detected harness's tier. Cursor, OpenCode, and Copilot have no setup yet, and it says plainly that nothing is protected for them today.

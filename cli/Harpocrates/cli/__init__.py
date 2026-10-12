@@ -84,6 +84,24 @@ def _should_fail(findings, min_severity: Optional[Severity]) -> bool:
     return any(_SEVERITY_RANK[f.severity] >= threshold for f in findings)
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from Harpocrates import __version__
+
+        typer.echo(f"harpocrates {__version__}")
+        raise typer.Exit(code=0)
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False, "--version", callback=_version_callback, is_eager=True,
+        help="Show the version and exit.",
+    ),
+) -> None:
+    """Harpocrates - Secrets detection for code repositories."""
+
+
 @app.command()
 def scan(
     paths: Optional[List[Path]] = typer.Argument(default=None, help="Files or directories to scan"),

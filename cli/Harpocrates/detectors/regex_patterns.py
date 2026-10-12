@@ -89,7 +89,8 @@ HIGH_SIGNATURES: Dict[str, Pattern] = {
         r"\bhvs\.[a-zA-Z0-9\-_]{90,}\b"
     ),
     # OpenAI legacy/short key — catches pre-2024 keys, test keys, and fine-tune
-    # keys that contain hyphens in the body (e.g. ***REMOVED***).
+    # keys that contain hyphens in the body (e.g. "sk-" followed by several
+    # short alphanumeric groups joined by hyphens, 16+ body chars in total).
     # Severity: HIGH (not CRITICAL) because the broader pattern has higher FP risk.
     # The strict 48-char pure-alphanum form and sk-proj- form remain in CRITICAL.
     # Stripe sk_live_/sk_test_ use underscores not hyphens — no collision.

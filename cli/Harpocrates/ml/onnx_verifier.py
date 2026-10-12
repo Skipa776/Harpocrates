@@ -259,6 +259,8 @@ class OnnxVerifier(Verifier):
             raise ImportError(
                 "onnxruntime is required for ONNX inference. Install with: pip install onnxruntime"
             ) from exc
+        if hasattr(ort, "disable_telemetry_events"):
+            ort.disable_telemetry_events()
 
         if not self._model_path.exists():
             raise FileNotFoundError(

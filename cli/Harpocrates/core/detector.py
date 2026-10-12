@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 from Harpocrates.core.classification import extract_var_name, infer_category
 from Harpocrates.core.result import EvidenceType, Finding, Severity
 from Harpocrates.detectors.entropy_detector import looks_like_secret, shannon_entropy
+from Harpocrates.detectors.path_tokens import benign_path_token
 from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNATURES
 from Harpocrates.ml.context import HIGH_RISK_EXTENSIONS, LOW_NOISE_EXTENSIONS
 from Harpocrates.utils.file_utils import iter_text_lines
@@ -707,6 +708,14 @@ def _apply_ml_verification_with_contexts(
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
     """Verify pre-built contexts in bounded batches and preserve alignment."""
+    # Filesystem paths are dropped before the model (detectors/path_tokens.py has the rule and
+    # its recall trade-off). Applied here, after candidate generation, so the Python and Rust
+    # engines keep identical raw candidates (FR-CORE-01) and both get the same filtering.
+    findings_with_context = [
+        (finding, context) for finding, context in findings_with_context
+        if not (finding.type == "ENTROPY_CANDIDATE" and finding.token
+                and benign_path_token(finding.token, context.line_content))
+    ]
     if not findings_with_context:
         return []
 
