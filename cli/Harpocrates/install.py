@@ -16,6 +16,7 @@ import shlex
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -387,7 +388,8 @@ def _mcp_step(remove: bool, dry_run: bool, owned: bool) -> Step:
         return (Step(label, "removed", "claude mcp remove") if done and done.returncode == 0
                 else Step(label, "failed", f"{_why(done)}; run: {shown_rm}"))
     command, args = harness.mcp_server()
-    if registered and got is not None and command in got.stdout and args[-1] in got.stdout:
+    # The whole argument list, flag included, so a registration from before the flag is re-registered.
+    if registered and got is not None and command in got.stdout and " ".join(args) in got.stdout:
         return Step(label, "unchanged", "already registered with this python")
     if registered:  # re-register so the python path is current
         _claude([claude, "mcp", "remove", "--scope", "user", MCP_NAME], home)
@@ -531,7 +533,17 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
                                 "commands were removed; it was left in place.")
         return reports
     sections = {t: new_record[t] for t in TARGETS if isinstance(new_record.get(t), dict)}
-    text = json.dumps({"version": 1, **sections}, indent=2) + "\n" if sections else None
+    # "python" is the interpreter that runs the hooks. The Claude Code prompt plugin runs the CLI through it
+    # (never a bare `harpocrates` from PATH). Records from before it existed stay valid without it.
+    # "python_args" are the flags it runs with (harness.python_flag: drop the agent-controlled cwd from sys.path).
+    python = record.get("python") if remove else sys.executable
+    python_args = record.get("python_args") if remove else [harness.python_flag()]
+    extra: dict = {}
+    if isinstance(python, str) and python:
+        extra["python"] = python
+        if isinstance(python_args, list):
+            extra["python_args"] = python_args
+    text = json.dumps({"version": 1, **extra, **sections}, indent=2) + "\n" if sections else None
     host = next((r for r in reversed(reports) if not r.refused), None)
     if host is not None:
         _apply(_Edit("install record", rpath, rtext, text, remove, private=True), dry_run, host)

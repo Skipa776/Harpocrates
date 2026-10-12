@@ -4,8 +4,9 @@ Command-line interface for Harpocrates secrets detection.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
-from typing import List, Optional, cast
+from typing import List, NoReturn, Optional, cast
 
 import typer
 from rich.console import Console
@@ -435,24 +436,82 @@ def uninstall_cmd(
     _install_run(True, claude_code, codex, dry_run)
 
 
+def _interactive() -> bool:
+    return sys.stdin.isatty()
+
+
 @app.command()
 def allow(
     path: Optional[Path] = typer.Argument(None, help="File or folder the agent may read even if it holds secrets."),
+    name: Optional[str] = typer.Option(
+        None, "--name", help="A folder or file name, allowed in every project (for example graphify-out)."),
+    remove: bool = typer.Option(False, "--remove", help="Take PATH, or --name NAME, off the allowlist."),
     list_: bool = typer.Option(False, "--list", help="Show the allowlist."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm a broad name (src, lib, home, ...) without asking."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable result on stdout, for plugins."),
 ) -> None:
-    """Let agents read a path that Harpocrates would otherwise flag (FR-READ-05). Every use is logged."""
+    """Let agents read a path that Harpocrates would otherwise flag (FR-READ-05). Every use is logged.
+
+    Exit code 0 ok, 1 refused or error, 3 a broad name needs confirmation (--yes).
+    """
     from Harpocrates import allowlist
 
-    if list_ or path is None:
-        typer.echo("\n".join(map(str, allowlist.entries())) or "(empty)")
-        typer.echo(f"Edit {allowlist.ALLOW_FILE} to remove entries.")
-        return
-    try:
-        added = allowlist.add(path)
-    except OSError as exc:
-        typer.echo(f"✗ {path}: {exc.strerror or 'not found'}", err=True)
-        raise typer.Exit(code=2) from exc
-    typer.echo(f"Allowed {added}. Uses are logged to {allowlist.LOG_FILE}.")
+    def done(payload: dict, text: str, code: int = 0) -> NoReturn:
+        typer.echo(json.dumps(payload) if as_json else text, err=code != 0 and not as_json)
+        raise typer.Exit(code=code)
+
+    def fail(message: str, code: int = 1, needs_confirmation: bool = False) -> NoReturn:
+        done({"ok": False, "error": message, "needs_confirmation": needs_confirmation}, f"✗ {message}", code)
+
+    logged = f"Uses are logged to {allowlist.LOG_FILE}."
+    if path is not None and name is not None:
+        fail("Give a PATH or --name NAME, not both.")
+    if list_ or (path is None and name is None and not remove):
+        if path is not None or name is not None or remove:
+            fail("--list takes no PATH, --name or --remove.")
+        rows = allowlist.listing()
+        shown = "\n".join(  # printable: a file name with a newline or escape can't fake lines
+            allowlist.printable(v) if k == "path" else f"name:{v}" for k, v in rows) or "(empty)"
+        done({"entries": [{"kind": k, "value": v} for k, v in rows]},
+             f"{shown}\nRemove one with --remove PATH or --remove --name NAME. {logged}")
+    if path is None and name is None:
+        fail("--remove needs a PATH or --name NAME.")
+    kind = "name" if name is not None else "path"
+
+    if remove:
+        try:
+            value = allowlist.remove_name(name) if name is not None else str(allowlist.remove(cast(Path, path)))
+        except ValueError as exc:
+            fail(str(exc))
+        what = f"the name {value}" if kind == "name" else allowlist.printable(value)
+        done({"ok": True, "action": "removed", "kind": kind, "value": value},
+             f"Removed {what}. Earlier uses stay in {allowlist.LOG_FILE}.")
+
+    if name is not None:
+        existed = name in allowlist.names()
+        if not existed:
+            try:
+                allowlist.add_name(name, confirmed=yes)
+            except allowlist.NeedsConfirmationError as exc:
+                # --json never prompts: a plugin can't answer, so it gets exit 3 and decides what to do.
+                if as_json or not _interactive():
+                    fail(f"{exc}. Re-run with --yes to allow it.", 3, True)
+                if not typer.confirm(f"{exc}. Allow it anyway?", default=False):
+                    fail("Not allowed.")
+                allowlist.add_name(name, confirmed=True)
+            except ValueError as exc:
+                fail(str(exc))
+        value, what = name, f"the name {name} in every project"
+    else:
+        target = cast(Path, path)
+        existed = target.resolve() in allowlist.entries()
+        try:
+            value = str(allowlist.add(target))
+        except OSError as exc:
+            fail(f"{target}: {exc.strerror or 'not found'}")
+        what = allowlist.printable(value)
+    done({"ok": True, "action": "exists" if existed else "added", "kind": kind, "value": value},
+         f"{'Already allowed' if existed else 'Allowed'} {what}. {logged}")
 
 
 def main() -> None:

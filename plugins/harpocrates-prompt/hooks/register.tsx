@@ -1,5 +1,31 @@
-import type { Register } from 'claude-code'
+import type { Hook, Register } from 'claude-code'
 
+import {
+  ARGUMENT_HINT,
+  BAD_ANSWER,
+  CANCELLED,
+  CANCEL_LABEL,
+  CONFIRM_LABEL,
+  HELP,
+  LIST_ARGV,
+  NOT_FOUND,
+  NOT_INSTALLED,
+  REFUSED,
+  absolutePath,
+  changeArgv,
+  cliCommand,
+  confirmQuestion,
+  doneText,
+  failText,
+  listText,
+  parseAllowArgs,
+  readAnswer,
+  recordPath,
+  recordedInterpreter,
+  unknownText,
+  verbOf,
+} from './allowlist'
+import type { Change, CliAnswer, Interpreter, Target } from './allowlist'
 import {
   ALLOW_EDITS,
   HEADER,
@@ -53,7 +79,150 @@ const withDescription = (option: unknown): unknown => {
   return description === undefined ? option : { ...option, description }
 }
 
+type CommandApi = Parameters<Hook<'command.run'>>[0]
+
+/** What the CLI answered; a string instead is the text to show because it could not be run. */
+type CliRun = { readonly exitCode: number; readonly answer: CliAnswer | null }
+type Outcome = CliRun | string
+
+/**
+ * The interpreter `harpocrates install` recorded, read from the person's
+ * install record; null when there is no record, no usable "python" in it, or
+ * it cannot be read. There is no fallback: a `harpocrates` found on PATH (or a
+ * project-local shim) is never run.
+ */
+async function readInterpreter($: CommandApi): Promise<Interpreter | null> {
+  try {
+    const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+    if (!home) return null
+    const text = await $.fs.read(recordPath(home))
+    return typeof text === 'string' ? recordedInterpreter(text) : null
+  } catch {
+    return null
+  }
+}
+
+/** Runs the CLI as `<recorded python> <recorded flags> -m Harpocrates.cli ...` by argv (no shell, so typed text is never parsed by one). */
+async function runCli($: CommandApi, argv: readonly string[]): Promise<Outcome> {
+  const interpreter = await readInterpreter($)
+  if (interpreter === null) return NOT_INSTALLED
+
+  try {
+    const ran = await $.process.run(cliCommand(interpreter, argv))
+    return { exitCode: ran.exitCode, answer: readAnswer(ran.stdout) }
+  } catch {
+    return NOT_FOUND
+  }
+}
+
+/** The text for a finished change; never the CLI's raw output. */
+function changeResult(kind: Change, target: Target, run: Outcome): string {
+  if (typeof run === 'string') return run
+  if (run.answer === null) return BAD_ANSWER
+  if (run.exitCode === 0 && run.answer.isOk) return doneText(kind, target, run.answer)
+  return failText(kind, run.answer.error ?? `the CLI exited with code ${run.exitCode}`)
+}
+
+/** A path made absolute from the session's folder and home; undefined when a base it needs is unknown. */
+async function absoluteFor($: CommandApi, path: string): Promise<string | undefined> {
+  let cwd: string | undefined
+  let home: string | undefined
+  try {
+    cwd = await $.session.cwd()
+  } catch {
+    cwd = undefined
+  }
+  if (path === '~' || path.startsWith('~/')) {
+    try {
+      home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+    } catch {
+      home = undefined
+    }
+  }
+
+  return absolutePath(path, cwd, home) ?? undefined
+}
+
+async function change($: CommandApi, kind: Change, target: Target): Promise<string> {
+  let resolved = target
+  if (target.kind === 'path') {
+    const path = await absoluteFor($, target.value)
+    if (path === undefined) return failText(kind, 'give a full path (the session folder or home folder is unknown)')
+    resolved = { kind: 'path', value: path }
+  }
+
+  const run = await runCli($, changeArgv(kind, resolved))
+  // Exit 3: a broad name. Only the person's exact "Allow it everywhere" re-runs
+  // with --yes; every other answer, a dismissal included, cancels.
+  if (kind !== 'add' || resolved.kind !== 'name' || typeof run === 'string' || run.exitCode !== 3) {
+    return changeResult(kind, resolved, run)
+  }
+
+  let choice: string | undefined
+  try {
+    choice = await $.ui.ask(confirmQuestion(resolved.value), [CONFIRM_LABEL, CANCEL_LABEL])
+  } catch {
+    choice = undefined
+  }
+
+  return choice === CONFIRM_LABEL
+    ? changeResult(kind, resolved, await runCli($, changeArgv(kind, resolved, true)))
+    : CANCELLED
+}
+
+async function list($: CommandApi): Promise<string> {
+  const run = await runCli($, LIST_ARGV)
+  if (typeof run === 'string') return run
+  if (run.exitCode !== 0 || run.answer?.entries == null) return run.answer?.error ?? BAD_ANSWER
+  return listText(run.answer.entries)
+}
+
 export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    try {
+      await $.command.register({
+        name: 'harpocrates',
+        description: 'Manage the Harpocrates allowlist',
+        argumentHint: ARGUMENT_HINT,
+      })
+    } catch {
+      $.ui.log('harpocrates-prompt: could not register /harpocrates', { to: 'debug' })
+    }
+
+    return next(e)
+  })
+
+  // Only the person's own Enter in the chat box (origin "composer") changes the
+  // allowlist. Anything else (a plugin, the SDK, the bridge, a model-invoked
+  // run, an unclassified origin) is refused before anything is parsed further
+  // or run. Help and the listing change nothing, so any origin may run them.
+  // The answer is `text` only: nothing is put in `context` for the model.
+  on('command.run', { command: 'harpocrates' }, async ($, e) => {
+    try {
+      const cmd = parseAllowArgs(e.args)
+      const word = verbOf(e.args)
+      const isChange = (word === 'allow' || word === 'remove' || cmd.kind === 'add' || cmd.kind === 'remove') && cmd.kind !== 'list'
+
+      if (isChange && e.origin?.kind !== 'composer') return { text: REFUSED }
+
+      switch (cmd.kind) {
+        case 'help':
+          return { text: HELP }
+        case 'unknown':
+          return { text: unknownText(cmd.word) }
+        case 'usage':
+          return { text: cmd.message }
+        case 'list':
+          return { text: await list($) }
+        default:
+          return { text: await change($, cmd.kind, cmd.target) }
+      }
+    } catch {
+      $.ui.log('harpocrates-prompt: /harpocrates failed', { to: 'debug' })
+      return { text: 'The /harpocrates command failed. Type /harpocrates allowlist to see the current list.' }
+    }
+  })
+
   // The person's decision comes from $.ui.ask, a `$` call: the hook's 10 s
   // budget does not run while it is in flight. Only an exact "Allow edits this
   // session" allows; every other answer, free text and a dismissal included,

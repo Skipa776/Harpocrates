@@ -395,3 +395,431 @@ def test_fr_read_06_touches_takes_the_working_directory_into_account(tmp_path: P
     assert not allowlist.touches("ls -la", state) and not allowlist.touches("cat allow", state)
     assert not allowlist.touches("echo x >> allow", other) and not allowlist.touches("echo x >> allow")
     assert not allowlist.touches("echo x >> allow", tmp_path / ".harpocrates-not")  # a sibling is not inside
+
+
+# ---- name rules, remove, list, CLI (FR-READ-05, name:<NAME> lines) ----
+
+_BROAD = ["src", "lib", "app", "config", "configs", "settings", ".venv", "venv", "node_modules", "vendor", "build",
+          "dist", "tests", "test", "scripts", ".git"]
+_REFUSED_NAMES = [
+    "", ".", "..", "a/b", "a\\b", "*", "a?", "a[b]", "a{b}", "a]", "a}", "a\nb", "a\x1b[0m", "a\x00b", "x" * 256,
+    " lead", "tail ", ".env", ".env.local", "x.pem", "a.key", "id_rsa", "id_rsa.pub", "id_ed25519", "credentials.json",
+    ".netrc", ".npmrc", ".pypirc", ".git-credentials", "prod.tfvars", ".ENV", "X.PEM", ".ssh", ".aws", ".azure",
+    "gcloud", ".kube", ".docker", ".gnupg", ".harpocrates", ".SSH",
+]
+
+
+def _project(base: Path, canaries: list[dict], root: Path, *parts: str) -> str:
+    """A file holding a canary secret (a copy, so it is not hard-linked) at base/parts; returns its path."""
+    target = base.joinpath(*parts)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text((root / _secret_file(canaries)).read_text())
+    return str(target)
+
+
+def test_fr_read_05_name_rule_allows_matching_dirs_in_any_project(repo, capsys, tmp_path: Path) -> None:
+    root, canaries = repo
+    one = _project(tmp_path / "p1", canaries, root, "graphify-out", "sub", "a.py")
+    two = _project(tmp_path / "p2" / "deep", canaries, root, "graphify-out", "b.py")
+    other = _project(tmp_path / "p1", canaries, root, "other-out", "c.py")
+    assert _decision(_read(tmp_path, one), capsys)[1] == "deny"  # nothing allowed yet
+    allowlist.add_name("graphify-out")
+    assert _decision(_read(tmp_path, one), capsys) == (0, "", "")
+    assert _decision(_read(tmp_path, two), capsys) == (0, "", "")
+    assert _decision(_read(tmp_path, other), capsys)[1] == "deny"  # exact component match, not a prefix
+    assert "graphify-out" in allowlist.LOG_FILE.read_text()
+    assert not any(c["value"][:12] in allowlist.LOG_FILE.read_text() for c in canaries)
+
+
+def test_fr_read_05_name_rule_matches_components_of_the_resolved_path(repo, capsys, tmp_path: Path) -> None:
+    root, canaries = repo
+    secret = _project(tmp_path / "elsewhere", canaries, root, "k.py")
+    (tmp_path / "p").mkdir()
+    (tmp_path / "p" / "graphify-out").symlink_to(tmp_path / "elsewhere")  # named like the rule, points elsewhere
+    allowlist.add_name("graphify-out")
+    assert Path(secret).exists()
+    assert not allowlist.allowed(tmp_path / "p" / "graphify-out" / "k.py")
+    assert _decision(_read(tmp_path, "p/graphify-out/k.py"), capsys)[1] == "deny"
+    real = tmp_path / "q" / "graphify-out"  # the reverse: a link outside points INTO a matching real dir
+    real.mkdir(parents=True)
+    (real / "k2.py").write_text((root / _secret_file(canaries)).read_text())
+    (tmp_path / "viewer").symlink_to(real)
+    assert _decision(_read(tmp_path, "viewer/k2.py"), capsys) == (0, "", "")
+
+
+def test_fr_read_05_name_rule_never_covers_secret_home_dirs(repo, capsys, tmp_path: Path,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    root, canaries = repo
+    home = tmp_path / "h"
+    monkeypatch.setenv("HOME", str(home))
+    inside = _project(home, canaries, root, ".ssh", "graphify-out", "k.py")
+    state = _project(home, canaries, root, ".harpocrates", "graphify-out", "k.py")
+    allowlist.add_name("graphify-out")
+    assert not allowlist.allowed(Path(inside)) and not allowlist.allowed(Path(state))
+    assert _decision(_read(tmp_path, inside), capsys)[1] == "deny"
+
+
+def test_fr_read_05_name_rule_hard_link_still_refused(repo, capsys, tmp_path: Path) -> None:
+    root, canaries = repo
+    rel = _secret_file(canaries)
+    (tmp_path / "graphify-out").mkdir()
+    allowlist.add_name("graphify-out")
+    (tmp_path / "graphify-out" / "hard.py").hardlink_to(root / rel)
+    assert _decision(_read(tmp_path, "graphify-out/hard.py"), capsys)[1] == "deny"
+
+
+@pytest.mark.parametrize("name", _REFUSED_NAMES)
+def test_fr_read_05_add_name_refuses_invalid_and_sensitive_names(name: str, allow_file: Path) -> None:
+    with pytest.raises(ValueError) as exc:
+        allowlist.add_name(name, confirmed=True)  # even a confirmation does not make these acceptable
+    assert not isinstance(exc.value, allowlist.NeedsConfirmationError)
+    assert not allow_file.exists()
+
+
+@pytest.mark.parametrize("name", _BROAD)
+def test_fr_read_05_broad_name_needs_confirmation(name: str, allow_file: Path) -> None:
+    with pytest.raises(allowlist.NeedsConfirmationError):
+        allowlist.add_name(name)
+    assert not allow_file.exists()
+    assert allowlist.add_name(name, confirmed=True) == name
+    assert allowlist.names() == [name]
+
+
+def test_fr_read_05_add_name_dedupes_and_keeps_old_lines(allow_file: Path, tmp_path: Path) -> None:
+    allow_file.write_text(f"# mine\n{tmp_path}\n")
+    allowlist.add_name("graphify-out")
+    allowlist.add_name("graphify-out")
+    assert allow_file.read_text() == f"# mine\n{tmp_path}\nname:graphify-out\n"
+    assert oct(allow_file.stat().st_mode & 0o777) == "0o600"
+
+
+def test_fr_read_05_allow_file_and_dir_are_private(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(allowlist, "ALLOW_FILE", tmp_path / "state" / "allow")
+    allowlist.add_name("graphify-out")
+    allowlist.add(tmp_path)
+    assert oct((tmp_path / "state" / "allow").stat().st_mode & 0o777) == "0o600"
+    assert oct((tmp_path / "state").stat().st_mode & 0o777) == "0o700"
+
+
+def test_fr_read_05_old_allow_file_without_names_still_works(repo, capsys, allow_file: Path, tmp_path: Path) -> None:
+    root, canaries = repo
+    inside = _project(tmp_path, canaries, root, "keep", "a.py")
+    allow_file.write_text(f"# old file\n\n{tmp_path / 'keep'}\n")
+    assert allowlist.names() == [] and allowlist.entries() == [tmp_path / "keep"]
+    assert allowlist.listing() == [("path", str(tmp_path / "keep"))]
+    assert _decision(_read(tmp_path, inside), capsys) == (0, "", "")
+
+
+def test_fr_read_05_hand_edited_unsafe_name_lines_match_nothing(repo, capsys, allow_file: Path, tmp_path: Path) -> None:
+    root, canaries = repo
+    inside = _project(tmp_path, canaries, root, "p", ".env", "a.py")
+    for line in ("name:/", "name:", "name:.", "name:..", "name:.env", "name:*", "name:.ssh"):
+        allow_file.write_text(line + "\n")
+        assert not allowlist.allowed(Path(inside)), line
+    assert _decision(_read(tmp_path, inside), capsys)[1] == "deny"
+
+
+def test_fr_read_05_remove_path_and_name_keep_comments_and_order(allow_file: Path, tmp_path: Path) -> None:
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    allow_file.write_text(f"# top\n{a.resolve()}\nname:one\n# mid\nname:two\n{b.resolve()}\n")
+    allow_file.chmod(0o644)
+    assert allowlist.remove(a) == a.resolve()
+    allowlist.remove_name("one")
+    assert allow_file.read_text() == f"# top\n# mid\nname:two\n{b.resolve()}\n"
+    assert oct(allow_file.stat().st_mode & 0o777) == "0o600"
+    assert not list(tmp_path.glob(".allow*"))  # no temp file left
+    b.rmdir()
+    assert allowlist.remove(b) == b.resolve()  # a path that no longer exists can still be removed
+
+
+def test_fr_read_05_remove_absent_is_an_error(allow_file: Path, tmp_path: Path) -> None:
+    allow_file.write_text("name:one\n")
+    with pytest.raises(ValueError, match="not in the allowlist"):
+        allowlist.remove(tmp_path / "nope")
+    with pytest.raises(ValueError, match="not in the allowlist"):
+        allowlist.remove_name("two")
+    with pytest.raises(ValueError, match="not in the allowlist"):
+        allowlist.remove_name("two")
+    assert allow_file.read_text() == "name:one\n"
+
+
+def test_fr_read_05_listing_and_names(allow_file: Path, tmp_path: Path) -> None:
+    allowlist.add(tmp_path)
+    allowlist.add_name("graphify-out")
+    assert allowlist.entries() == [tmp_path.resolve()] and allowlist.names() == ["graphify-out"]
+    assert allowlist.listing() == [("path", str(tmp_path.resolve())), ("name", "graphify-out")]
+
+
+def _cli(*args: str) -> tuple[int, str]:
+    from typer.testing import CliRunner
+
+    from Harpocrates.cli import app
+
+    result = CliRunner().invoke(app, ["allow", *args])
+    return result.exit_code, result.output
+
+
+def test_fr_read_05_cli_name_add_remove_list(allow_file: Path) -> None:
+    code, out = _cli("--name", "graphify-out")
+    assert code == 0 and "Allowed the name graphify-out in every project." in out and str(allowlist.LOG_FILE) in out
+    assert "name:graphify-out" in allow_file.read_text()
+    assert _cli("--name", "graphify-out")[0] == 0 and allow_file.read_text().count("graphify-out") == 1
+    code, out = _cli("--list")
+    assert code == 0 and "name:graphify-out" in out
+    code, out = _cli("--remove", "--name", "graphify-out")
+    assert code == 0 and "Removed the name graphify-out" in out and str(allowlist.LOG_FILE) in out
+    assert "graphify-out" not in allow_file.read_text()
+    code, out = _cli("--remove", "--name", "graphify-out")
+    assert code == 1 and "not in the allowlist" in out
+
+
+def test_fr_read_05_cli_remove_path(allow_file: Path, tmp_path: Path) -> None:
+    assert _cli(str(tmp_path))[0] == 0
+    code, out = _cli("--remove", str(tmp_path))
+    assert code == 0 and f"Removed {tmp_path.resolve()}." in out and allowlist.entries() == []
+    code, out = _cli("--remove", str(tmp_path))
+    assert code == 1 and "not in the allowlist" in out
+
+
+def test_fr_read_05_cli_broad_name_needs_yes_without_a_terminal(allow_file: Path) -> None:
+    code, out = _cli("--name", "src")
+    assert code == 3 and "--yes" in out and not allow_file.exists()
+    code, out = _cli("--name", "src", "--yes")
+    assert code == 0 and "name:src" in allow_file.read_text()
+
+
+def test_fr_read_05_cli_broad_name_asks_on_a_terminal(allow_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from Harpocrates import cli
+
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.typer, "confirm", lambda *_a, **_k: False)
+    code, out = _cli("--name", "src")
+    assert code == 1 and not allow_file.exists()
+    monkeypatch.setattr(cli.typer, "confirm", lambda *_a, **_k: True)
+    assert _cli("--name", "src")[0] == 0 and "name:src" in allow_file.read_text()
+
+
+@pytest.mark.parametrize("name", ["", ".env", "a/b", ".ssh"])
+def test_fr_read_05_cli_refuses_bad_names_even_with_yes(name: str, allow_file: Path) -> None:
+    code, out = _cli("--name", name, "--yes")
+    assert code == 1 and not allow_file.exists()
+
+
+def test_fr_read_05_cli_rejects_conflicting_arguments(allow_file: Path, tmp_path: Path) -> None:
+    assert _cli(str(tmp_path), "--name", "x")[0] == 1
+    assert _cli("--remove")[0] == 1
+    assert not allow_file.exists()
+
+
+def test_fr_read_05_cli_json_shapes(allow_file: Path, tmp_path: Path) -> None:
+    def j(*args: str) -> tuple[int, dict]:
+        code, out = _cli(*args, "--json")
+        return code, json.loads(out)
+
+    assert j("--list") == (0, {"entries": []})
+    assert j("--name", "graphify-out") == (0, {"ok": True, "action": "added", "kind": "name", "value": "graphify-out"})
+    assert j("--name", "graphify-out") == (0, {"ok": True, "action": "exists", "kind": "name", "value": "graphify-out"})
+    real = str(tmp_path.resolve())
+    assert j(str(tmp_path)) == (0, {"ok": True, "action": "added", "kind": "path", "value": real})
+    assert j(str(tmp_path)) == (0, {"ok": True, "action": "exists", "kind": "path", "value": real})
+    assert j("--list") == (0, {"entries": [{"kind": "path", "value": real}, {"kind": "name", "value": "graphify-out"}]})
+    assert j("--remove", "--name", "graphify-out") == (
+        0, {"ok": True, "action": "removed", "kind": "name", "value": "graphify-out"})
+    assert j("--remove", str(tmp_path)) == (0, {"ok": True, "action": "removed", "kind": "path", "value": real})
+    code, body = j("--remove", "--name", "graphify-out")
+    assert code == 1 and body == {"ok": False, "error": "not in the allowlist", "needs_confirmation": False}
+    code, body = j("--name", "src")  # --json never prompts
+    assert code == 3 and body["ok"] is False and body["needs_confirmation"] is True and "--yes" in body["error"]
+    assert j("--name", "src", "--yes") == (0, {"ok": True, "action": "added", "kind": "name", "value": "src"})
+    code, body = j("--name", ".env", "--yes")
+    assert code == 1 and body["ok"] is False and body["needs_confirmation"] is False and body["error"]
+    code, body = j(str(tmp_path / "missing"))
+    assert code == 1 and body["ok"] is False and body["needs_confirmation"] is False
+
+
+@pytest.mark.parametrize("cmd", [
+    "harpocrates allow --name graphify-out",
+    "harpocrates allow --name src --yes",
+    "harpocrates allow --remove /x",
+    "harpocrates allow --remove --name x",
+    "harpocrates allow --list",  # read-only, but refused too: simpler, fail closed
+    "harpocrates allow --list --json",
+    "harpocrates allow --json --name x",
+    "/usr/local/bin/harpocrates allow --name x",
+    "python -m Harpocrates.cli allow --name x --yes",
+    "sudo harpocrates allow --remove --name x",
+    "python -c \"from Harpocrates import allowlist; allowlist.add_name('x')\"",
+    "python -c \"from Harpocrates import allowlist; allowlist.remove('/x')\"",
+])
+def test_fr_read_05_touches_blocks_name_remove_and_list_flags(cmd) -> None:
+    assert allowlist.touches(cmd), cmd
+# ---- security review round 1 ----
+
+_SYSTEM_NAMES = ["Users", "users", "USERS", "private", "tmp", "var", "etc", "opt", "usr", "Volumes", "System", "Library",
+                 "Applications", "home", "root", "mnt", "Documents", "Desktop", "Downloads"]
+_SECRET_SOUNDING = ["secrets", "secret", "keys", "key", "certs", "cert", "credentials", "credential",
+                    "token", "tokens", "vault", "auth", "passwords", "client_secret.json", "Secrets", "my-secret-store",
+                    "Prod_Credential_Files", "PASSWORD-backup", "api-token-cache"]
+
+
+@pytest.mark.parametrize("name", [".ſsh", ".ＳＳＨ", "ｉｄ_rsa", "ID_RSA", "ＳＥＣＲＥＴ.PEM", ".Ａws", "ＧＣＬＯＵＤ", ".ｈarpocrates",
+                                  "ＣＲＥＤＥＮＴＩＡＬＳ.ＪＳＯＮ", "ａ＊"])
+def test_fr_read_05_add_name_compares_unicode_folded_names(name: str, allow_file: Path) -> None:
+    with pytest.raises(ValueError):
+        allowlist.add_name(name, confirmed=True)
+    assert not allow_file.exists()
+
+
+@pytest.mark.parametrize("name", _SYSTEM_NAMES)
+def test_fr_read_05_add_name_refuses_system_dirs(name: str, allow_file: Path) -> None:
+    with pytest.raises(ValueError) as exc:
+        allowlist.add_name(name, confirmed=True)  # too broad to confirm
+    assert not isinstance(exc.value, allowlist.NeedsConfirmationError)
+    assert not allow_file.exists()
+
+
+def test_fr_read_05_add_name_refuses_names_from_the_home_path_and_home_dot_dirs(allow_file: Path, tmp_path: Path,
+                                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "myuser"
+    (home / ".codex").mkdir(parents=True)
+    (home / ".password-store").mkdir()
+    (home / "work").mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for name in ("myuser", "MYUSER", "ＭＹＵＳＥＲ", ".codex", ".CODEX", ".password-store"):
+        with pytest.raises(ValueError) as exc:
+            allowlist.add_name(name, confirmed=True)
+        assert not isinstance(exc.value, allowlist.NeedsConfirmationError), name
+    assert allowlist.add_name("work") == "work"  # an ordinary home folder name is fine
+
+
+@pytest.mark.parametrize("name", _SECRET_SOUNDING)
+def test_fr_read_05_secret_sounding_name_needs_confirmation(name: str, allow_file: Path) -> None:
+    with pytest.raises(allowlist.NeedsConfirmationError):
+        allowlist.add_name(name)
+    assert not allow_file.exists()
+    assert allowlist.add_name(name, confirmed=True) == name
+
+
+def test_fr_read_05_name_rule_skips_home_dot_dirs_and_library(repo, capsys, tmp_path: Path,
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    root, canaries = repo
+    home = tmp_path / "h"
+    monkeypatch.setenv("HOME", str(home))
+    ok = _project(home / "work", canaries, root, "graphify-out", "k.py")
+    blocked = [_project(home, canaries, root, d, "proj", "graphify-out", "k.py")
+               for d in (".config", ".codex", ".claude", ".password-store", "Library")]
+    allowlist.add_name("graphify-out")
+    assert _decision(_read(tmp_path, ok), capsys) == (0, "", "")
+    for path in blocked:
+        assert not allowlist.allowed(Path(path)), path
+        assert _decision(_read(tmp_path, path), capsys)[1] == "deny", path
+    allowlist.add(home / ".config")  # a path entry (the user's explicit choice) still opens them
+    assert allowlist.allowed(Path(blocked[0]))
+
+
+def _case_insensitive(tmp: Path) -> bool:
+    (tmp / "CaseProbe").mkdir()
+    return (tmp / "caseprobe").exists()
+
+
+def test_fr_read_05_name_rule_protected_dirs_compared_by_identity(repo, tmp_path: Path,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    root, canaries = repo
+    if not _case_insensitive(tmp_path):
+        pytest.skip("needs a case-insensitive file system (macOS default) to spell ~/.aws as ~/.AWS")
+    home = tmp_path / "h"
+    monkeypatch.setenv("HOME", str(home))
+    real = _project(home, canaries, root, ".aws", "credentials")
+    spelled = str(home / ".AWS" / "credentials")
+    assert Path(spelled).exists()
+    allowlist.add_name("credentials", confirmed=True)
+    assert not allowlist.allowed(Path(real)) and not allowlist.allowed(Path(spelled))
+    ssh = _project(home, canaries, root, ".ssh", "graphify-out", "k.py")
+    allowlist.add_name("graphify-out")
+    assert not allowlist.allowed(Path(str(home / ".SSH" / "graphify-out" / "k.py"))) and Path(ssh).exists()
+
+
+@pytest.mark.parametrize("cmd", [
+    "python -c \"from Harpocrates.allowlist import add_name; add_name('x')\"",
+    "python -c \"import Harpocrates.allowlist as al; al.add_name('x')\"",
+    "python -c \"import Harpocrates.allowlist as al; al.remove('/x')\"",
+    "python -c \"from Harpocrates import allowlist as al; al.remove_name('x')\"",
+    "python -c \"from Harpocrates.allowlist import REMOVE; REMOVE('/x')\"",
+    "python -c \"from Harpocrates.allowlist import _write; _write([])\" ; echo add",
+    "python3 - <<'EOF'\nimport Harpocrates.allowlist as al\nal.add('/')\nEOF",
+])
+def test_fr_read_05_touches_blocks_allowlist_module_imports(cmd) -> None:
+    assert allowlist.touches(cmd), cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "git add cli/Harpocrates/allowlist.py cli/tests/test_hooks_allowlist.py",
+    ".venv/bin/python -m ruff check cli/Harpocrates/allowlist.py",
+    "grep -n add cli/Harpocrates/allowlist.py",
+    "pytest -q cli/tests/test_hooks_allowlist.py",
+    "python -c \"from Harpocrates import allowlist; print(allowlist.entries())\"",
+])
+def test_fr_read_05_touches_leaves_the_allowlist_module_file_alone(cmd) -> None:
+    assert not allowlist.touches(cmd), cmd
+
+
+def _bash(root: Path, cmd: str) -> dict:
+    return {"tool_name": "Bash", "cwd": str(root), "permission_mode": "default", "tool_input": {"command": cmd}}
+
+
+_COPY_CMDS = [
+    "cp -r DIR graphify-out/y",
+    "cp -R DIR/ graphify-out/y",
+    "mv DIR graphify-out/x",
+    "rsync -a DIR graphify-out/y",
+    "rsync -a DIR/ graphify-out/y/",
+    "install -d DIR graphify-out/y",
+    "ln -s DIR graphify-out/y",
+    "ditto DIR graphify-out/y",
+    "tar -cf graphify-out/y.tar DIR",
+    "tar -C DIR -cf graphify-out/y.tar .",
+    "zip -r graphify-out/y.zip DIR",
+    "sudo cp -r DIR graphify-out/y",
+    "cd . && cp -r DIR graphify-out/y",
+]
+
+
+@pytest.mark.parametrize("cmd", _COPY_CMDS)
+def test_fr_read_05_copying_a_directory_with_a_secret_is_refused(repo, capsys, tmp_path: Path, cmd: str) -> None:
+    root, canaries = repo
+    _project(tmp_path, canaries, root, "DIR", "sub", "a.py")
+    (tmp_path / "graphify-out").mkdir()
+    for rules in (False, True):  # laundering through the allowlisted folder is the point, but refused either way
+        if rules:
+            allowlist.add_name("graphify-out")
+        code, decision, reason = _decision(_bash(tmp_path, cmd), capsys)
+        assert code == 0 and decision == "deny" and "DIR" in reason and "sub/a.py" in reason, (cmd, rules)
+        assert not any(c["value"][:12] in reason for c in canaries)
+
+
+@pytest.mark.parametrize("cmd", _COPY_CMDS)
+def test_fr_read_05_copying_a_clean_directory_is_allowed(repo, capsys, tmp_path: Path, cmd: str) -> None:
+    (tmp_path / "DIR" / "sub").mkdir(parents=True)
+    (tmp_path / "DIR" / "sub" / "a.py").write_text("print('hi')\n")
+    (tmp_path / "graphify-out").mkdir()
+    assert _decision(_bash(tmp_path, cmd), capsys) == (0, "", "")
+
+
+def test_fr_read_05_copy_destination_directory_is_not_scanned(repo, capsys, tmp_path: Path) -> None:
+    root, canaries = repo
+    _project(tmp_path, canaries, root, "elsewhere", "a.py")
+    (tmp_path / "note.txt").write_text("hi\n")
+    assert _decision(_bash(tmp_path, "cp note.txt elsewhere"), capsys) == (0, "", "")  # the last word is the target
+    assert _decision(_bash(tmp_path, "cp -t elsewhere note.txt"), capsys)[1] == "deny"  # -t: can't tell, scan all
+
+
+def test_fr_read_05_copying_a_directory_too_wide_to_scan_fails_closed(repo, capsys, tmp_path: Path,
+                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hooks, "MAX_SCOPE_FILES", 3)
+    (tmp_path / "DIR").mkdir()
+    for i in range(6):
+        (tmp_path / "DIR" / f"f{i}.txt").write_text("x\n")
+    code, decision, reason = _decision(_bash(tmp_path, "cp -r DIR out"), capsys)
+    assert code == 0 and decision == "deny" and "Too many files" in reason

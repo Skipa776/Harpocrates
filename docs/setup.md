@@ -59,7 +59,7 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 1. **Register the read tool for every project:**
 
    ```bash
-   claude mcp add --scope user harpocrates -- "$(python -c 'import sys; print(sys.executable)')" -m Harpocrates.mcp.server
+   claude mcp add --scope user harpocrates -- "$(python -c 'import sys; print(sys.executable)')" -P -m Harpocrates.mcp.server   # use -I instead of -P on Python 3.10
    ```
 
 2. **Merge the printed `permissions` block into `~/.claude/settings.json`.**
@@ -95,6 +95,7 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 - **Edits:** Edit, Write and NotebookEdit on a file that holds a secret ask you once per file and session ("edit without secret protection"), even in accept-edits mode. Yes allows built-in Read and Edit of that one file until the session ends. In modes with no one to answer, the edit is refused and Claude has to ask you to make it. An edit that would write a placeholder is refused. Only the target file is scanned, not the new content being written (FR-READ-04, M2).
 - **How often:** on 1,000 random files from 16 open-source repos, the hook refused 30 (3.0%). Almost all were `generic` false alarms, such as a hash or a test fixture.
 - **Speed:** about 0.05–0.15 s per call.
+- **Large files:** a binary file (a NUL byte in its first 8 KB, such as a tool in `.venv/bin`) is not scanned and passes, unless it is named like a secret store (`.env`, `*.pem`, ...). A text file over 10 MB is refused unscanned. UTF-16 text is decoded and scanned.
 
 **What the hook follows in a shell command:**
 - `sh -c` bodies, including after `sudo`, `env`, or `timeout`, plus `$(...)` and backticks;
@@ -114,6 +115,12 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 **Failure behavior.** Any error, an unparseable command, or passing its 25-second budget makes the hook block the call. It never fails open.
 
 **Check:** in a repo with a `.env`, ask Claude to show the file. The built-in Read is refused, and the answer contains placeholders instead of values.
+
+### Allowlisting paths and names
+
+A path on the allowlist passes the read hook even when it holds secrets, for every session until you remove it. Only you can change the list. `harpocrates allow PATH` allows one file or folder, and a folder covers everything under it. `harpocrates allow --name NAME` allows a folder or file name in every project, such as `graphify-out`. Name rules refuse secret-file names, credential folders, `.harpocrates`, wildcards and path separators. Broad names such as `src`, `lib` or `.venv` need confirmation: an answer at the prompt, or `--yes` when there is no terminal to ask. `--remove` takes a path or `--name` off the list, `--list` shows it, and `--json` gives scripts a machine-readable result. Every pass is logged to `~/.harpocrates/allow.log`.
+
+In Claude Code with the plugin, `/harpocrates allow <path>`, `/harpocrates allow --name <name>`, `/harpocrates remove …` and `/harpocrates allowlist` do the same. They run only when you type the command in the chat box yourself. The agent's own Bash commands that call `harpocrates allow` or touch `~/.harpocrates` are refused.
 
 ## 4. Codex CLI
 

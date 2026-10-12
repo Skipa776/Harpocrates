@@ -99,9 +99,18 @@ def tier_report(found: dict[str, bool]) -> str:
     return "\n".join(lines)
 
 
+def python_flag() -> str:
+    """The interpreter flag every generated `python -m Harpocrates...` command carries. `python -m` puts the
+    current directory first on sys.path, and the current directory is the agent-controlled project, so a planted
+    `Harpocrates/` package there would run in place of ours (a hook that exits 0 is an allow). -P (3.11+) drops only
+    that entry and keeps user site-packages; older Pythons have no -P, so -I (isolated mode, which also drops the
+    user site and PYTHON* variables) is the closest."""
+    return "-P" if sys.version_info >= (3, 11) else "-I"
+
+
 def mcp_server() -> tuple[str, list[str]]:
     """This interpreter running the MCP server, so it works from any venv and from IDE-launched agents."""
-    return sys.executable, ["-m", "Harpocrates.mcp.server"]
+    return sys.executable, [python_flag(), "-m", "Harpocrates.mcp.server"]
 
 
 def guarded_hook(python: str, *flags: str) -> str:
@@ -109,7 +118,7 @@ def guarded_hook(python: str, *flags: str) -> str:
     (exit 127) or a crash (1) would let the call through. The hook itself exits 0 or 2, so `|| exit 2` changes
     nothing else. The explicit `sh -c` works whether the harness runs the string in a shell or splits it into argv;
     the python path travels as $0, so spaces and quotes in it are safe. --post hooks stay bare: they must never block."""
-    script = " ".join(['"$0"', "-m", "Harpocrates.hooks", *flags, "||", "exit", "2"])
+    script = " ".join(['"$0"', python_flag(), "-m", "Harpocrates.hooks", *flags, "||", "exit", "2"])
     return shlex.join(["sh", "-c", script, python])
 
 
@@ -123,7 +132,7 @@ def claude_code_settings() -> dict:
     # --ask: an edit of such a file prompts the user instead of being refused (reads are always refused, FR-READ-06).
     hook = {"type": "command", "command": guarded_hook(command, "--ask")}
     # --post records a Yes: PostToolUse/PostToolUseFailure fire only for an edit that ran, SessionEnd drops the grants.
-    post = {"type": "command", "command": shlex.join([command, "-m", "Harpocrates.hooks", "--post"])}
+    post = {"type": "command", "command": shlex.join([command, python_flag(), "-m", "Harpocrates.hooks", "--post"])}
     edits = "Edit|MultiEdit|Write|NotebookEdit"
     return {"permissions": {"deny": deny, "allow": list(MCP_TOOLS)},
             "hooks": {"PreToolUse": [{"matcher": f"Read|Grep|Bash|{edits}", "hooks": [hook]}],

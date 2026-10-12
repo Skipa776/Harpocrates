@@ -83,7 +83,7 @@ None of these channels is meant to carry prompt content, but Guard can't verify 
 - Grants live in `~/.harpocrates/grants/<session>.json`. They expire after 24 hours or when the session ends.
 - A grant never covers Bash. A shell command that would print the file is still refused.
 
-**Allowlist.** Paths in `~/.harpocrates/allow` (`harpocrates allow PATH`) pass the read hook even when they hold secrets, for every session until you remove them. Each pass is logged to `allow.log`, never the content.
+**Allowlist.** Paths in `~/.harpocrates/allow` (`harpocrates allow PATH`) pass the read hook even when they hold secrets, for every session until you remove them. Each pass is logged to `allow.log`, never the content. Name rules (`--name NAME`) apply in every project, so they are broader than a path: names of secret stores, credential folders and wildcards are refused, and broad names such as `src` need an explicit confirmation. Symlinks are resolved before matching, so a link named like a rule but pointing elsewhere does not match. In Claude Code, the `/harpocrates` slash command changes the list only when you type it in the chat box.
 
 **Why Guard can't fully fix it.**
 - A script that writes the grant file or the allowlist itself can forge an entry. This is the same class as the script gap above. The hook refuses shell commands that visibly touch `~/.harpocrates`, and the settings deny Edit and Write there, but a script that builds the path at runtime gets past both.

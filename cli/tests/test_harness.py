@@ -18,6 +18,7 @@ from Harpocrates.harness import (
     codex_config,
     detect,
     mcp_server,
+    python_flag,
     tier_report,
 )
 
@@ -73,10 +74,12 @@ def test_fr_read_03_claude_code_denies_every_sensitive_path() -> None:
     assert set(cfg["permissions"]["allow"]) == {"mcp__harpocrates__safe_read", "mcp__harpocrates__safe_grep"}
     (entry,) = cfg["hooks"]["PreToolUse"]
     assert entry["matcher"] == "Read|Grep|Bash|Edit|MultiEdit|Write|NotebookEdit"
-    assert _guarded_parts(entry["hooks"][0]["command"]) == (sys.executable, '"$0" -m Harpocrates.hooks --ask || exit 2')
+    flag = python_flag()
+    assert _guarded_parts(entry["hooks"][0]["command"]) == (
+        sys.executable, f'"$0" {flag} -m Harpocrates.hooks --ask || exit 2')
     assert "timeout" not in entry["hooks"][0]  # a timed-out hook allows the call; keep Claude's 600 s
     command, args = mcp_server()
-    assert args == ["-m", "Harpocrates.mcp.server"] and Path(command).exists()
+    assert args == [flag, "-m", "Harpocrates.mcp.server"] and Path(command).exists()
 
 
 def test_fr_read_06_claude_code_settings_register_the_post_hooks() -> None:
@@ -86,9 +89,9 @@ def test_fr_read_06_claude_code_settings_register_the_post_hooks() -> None:
         (entry,) = hooks[event]
         assert entry["matcher"] == "Edit|MultiEdit|Write|NotebookEdit"
         (hook,) = entry["hooks"]
-        assert hook["type"] == "command" and hook["command"].endswith("-m Harpocrates.hooks --post")
+        assert hook["type"] == "command" and hook["command"].endswith(f"{python_flag()} -m Harpocrates.hooks --post")
     (end,) = hooks["SessionEnd"]
-    assert "matcher" not in end and end["hooks"][0]["command"].endswith("-m Harpocrates.hooks --post")
+    assert "matcher" not in end and end["hooks"][0]["command"].endswith(f"{python_flag()} -m Harpocrates.hooks --post")
     (pre,) = hooks["PreToolUse"]
     assert _guarded_parts(pre["hooks"][0]["command"])[1].endswith("--ask || exit 2")  # the ask hook is unchanged
 
@@ -102,10 +105,11 @@ def test_fr_read_03_codex_denies_every_sensitive_path() -> None:
     roots = profile["filesystem"][":workspace_roots"]
     for name in SENSITIVE_FILES:
         assert roots[f"**/{name}"] == "deny", name
-    assert cfg["mcp_servers"]["harpocrates"]["args"] == ["-m", "Harpocrates.mcp.server"]
+    assert cfg["mcp_servers"]["harpocrates"]["args"] == [python_flag(), "-m", "Harpocrates.mcp.server"]
     (entry,) = cfg["hooks"]["PreToolUse"]
     assert entry["matcher"] == "^Bash$"
-    assert _guarded_parts(entry["hooks"][0]["command"]) == (sys.executable, '"$0" -m Harpocrates.hooks || exit 2')
+    assert _guarded_parts(entry["hooks"][0]["command"]) == (
+        sys.executable, f'"$0" {python_flag()} -m Harpocrates.hooks || exit 2')
 
 
 def test_fr_read_03_cli_prints_setup_and_tiers() -> None:

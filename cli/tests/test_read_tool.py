@@ -161,3 +161,22 @@ def test_fr_read_01_short_prefixed_token_not_shrunk() -> None:
     assert read._NAME_PREFIX.sub("", "abcd==", count=1) == "="  # why the length guard exists
     text = "a = 1\nb = 2\n"
     assert Redactor().redact(text) == text
+
+@pytest.mark.parametrize("codec,bom", [("utf-16-le", b"\xff\xfe"), ("utf-16-be", b"\xfe\xff"), ("utf-16-le", b""),
+                                       ("utf-16-be", b"")])
+def test_fr_read_01_safe_read_redacts_utf16_files(repo, tmp_path: Path, codec: str, bom: bytes) -> None:
+    root, canaries = repo
+    rel = sorted({c["file"] for c in canaries})[0]
+    path = tmp_path / "notes16.txt"
+    path.write_bytes(bom + (root / rel).read_text().encode(codec))
+    redactor = Redactor()
+    out = redactor.safe_read(str(path))
+    assert PLACEHOLDER.search(out) and not _leaks(out, canaries)
+    assert PLACEHOLDER.search(redactor.safe_grep(".", str(path)))  # safe_grep decodes them too
+
+
+def test_fr_read_01_still_refuses_other_binary_with_nuls_on_both_parities(tmp_path: Path) -> None:
+    path = tmp_path / "blob.bin"
+    path.write_bytes((b"\x00\x01\x00\x00\x02\x00" * 200))
+    with pytest.raises(ValueError, match="binary"):
+        Redactor().safe_read(str(path))
