@@ -144,3 +144,4 @@ scripts/train_experiments_v3.py
 scripts/train_v4.py
 scripts/analyze_fp.py
 scripts/evaluate_overfit.py
+scripts/regenerate_features.py
