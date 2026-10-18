@@ -145,3 +145,4 @@ scripts/train_v4.py
 scripts/analyze_fp.py
 scripts/evaluate_overfit.py
 scripts/regenerate_features.py
+scripts/generate_go_nogo_report.py
