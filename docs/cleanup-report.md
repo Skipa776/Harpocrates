@@ -27,7 +27,7 @@ One commit each.
 | 9 | `ml/context.py`: `has_safe_context`, `has_risky_context` and their `__all__` lines | Zero callers anywhere, including tests | ~12 |
 | 10 | `pyproject.toml`: `examples*` and `comparison*` in `packages.find.exclude` | No such packages under `cli/` | 1 |
 | 11 | `.gitignore`: `scripts/evaluate_stress_tests.py` and `scripts/train_simple.py` entries | Files do not exist | 2 |
-| 12 | `docs/assets/divider-*.png` (6 files) and their rows in `ASSETS.md` | Referenced only by `ASSETS.md`. README uses none | binary |
+| 12 | `docs/assets/divider-*.png` (6 files) and `docs/assets/ASSETS.md` | Dividers are referenced only by `ASSETS.md`, and README uses none. `ASSETS.md` is a brand catalog, and most images it links (banners B–E, lockups, OG cards, palette) are not in the repo | binary + 181 |
 | 13 | `docs/ml_feature_vector_and_synthetic_data.md` | No inbound links. ⚠ Confirm `docs/data.md` supersedes it | 270 |
 | 14 | `docs/samples/TESTING_GUIDE.txt` | No inbound references. ⚠ Confirm it is unused | 391 |
 

@@ -148,3 +148,10 @@ scripts/regenerate_features.py
 scripts/generate_go_nogo_report.py
 docs/ml_feature_vector_and_synthetic_data.md
 docs/samples/TESTING_GUIDE.txt
+docs/assets/ASSETS.md
+docs/assets/divider-configuration.png
+docs/assets/divider-contributing.png
+docs/assets/divider-how-it-scans.png
+docs/assets/divider-installation.png
+docs/assets/divider-license.png
+docs/assets/divider-usage.png
