@@ -140,3 +140,4 @@ data/audit/
 # R0 cleanup (FR-CLEAN-01): untracked, kept locally for reproducibility
 scripts/train_experiments.py
 scripts/train_experiments_v2.py
+scripts/train_experiments_v3.py
