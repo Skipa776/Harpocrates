@@ -136,3 +136,6 @@ data/models/
 data/llm_slots/
 # Alarm audits hold real strings from the OSS corpus; local only
 data/audit/
+
+# R0 cleanup (FR-CLEAN-01): untracked, kept locally for reproducibility
+scripts/train_experiments.py
