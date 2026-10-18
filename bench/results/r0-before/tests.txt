@@ -1,0 +1,1162 @@
+# pytest summary (cmd: .venv/bin/python -m pytest -q -p no:cacheprovider), run at b2f9873
+1157 passed, 1 skipped, 0 failed (collected 1158), 2 runs identical
+skipped: cli/tests/test_hooks.py:598: this file system rejects non-UTF-8 names
+# node ids (pytest -q --co, python-sorted); 154 ids had their [param] replaced by sha256[:12] because they contain secret-like values
+cli/tests/test_benchmark_scanner.py::test_benchmark_onnx_proves_session_execution
+cli/tests/test_benchmark_scanner.py::test_directory_benchmark_rejects_an_intermediate_scan_error
+cli/tests/test_benchmark_scanner.py::test_directory_benchmark_rejects_engine_parity_mismatch
+cli/tests/test_benchmark_scanner.py::test_directory_benchmark_rejects_line_accounting_mismatch
+cli/tests/test_benchmark_scanner.py::test_directory_benchmark_rejects_same_count_different_findings
+cli/tests/test_benchmark_scanner.py::test_directory_benchmark_rejects_scan_errors
+cli/tests/test_benchmark_scanner.py::test_directory_benchmark_reports_effective_ignore_policy
+cli/tests/test_benchmark_scanner.py::test_summarize_reports_stable_percentiles
+cli/tests/test_calibration.py::test_fr_core_03_bad_map_refused
+cli/tests/test_calibration.py::test_fr_core_03_finding_confidence_is_calibrated
+cli/tests/test_calibration.py::test_fr_core_03_map_and_platt_refused_together
+sha256:48de68051c2c (whole-id hashed)
+cli/tests/test_calibration.py::test_fr_core_03_verifier_applies_map
+cli/tests/test_candidate_extractors.py::test_credential_shapes_become_ml_candidates[sha256:9742fe7609b2]
+cli/tests/test_candidate_extractors.py::test_credential_shapes_become_ml_candidates[sha256:8e9e96be47f7]
+cli/tests/test_candidate_extractors.py::test_credential_shapes_become_ml_candidates[sha256:9034ca0baab4]
+cli/tests/test_candidate_extractors.py::test_credential_shapes_become_ml_candidates[sha256:3e1054aabaa0]
+cli/tests/test_candidate_extractors.py::test_credential_shapes_become_ml_candidates[sha256:390da43e3531]
+cli/tests/test_candidate_extractors.py::test_credential_shapes_become_ml_candidates[value = "Wint3r#Sales9"-Wint3r#Sales9]
+cli/tests/test_candidate_extractors.py::test_credential_shapes_become_ml_candidates[value = "hunter4242"-hunter4242]
+cli/tests/test_candidate_extractors.py::test_credential_shapes_become_ml_candidates[sha256:0d61169f13e6]
+cli/tests/test_candidate_extractors.py::test_long_dotted_run_without_scheme_is_fast
+cli/tests/test_candidate_extractors.py::test_non_ml_scan_reports_no_new_candidates
+cli/tests/test_candidate_extractors.py::test_plain_strings_are_not_candidates[label = "Content-Type"]
+cli/tests/test_candidate_extractors.py::test_plain_strings_are_not_candidates[name = "userProfileHandler"]
+cli/tests/test_candidate_extractors.py::test_plain_strings_are_not_candidates[path = "src/app/main.py"]
+cli/tests/test_candidate_extractors.py::test_plain_strings_are_not_candidates[version = "1.2.3"]
+cli/tests/test_candidate_extractors.py::test_round2_plain_strings_are_not_candidates[fmt = "%Y-%m-%d %H:%M:%S"]
+cli/tests/test_candidate_extractors.py::test_round2_plain_strings_are_not_candidates[pattern = r"^[a-z]+$"]
+cli/tests/test_candidate_extractors.py::test_round2_plain_strings_are_not_candidates[sha256:03e601ed392d]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[sha256:30af0079af29]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[-H "Authorization: Bearer ab9Kd_Wq2x"-ab9Kd_Wq2x]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[WEEKLY = "Qm]a%)A-x;7Kp{9!z"-Qm]a%)A-x;7Kp{9!z]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[bootstrap_value = Qm]a%)A-x;7Kp{9!z-Qm]a%)A-x;7Kp{9!z]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[sha256:4cec55cdb7b4]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[sha256:3886dce99d2c]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[sha256:9f3e06c8aaa3]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[sha256:6807c71ea156]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[sha256:4b7044647b66]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[sha256:a7746918a1ff]
+cli/tests/test_candidate_extractors.py::test_round2_shapes_become_ml_candidates[sha256:130aa6714853]
+cli/tests/test_ci_config.py::test_mcp_extras_remain_on_the_v1_api
+cli/tests/test_ci_config.py::test_workflows_use_node24_actions
+cli/tests/test_classification.py::test_apim_client_key_classifies_as_api_token
+cli/tests/test_classification.py::test_apim_secret_key_classifies_as_api_token
+cli/tests/test_classification.py::test_bare_key_suffix_is_generic_secret_low_confidence
+cli/tests/test_classification.py::test_both_fire_combined_reason_includes_value_signal
+cli/tests/test_classification.py::test_client_secret_unchanged_after_expansion
+cli/tests/test_classification.py::test_database_url_still_classifies_as_connection_string
+cli/tests/test_classification.py::test_db_password_unchanged_after_lexicon_expansion
+cli/tests/test_classification.py::test_extract_var_name_colon_style
+cli/tests/test_classification.py::test_extract_var_name_no_lhs
+cli/tests/test_classification.py::test_extract_var_name_simple_assignment
+cli/tests/test_classification.py::test_extract_var_name_token_not_in_line
+cli/tests/test_classification.py::test_finding_category_in_json_output
+cli/tests/test_classification.py::test_finding_category_populated_on_entropy_hit
+cli/tests/test_classification.py::test_finding_category_populated_on_regex_hit
+cli/tests/test_classification.py::test_finding_str_includes_category
+cli/tests/test_classification.py::test_fr_core_02_hex_blob_is_not_a_private_key
+cli/tests/test_classification.py::test_fr_core_02_line_context_is_linear_and_local
+cli/tests/test_classification.py::test_fr_core_02_piece_of_connection_string_is_db_credential
+cli/tests/test_classification.py::test_fr_core_02_provider_prefix_beats_var_name
+cli/tests/test_classification.py::test_mongo_url_classifies_as_connection_string
+cli/tests/test_classification.py::test_no_signal_returns_generic_secret
+cli/tests/test_classification.py::test_openai_api_key_var_name_unchanged
+cli/tests/test_classification.py::test_password_from_early_lexicon_entry
+cli/tests/test_classification.py::test_redis_url_classifies_as_connection_string
+cli/tests/test_classification.py::test_signature_mapping_all_known_signatures
+cli/tests/test_classification.py::test_signature_mapping_aws_key
+cli/tests/test_classification.py::test_signature_mapping_github_pat
+cli/tests/test_classification.py::test_signature_to_category_has_no_orphaned_entries
+cli/tests/test_classification.py::test_unknown_signature_falls_through_to_lexicon
+cli/tests/test_classification.py::test_value_structure_connection_string
+cli/tests/test_classification.py::test_value_structure_hex64_crypto_key
+cli/tests/test_classification.py::test_value_structure_jwt
+cli/tests/test_classification.py::test_value_structure_pem_private_key
+cli/tests/test_classification.py::test_value_wins_decisively_over_var_name
+cli/tests/test_classification.py::test_var_name_api_token
+cli/tests/test_classification.py::test_var_name_client_secret
+cli/tests/test_classification.py::test_var_name_connection_string
+cli/tests/test_classification.py::test_var_name_crypto_key
+cli/tests/test_classification.py::test_var_name_endpoint_url_classifies_as_generic_secret_low_conf
+cli/tests/test_classification.py::test_var_name_jwt
+cli/tests/test_classification.py::test_var_name_password
+cli/tests/test_classification.py::test_var_name_sso_callback_url
+cli/tests/test_classification.py::test_var_name_wins_when_value_signal_is_weak
+cli/tests/test_classification.py::test_webhook_url_not_reclassified_by_url_entry
+cli/tests/test_clean_v4.py::test_clean_rules
+cli/tests/test_clean_v4.py::test_dotted_and_kebab_identifiers_are_relabeled
+cli/tests/test_clean_v4.py::test_jwt_is_not_mistaken_for_a_dotted_identifier
+cli/tests/test_clean_v4.py::test_round2_hash_named_positives_are_dropped_not_relabeled
+cli/tests/test_clean_v4.py::test_round2_hash_rule_looks_only_at_the_assigned_name
+cli/tests/test_clean_v4.py::test_round2_word_paths_and_calls_are_relabeled
+cli/tests/test_cli.py::test_cli_explicit_rust_backend_failure_exits_two
+cli/tests/test_cli.py::test_cli_ml_auto_backend_fallback_warning_is_not_fatal
+cli/tests/test_cli.py::test_cli_ml_inference_failure_exits_two
+cli/tests/test_cli.py::test_cli_ml_model_load_failure_exits_two
+cli/tests/test_cli.py::test_cli_partial_scan_error_exits_two
+cli/tests/test_cli.py::test_cli_scan_directory
+cli/tests/test_cli.py::test_cli_scan_engine_flag_is_forwarded
+cli/tests/test_cli.py::test_cli_scan_fail_on_below_threshold_exits_zero
+cli/tests/test_cli.py::test_cli_scan_fail_on_case_insensitive
+cli/tests/test_cli.py::test_cli_scan_fail_on_critical_exits_one_for_critical
+cli/tests/test_cli.py::test_cli_scan_fail_on_default_medium_exits_one
+cli/tests/test_cli.py::test_cli_scan_fail_on_help_documents_flag
+cli/tests/test_cli.py::test_cli_scan_fail_on_invalid_value_exits_two
+cli/tests/test_cli.py::test_cli_scan_fail_on_no_findings_exits_zero
+cli/tests/test_cli.py::test_cli_scan_fail_on_none_exits_zero_with_findings
+cli/tests/test_cli.py::test_cli_scan_fail_on_none_json_exits_zero
+cli/tests/test_cli.py::test_cli_scan_file_with_secrets
+cli/tests/test_cli.py::test_cli_scan_file_without_secrets
+cli/tests/test_cli.py::test_cli_scan_json_excludes_token
+cli/tests/test_cli.py::test_cli_scan_json_includes_token_with_flag
+cli/tests/test_cli.py::test_cli_scan_json_omits_token_by_default
+cli/tests/test_cli.py::test_cli_scan_json_output
+cli/tests/test_cli.py::test_cli_scan_json_output_no_secrets
+cli/tests/test_cli.py::test_cli_scan_ml_threshold_default_documented_in_help
+cli/tests/test_cli.py::test_cli_scan_ml_threshold_default_is_0_19
+cli/tests/test_cli.py::test_cli_scan_nonexistent_path
+cli/tests/test_cli.py::test_cli_scan_show_secrets_flag_in_help
+cli/tests/test_cli.py::test_cli_scan_show_secrets_no_findings
+cli/tests/test_cli.py::test_cli_scan_table_redacts_by_default
+cli/tests/test_cli.py::test_cli_scan_table_shows_full_token_with_flag
+cli/tests/test_cli.py::test_cli_scan_with_ignore
+cli/tests/test_cli.py::test_cli_version
+cli/tests/test_cli.py::test_scan_multiple_files
+cli/tests/test_cli.py::test_scan_skips_binary_file
+cli/tests/test_cli.py::test_scan_zero_files
+cli/tests/test_cli_module_entry.py::test_fr_install_01_module_entry_runs_the_cli
+cli/tests/test_cli_version.py::test_version_flag_prints_and_exits_zero
+cli/tests/test_cli_version.py::test_version_subcommand_still_works
+cli/tests/test_data_02_connection_kinds.py::test_data_02_ado_and_jdbc_carry_password_field
+cli/tests/test_data_02_connection_kinds.py::test_data_02_connection_uri_embeds_a_password
+cli/tests/test_data_02_connection_kinds.py::test_data_02_negative_lookalikes_have_no_real_credential
+cli/tests/test_data_02_connection_kinds.py::test_data_02_real_passwords_use_symbols_and_realistic_formats
+cli/tests/test_data_02_connection_kinds.py::test_data_02_token_url_carries_token_param
+cli/tests/test_data_02_connection_kinds.py::test_data_02_uri_password_never_contains_mask_marker
+cli/tests/test_data_02_connection_kinds.py::test_slack_generator_uses_real_bot_format
+cli/tests/test_data_03_human_passwords.py::test_data_03_passwords_are_word_based
+cli/tests/test_data_03_human_passwords.py::test_data_03_seeded_output_is_reproducible
+cli/tests/test_data_07_eval_set.py::test_data_04_neutral_names_carry_no_secret_words
+cli/tests/test_data_07_eval_set.py::test_data_06_insert_records_value_and_provenance
+cli/tests/test_data_07_eval_set.py::test_data_07_split_is_deterministic_and_exclusive
+cli/tests/test_data_generator.py::TestContextTemplates::test_negative_context_git_sha
+cli/tests/test_data_generator.py::TestContextTemplates::test_positive_context_structure
+cli/tests/test_data_generator.py::TestContextTemplates::test_test_context
+cli/tests/test_data_generator.py::TestDatasetGeneration::test_generate_balanced_dataset
+cli/tests/test_data_generator.py::TestDatasetGeneration::test_generate_imbalanced_dataset
+cli/tests/test_data_generator.py::TestDatasetGeneration::test_record_is_jsonl_serializable
+cli/tests/test_data_generator.py::TestDatasetGeneration::test_reproducibility
+cli/tests/test_data_generator.py::TestDatasetLoading::test_load_generated_data
+cli/tests/test_data_generator.py::TestSecretTemplates::test_aws_key_format
+cli/tests/test_data_generator.py::TestSecretTemplates::test_checksum_formats
+cli/tests/test_data_generator.py::TestSecretTemplates::test_git_sha_format
+cli/tests/test_data_generator.py::TestSecretTemplates::test_github_token_format
+cli/tests/test_data_generator.py::TestSecretTemplates::test_jwt_token_format
+cli/tests/test_data_generator.py::TestSecretTemplates::test_openai_key_format
+cli/tests/test_data_generator.py::TestSecretTemplates::test_uuid_format
+cli/tests/test_data_generator.py::TestTrainingRecordGeneration::test_negative_record_structure
+cli/tests/test_data_generator.py::TestTrainingRecordGeneration::test_negative_records_have_tokens
+cli/tests/test_data_generator.py::TestTrainingRecordGeneration::test_positive_record_structure
+cli/tests/test_data_generator.py::TestTrainingRecordGeneration::test_positive_records_have_tokens
+cli/tests/test_detector.py::test_css_entropy_tokens_produce_no_findings
+cli/tests/test_detector.py::test_detect_file_nonexistent
+cli/tests/test_detector.py::test_detect_file_smoke
+cli/tests/test_detector.py::test_detect_text_detects_aws_key_in_html_comment
+cli/tests/test_detector.py::test_detect_text_detects_aws_key_in_sql_comment
+cli/tests/test_detector.py::test_detect_text_detects_secret_in_js_comment
+cli/tests/test_detector.py::test_detect_text_detects_secret_in_python_comment
+cli/tests/test_detector.py::test_detect_text_does_not_expose_ml_candidates
+cli/tests/test_detector.py::test_detect_text_empty_input
+cli/tests/test_detector.py::test_detect_text_entropy_candidate_in_comment_has_in_comment_flag
+cli/tests/test_detector.py::test_detect_text_finds_aws_key
+cli/tests/test_detector.py::test_detect_text_finds_github_token
+cli/tests/test_detector.py::test_detect_text_finds_private_key_header
+cli/tests/test_detector.py::test_detect_text_never_exposes_ml_candidates_for_any_input
+cli/tests/test_detector.py::test_detect_text_no_false_positives
+cli/tests/test_detector.py::test_detect_text_non_comment_in_comment_is_none
+cli/tests/test_detector.py::test_detect_text_prose_comment_skipped
+cli/tests/test_detector.py::test_detect_text_with_ml_batches_all_candidates
+cli/tests/test_detector.py::test_detect_text_with_ml_propagates_verifier_failure
+cli/tests/test_detector.py::test_detect_text_with_ml_rejects_wrong_batch_result_count
+cli/tests/test_detector.py::test_dotenv_local_basename_treated_as_env
+cli/tests/test_detector.py::test_env_assignment_regex_skips_when_critical_regex_matched
+cli/tests/test_detector.py::test_env_file_preserves_url_bodies_in_connection_string
+cli/tests/test_detector.py::test_env_file_surfaces_endpoint_var_at_info
+cli/tests/test_detector.py::test_finding_confidence_score
+cli/tests/test_detector.py::test_finding_redacted_token
+cli/tests/test_detector.py::test_finding_to_json_dict_excludes_token
+cli/tests/test_detector.py::test_html_entropy_tokens_produce_no_findings
+cli/tests/test_detector.py::test_html_regex_still_fires_for_structured_secrets
+cli/tests/test_detector.py::test_ml_verification_splits_candidate_dense_inputs_into_bounded_batches
+cli/tests/test_detector.py::test_non_env_file_still_strips_urls
+cli/tests/test_detector.py::test_pem_file_preserves_url_bodies
+cli/tests/test_detector.py::test_py_file_still_gets_entropy_scan
+cli/tests/test_detector.py::test_svg_entropy_tokens_produce_no_findings
+cli/tests/test_entropy.py::test_looks_like_secret_false_for_words
+cli/tests/test_entropy.py::test_looks_like_secret_low_diversity
+cli/tests/test_entropy.py::test_looks_like_secret_short_string
+cli/tests/test_entropy.py::test_looks_like_secret_single_char_class
+cli/tests/test_entropy.py::test_looks_like_secret_threshold
+cli/tests/test_entropy.py::test_looks_like_secret_true_positive
+cli/tests/test_entropy.py::test_shannon_entropy_empty_string
+cli/tests/test_entropy.py::test_shannon_entropy_low_vs_high
+cli/tests/test_entropy.py::test_shannon_entropy_single_char
+cli/tests/test_entropy.py::test_shannon_entropy_typical_secret
+cli/tests/test_eval_detector.py::test_compare_scanners_matching_rules
+cli/tests/test_eval_detector.py::test_evaluate_counts_confusion_matrix
+cli/tests/test_eval_detector.py::test_evaluate_precision_undefined_without_negatives
+cli/tests/test_eval_detector.py::test_pipeline_counts_only_the_record_line
+cli/tests/test_explain.py::test_all_floats_rounded_to_3_decimal_places
+cli/tests/test_explain.py::test_booster_cache_persists_across_calls
+cli/tests/test_explain.py::test_explain_module_not_imported_by_default_scan_path
+cli/tests/test_explain.py::test_explain_returns_explanation_for_ml_finding
+cli/tests/test_explain.py::test_explain_returns_none_for_regex_finding
+cli/tests/test_explain.py::test_explanation_category_mirrors_finding_category
+cli/tests/test_explain.py::test_explanation_contributions_cover_all_features
+cli/tests/test_explain.py::test_explanation_contributions_sum_approx_log_odds
+cli/tests/test_explain.py::test_explanation_probability_in_unit_interval
+cli/tests/test_explain.py::test_explanation_to_dict_is_json_serializable
+cli/tests/test_explain.py::test_explanation_top_positive_and_negative_populated
+cli/tests/test_explain.py::test_finding_id_is_stable_and_16_chars
+cli/tests/test_explain.py::test_missing_model_raises_file_not_found
+cli/tests/test_explain.py::test_model_path_outside_models_dir_raises_value_error
+cli/tests/test_explain.py::test_token_derived_feature_values_suppressed_in_json
+cli/tests/test_extract_var_name_perf.py::test_minified_line_with_huge_word_run_is_fast
+cli/tests/test_extract_var_name_perf.py::test_normal_lines_unchanged
+sha256:c11e1b1dda33 (whole-id hashed)
+cli/tests/test_fr_commit_01_history.py::test_fr_commit_01_cli_history_flag
+cli/tests/test_fr_commit_01_history.py::test_fr_commit_01_history_finds_deleted_secret
+cli/tests/test_fr_commit_01_history.py::test_fr_commit_01_non_git_dir_raises
+cli/tests/test_fr_commit_01_history.py::test_fr_commit_01_secret_added_in_merge_resolution
+cli/tests/test_fr_core_01_rust_parity.py::test_fr_core_01_rust_matches_python
+cli/tests/test_generate_llm_slots.py::test_clean_output_strips_fences_and_requires_markers
+cli/tests/test_generate_llm_slots.py::test_cli_commands_are_text_only
+cli/tests/test_generate_llm_slots.py::test_jobs_are_deterministic_and_typed
+cli/tests/test_harness.py::test_fr_install_01_codex_config_stays_deny_only
+cli/tests/test_harness.py::test_fr_install_01_pretooluse_hooks_fail_closed_when_the_interpreter_is_gone
+cli/tests/test_harness.py::test_fr_install_01_wrapped_hook_keeps_the_hooks_own_exit_code
+cli/tests/test_harness.py::test_fr_install_03_detect_uses_path_and_home
+cli/tests/test_harness.py::test_fr_install_03_harness_without_setup_is_unprotected
+cli/tests/test_harness.py::test_fr_install_03_nothing_detected
+cli/tests/test_harness.py::test_fr_install_03_partial_tier_names_the_gap
+cli/tests/test_harness.py::test_fr_install_03_read_tool_only_says_what_is_unprotected
+cli/tests/test_harness.py::test_fr_install_03_tier_for_each_detected_harness
+cli/tests/test_harness.py::test_fr_read_03_claude_code_denies_every_sensitive_path
+cli/tests/test_harness.py::test_fr_read_03_cli_prints_setup_and_tiers
+cli/tests/test_harness.py::test_fr_read_03_codex_denies_every_sensitive_path
+cli/tests/test_harness.py::test_fr_read_03_odd_interpreter_paths_survive
+cli/tests/test_harness.py::test_fr_read_06_claude_code_settings_register_the_post_hooks
+cli/tests/test_harness.py::test_fr_read_06_setup_text_says_reads_are_refused_and_only_edits_prompt
+cli/tests/test_harness.py::test_sec_06_threat_model_lists_the_three_residual_risks
+cli/tests/test_harness_cwd_hijack.py::test_sec_hijack_control_a_bare_python_dash_m_runs_the_planted_hook
+cli/tests/test_harness_cwd_hijack.py::test_sec_hijack_every_generated_command_carries_the_flag
+sha256:7de822c22168 (whole-id hashed)
+cli/tests/test_harness_cwd_hijack.py::test_sec_hijack_generated_hook_commands_ignore_a_planted_package[PostToolUseFailure]
+cli/tests/test_harness_cwd_hijack.py::test_sec_hijack_generated_hook_commands_ignore_a_planted_package[PostToolUse]
+cli/tests/test_harness_cwd_hijack.py::test_sec_hijack_generated_hook_commands_ignore_a_planted_package[PreToolUse]
+cli/tests/test_harness_cwd_hijack.py::test_sec_hijack_generated_hook_commands_ignore_a_planted_package[SessionEnd]
+cli/tests/test_harness_cwd_hijack.py::test_sec_hijack_generated_hook_commands_ignore_a_planted_package[codex PreToolUse]
+cli/tests/test_harness_cwd_hijack.py::test_sec_hijack_the_generated_mcp_command_ignores_a_planted_package
+cli/tests/test_hooks.py::test_fr_read_03_hook_agent_run_scan_prints_values_and_is_refused
+cli/tests/test_hooks.py::test_fr_read_03_hook_agent_scan_with_history_or_show_secrets_is_refused[clean]
+cli/tests/test_hooks.py::test_fr_read_03_hook_agent_scan_with_history_or_show_secrets_is_refused[dirty]
+cli/tests/test_hooks.py::test_fr_read_03_hook_allows_clean_file
+cli/tests/test_hooks.py::test_fr_read_03_hook_bash_codex_style_commands
+cli/tests/test_hooks.py::test_fr_read_03_hook_bash_file_reads
+cli/tests/test_hooks.py::test_fr_read_03_hook_bash_review_cases
+cli/tests/test_hooks.py::test_fr_read_03_hook_bash_shell_variables
+cli/tests/test_hooks.py::test_fr_read_03_hook_binary_secret_store_name_is_refused
+cli/tests/test_hooks.py::test_fr_read_03_hook_blocks_read_of_file_with_secret
+cli/tests/test_hooks.py::test_fr_read_03_hook_env_assignment_in_code_is_not_an_environment_dump
+cli/tests/test_hooks.py::test_fr_read_03_hook_environment
+cli/tests/test_hooks.py::test_fr_read_03_hook_fails_closed
+cli/tests/test_hooks.py::test_fr_read_03_hook_find_exec_search_is_scoped_to_find_paths
+cli/tests/test_hooks.py::test_fr_read_03_hook_git_dir_in_nested_repo_is_in_scope
+cli/tests/test_hooks.py::test_fr_read_03_hook_git_dir_is_in_scope_for_tools_that_descend
+cli/tests/test_hooks.py::test_fr_read_03_hook_git_dir_lfs_content_is_in_scope[.git/lfs/objects/ab/cd/oid]
+cli/tests/test_hooks.py::test_fr_read_03_hook_git_dir_lfs_content_is_in_scope[.git/lfs/tmp/blob]
+cli/tests/test_hooks.py::test_fr_read_03_hook_git_dir_objects_stay_out_of_scope[.git/modules/sub/objects/ab/cdef]
+cli/tests/test_hooks.py::test_fr_read_03_hook_git_dir_objects_stay_out_of_scope[.git/objects/ab/cdef]
+cli/tests/test_hooks.py::test_fr_read_03_hook_git_show_shell_variables
+cli/tests/test_hooks.py::test_fr_read_03_hook_git_status_is_not_a_read
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_content_mode
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_glob_is_split_like_the_tool[*.zzz *.py-True]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_glob_is_split_like_the_tool[*.zzz,*.py-True]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_glob_is_split_like_the_tool[*.zzz-False]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_glob_is_split_like_the_tool[*.{py,zzz}-True]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_glob_is_split_like_the_tool[{*.zzz,*.py}-True]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_glob_reaches_ignored_files[False]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_glob_reaches_ignored_files[True]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_non_utf8_file_name
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_oversize_context_flags_cannot_shrink_the_check[sha256:03b7bf38d8c6]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_oversize_context_flags_cannot_shrink_the_check[sha256:4794d56d48eb]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_oversize_context_flags_cannot_shrink_the_check[sha256:3d10e925e37e]
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_oversize_context_lines_are_scanned
+sha256:00bda14d6253 (whole-id hashed)
+cli/tests/test_hooks.py::test_fr_read_03_hook_grep_semantics_fail_safe
+cli/tests/test_hooks.py::test_fr_read_03_hook_heredoc_body_is_input_not_shell
+cli/tests/test_hooks.py::test_fr_read_03_hook_heredoc_body_is_never_dropped
+cli/tests/test_hooks.py::test_fr_read_03_hook_heredoc_never_closed_is_read_to_the_end
+cli/tests/test_hooks.py::test_fr_read_03_hook_heredoc_shell_body_and_substitutions_are_checked
+cli/tests/test_hooks.py::test_fr_read_03_hook_main_fails_closed_on_bad_stdin
+cli/tests/test_hooks.py::test_fr_read_03_hook_match_timeout_counts_as_match
+cli/tests/test_hooks.py::test_fr_read_03_hook_naming_commands_do_not_cover_text_that_runs
+cli/tests/test_hooks.py::test_fr_read_03_hook_oserror_on_a_file_that_exists_stays_closed
+cli/tests/test_hooks.py::test_fr_read_03_hook_oversize_binary_passes_oversize_text_refused
+cli/tests/test_hooks.py::test_fr_read_03_hook_oversize_stays_refused_elsewhere
+cli/tests/test_hooks.py::test_fr_read_03_hook_pipe_into_an_interpreter_keeps_every_named_word_read
+cli/tests/test_hooks.py::test_fr_read_03_hook_placeholder_text_is_not_a_secret
+cli/tests/test_hooks.py::test_fr_read_03_hook_readers_of_stdin_do_not_promote_other_commands_words
+cli/tests/test_hooks.py::test_fr_read_03_hook_rereview_cases
+cli/tests/test_hooks.py::test_fr_read_03_hook_rg_dash_l_follows_links_and_prints
+cli/tests/test_hooks.py::test_fr_read_03_hook_scans_utf16_files_instead_of_passing_them_as_binary[sha256:4891553466da]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scans_utf16_files_instead_of_passing_them_as_binary[sha256:46599c5bb5c3]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scans_utf16_files_instead_of_passing_them_as_binary[sha256:b967ee559d3b]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scans_utf16_files_instead_of_passing_them_as_binary[sha256:61098a4bf2a5]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_fails_closed_without_git[git stalls]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_fails_closed_without_git[no git]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_follows_symlinked_directories[sha256:442fa163ddc5]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_follows_symlinked_directories[sha256:0c0e465a8c39]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_follows_symlinked_directories[sha256:4276df6ad2bc]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_ignored_ordinary_file_is_accepted
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_ignored_root_is_walked
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_ignores_rules_the_agent_wrote[core.excludesFile]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_ignores_rules_the_agent_wrote[edited .gitignore]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_ignores_rules_the_agent_wrote[info/exclude]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_ignores_rules_the_agent_wrote[new .gitignore]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_ignores_rules_the_agent_wrote[none]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_ignores_rules_the_agent_wrote[self-hiding .gitignore]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_ignores_rules_the_agent_wrote[xdg ignore]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_keeps_ignored_secret_named_files[.env]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_keeps_ignored_secret_named_files[junk/deep/.env]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_keeps_ignored_secret_named_files[junk/deep/server.pem]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_keeps_tracked_and_untracked_files[False]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_keeps_tracked_and_untracked_files[True]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_nested_repo_is_not_skipped
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_outside_git_is_unchanged
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_over_limit_in_git_is_denied
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_skips_gitignored_files
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_symlink_loop_terminates[sha256:9a881b9b9f23]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_symlink_loop_terminates[sha256:a116c9ed46d6]
+cli/tests/test_hooks.py::test_fr_read_03_hook_scope_trusts_tool_cache_ignore_files
+cli/tests/test_hooks.py::test_fr_read_03_hook_search_name_must_be_the_command
+cli/tests/test_hooks.py::test_fr_read_03_hook_stdin_readers_do_not_scan_the_tree
+cli/tests/test_hooks.py::test_fr_read_03_hook_stdin_shortcut_needs_words_that_cannot_name_files
+cli/tests/test_hooks.py::test_fr_read_03_hook_subprocess_timeouts_respect_budget
+cli/tests/test_hooks.py::test_fr_read_03_hook_unstattable_candidate_fails_closed
+cli/tests/test_hooks.py::test_fr_read_03_hook_untrusted_matcher_output_falls_back_to_the_full_scope
+cli/tests/test_hooks.py::test_fr_read_03_hook_utf16_oversize_is_refused_not_passed
+cli/tests/test_hooks.py::test_fr_read_03_hook_very_long_word_names_no_file
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[.\u017fsh]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[.\uff21ws]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[.\uff33\uff33\uff28]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[.\uff48arpocrates]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[ID_RSA]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[sha256:22914c48db67]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[\uff27\uff23\uff2c\uff2f\uff35\uff24]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[\uff33\uff25\uff23\uff32\uff25\uff34.PEM]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[\uff41\uff0a]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_compares_unicode_folded_names[\uff49\uff44_rsa]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_dedupes_and_keeps_old_lines
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[ lead]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[*]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[..]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.ENV]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.SSH]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.aws]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.azure]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.docker]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.env.local]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.env]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.git-credentials]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.gnupg]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.harpocrates]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.kube]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.netrc]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.npmrc]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.pypirc]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[.ssh]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[X.PEM]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a.key]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a/b]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a?]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a[b]]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a\\b]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a\nb]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a\x00b]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a\x1b[0m]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a]]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a{b}]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[a}]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[credentials.json]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[gcloud]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[id_ed25519]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[id_rsa.pub]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[id_rsa]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[prod.tfvars]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[tail ]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[x.pem]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_invalid_and_sensitive_names[sha256:85e62acd750c]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_names_from_the_home_path_and_home_dot_dirs
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[Applications]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[Desktop]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[Documents]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[Downloads]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[Library]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[System]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[USERS]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[Users]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[Volumes]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[etc]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[home]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[mnt]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[opt]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[private]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[root]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[tmp]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[users]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[usr]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_add_name_refuses_system_dirs[var]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[/home/u/.venv/bin/harpocrates allow ~/.ssh]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[D=~/.harpocrates; echo / >> $D/allow]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[bash -c 'printf x > $HOME/.harpocrates/allow']
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[cd ~/.harpocrates && echo /x >> allow]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[cd ~; cd .harpocrates; echo / >> allow]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[echo / >> ~/.harpo""crates/allow]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[echo /tmp >> ~/.harpocrates/allow]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[harpocrates 'allow' /]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[harpocrates allow graphify-out]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[sha256:9351aeb46782]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[python -m Harpocrates.cli allow .]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_agent_cannot_edit_the_allowlist[rm -rf ~/.harpocrates]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_allow_file_and_dir_are_private
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_allowlist_use_not_logged_when_call_refused
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_allowlisted_directory_covers_its_tree
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_allowlisted_path_passes_and_is_logged
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_ask_falls_back_to_deny_without_a_human[sha256:dc937b598926]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_ask_falls_back_to_deny_without_a_human[sha256:b2a01e47333e]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_ask_falls_back_to_deny_without_a_human[sha256:e12390ee8b70]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_ask_falls_back_to_deny_without_a_human[sha256:4cce54ecd7ad]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[.git]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[.venv]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[app]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[build]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[config]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[configs]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[dist]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[lib]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[node_modules]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[scripts]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[settings]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[src]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[test]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[tests]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[vendor]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_broad_name_needs_confirmation[venv]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_claude_code_settings_use_ask_and_protect_allowlist
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_allow_adds_and_lists
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_broad_name_asks_on_a_terminal
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_broad_name_needs_yes_without_a_terminal
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_json_shapes
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_name_add_remove_list
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_refuses_bad_names_even_with_yes[.env]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_refuses_bad_names_even_with_yes[.ssh]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_refuses_bad_names_even_with_yes[]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_refuses_bad_names_even_with_yes[a/b]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_rejects_conflicting_arguments
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_cli_remove_path
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copy_destination_directory_is_not_scanned
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[cd . && cp -r DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[cp -R DIR/ graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[cp -r DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[ditto DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[install -d DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[ln -s DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[mv DIR graphify-out/x]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[rsync -a DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[rsync -a DIR/ graphify-out/y/]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[sudo cp -r DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[tar -C DIR -cf graphify-out/y.tar .]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[tar -cf graphify-out/y.tar DIR]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_clean_directory_is_allowed[zip -r graphify-out/y.zip DIR]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_too_wide_to_scan_fails_closed
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[cd . && cp -r DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[cp -R DIR/ graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[cp -r DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[ditto DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[install -d DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[ln -s DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[mv DIR graphify-out/x]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[rsync -a DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[rsync -a DIR/ graphify-out/y/]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[sudo cp -r DIR graphify-out/y]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[tar -C DIR -cf graphify-out/y.tar .]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[tar -cf graphify-out/y.tar DIR]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_copying_a_directory_with_a_secret_is_refused[zip -r graphify-out/y.zip DIR]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_edit_edge_cases
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_files_moved_or_linked_into_allowed_dir_are_checked
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_hand_edited_unsafe_name_lines_match_nothing
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_listing_and_names
+sha256:0a1d0a550c18 (whole-id hashed)
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_name_rule_hard_link_still_refused
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_name_rule_matches_components_of_the_resolved_path
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_name_rule_never_covers_secret_home_dirs
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_name_rule_protected_dirs_compared_by_identity
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_name_rule_skips_home_dot_dirs_and_library
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_old_allow_file_without_names_still_works
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_remove_absent_is_an_error
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_remove_path_and_name_keep_comments_and_order
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[PASSWORD-backup]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[Prod_Credential_Files]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[Secrets]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[api-token-cache]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[auth]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[cert]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[certs]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[client_secret.json]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[credential]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[credentials]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[key]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[keys]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[my-secret-store]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[passwords]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[secret]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[secrets]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[token]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[tokens]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_secret_sounding_name_needs_confirmation[vault]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_settings_hook_covers_edits
+sha256:94cd6bd3cf16 (whole-id hashed)
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_clean_and_read_only_after_normalising[.venv/bin/python -m pytest cli/tests/test_hooks_allowlist.py]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_clean_and_read_only_after_normalising[cat ~/.harpocrates/allow.log]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_clean_and_read_only_after_normalising[cd /Users/joshuado/harpocrates && pytest -q]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_clean_and_read_only_after_normalising[echo 'a,b' {1,2}]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_clean_and_read_only_after_normalising[grep -rn allow /Users/joshuado/harpocrates/cli]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_clean_and_read_only_after_normalising[harpocrates scan .]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_clean_and_read_only_after_normalising[ls ~/.ha''rpocrates]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_clean_and_read_only_after_normalising[ls ~/.harpocrates]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_clean_and_read_only_after_normalising[python -m Harpocrates.cli scan .]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[cat < ~/.harpocrates/allow]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[cat ~/.harpocrates/allow.log]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[cd /Users/joshuado/harpocrates && git log --grep allow]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[sha256:f9f860011484]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[cd ~/.harpocrates && ls -l | wc -l]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[grep -n tests ~/.harpocrates/allow]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[grep -rn allow /Users/joshuado/harpocrates/cli]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[harpocrates scan --help]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[ls ~/.harpocrates]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_read_only_commands[wc -l ~/.harpocrates/allow | head]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_unrelated_and_read_only_globs[cat ~/.zshrc]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_unrelated_and_read_only_globs[echo *.py]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_unrelated_and_read_only_globs[grep -rn foo ~/.config]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_unrelated_and_read_only_globs[ls -d ~/.c*]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_unrelated_and_read_only_globs[ls src/.*]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_allows_unrelated_and_read_only_globs[ls ~/.*]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_allowlist_module_imports[sha256:6cddbb64b1e3]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_allowlist_module_imports[sha256:ce2739c1210a]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_allowlist_module_imports[sha256:a6443a92607d]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_allowlist_module_imports[sha256:4a1f9ceab253]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_allowlist_module_imports[sha256:c66db98eda06]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_allowlist_module_imports[sha256:df80c8156caa]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_allowlist_module_imports[sha256:9e0a2fea59b7]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_globbed_dir_names[sha256:0a6ffbc4afe2]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_globbed_dir_names[sha256:1460c8d33580]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_globbed_dir_names[sha256:694c8de67c59]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_globbed_dir_names[sha256:78e964f1b95b]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_globbed_dir_names[sha256:63fda8d5f98e]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_globbed_dir_names[sha256:4702afdcaba7]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:26ff6ca18496]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:482d6906458c]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:434e353000fd]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:970d30177d78]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:e6bddc9a0e73]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:bcdab558dc4d]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:2a97294acae4]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:ba5ba4df5375]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:659b81840ce5]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:071dea5dffea]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:7186cd8908e4]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_name_remove_and_list_flags[sha256:5f5c178e69be]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:c3b770ddc9ca]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:2d6130393b66]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:b2685fa931b7]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:9e977b82c987]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:cf5996b534f5]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:918570d6198e]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:c4de97bd0a0e]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:8604c25b3cad]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:021926a9f68c]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:11543a7b022a]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:f96da717e249]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:ddf66dafc365]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:ce636d47eb36]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_obfuscated_spellings[sha256:63a0752d3dac]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:4d9e6dd33fd9]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:508043265c6a]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:5cf99c10a388]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:dcf58ebc832b]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:fc68948968b9]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:13cdd689c98c]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:30bf5e996ed2]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:9eb8a85f1160]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:2080171ccc65]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:cf6afb7e2ef6]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:5dbc61dbcbd8]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:15014e523dfa]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:0bcd3f36df57]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:4beac8cdee68]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:4cf5e3156f18]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:e52769ae697d]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:7b33b771ced7]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:61dc877c0dc8]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:f34ac8ebc82c]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:1dbf1290e676]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:a3a1209383e1]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:661085c1c0c8]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:14c8085a1eda]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:6efa8ceea4b5]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:c37375b7d248]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:5197c8ae994d]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:f798e0d7ad2e]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:eb28f0a6d961]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:e7ae8ff1c3fe]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:f353aa343827]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:998c73b8f951]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:e94fbf1765d3]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:2f93bb036980]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:072825d8646e]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:50c4b10a4349]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:be6579ab14a6]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:a2ff4376d353]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:7d3e983d6880]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:783e69c56324]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:82fd1d207f3e]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:e992e84651b9]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:616221db9969]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:48332bbf4e5a]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:a4c1c48f88e0]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:9ddc468b1d55]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:5a43c8edcb08]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:b112f3cfbb2b]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:1ea123a311cb]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:dd76a1e98a8a]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:164328cc1cd3]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:5a15e728aac3]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:c52212c07f81]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:af81a3a815e9]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:ba60f1771634]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_blocks_writes_and_allow_cmd[sha256:a7b9d47db041]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_leaves_the_allowlist_module_file_alone[.venv/bin/python -m ruff check cli/Harpocrates/allowlist.py]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_leaves_the_allowlist_module_file_alone[sha256:c39453a4fa75]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_leaves_the_allowlist_module_file_alone[grep -n add cli/Harpocrates/allowlist.py]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_leaves_the_allowlist_module_file_alone[pytest -q cli/tests/test_hooks_allowlist.py]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_touches_leaves_the_allowlist_module_file_alone[sha256:9b67c60c0ee2]
+cli/tests/test_hooks_allowlist.py::test_fr_read_05_without_ask_flag_still_denies
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_ask_mode_refuses_a_search_over_secret_files
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_edit_of_secret_file_prompts[Edit-file_path]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_edit_of_secret_file_prompts[MultiEdit-file_path]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_edit_of_secret_file_prompts[NotebookEdit-notebook_path]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_edit_of_secret_file_prompts[Write-file_path]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:8281b9d76faf]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:56c045b80237]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:f8bb00ed5d2a]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:6d80c140bbda]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:afa6e7aa7e80]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:5faf93bf97dd]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:7d8334011d47]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:448a0fe470ad]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:a1d40d3d2b91]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:6af79a34c5c3]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling[sha256:9b8819ef40a8]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_leaves_the_grants_module_and_read_only_listing_alone[.venv/bin/python -m ruff check cli/Harpocrates/grants.py]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_leaves_the_grants_module_and_read_only_listing_alone[cat cli/Harpocrates/grants.py]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_leaves_the_grants_module_and_read_only_listing_alone[sha256:68b11290e2b8]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_leaves_the_grants_module_and_read_only_listing_alone[sha256:549fc133c248]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_leaves_the_grants_module_and_read_only_listing_alone[ls ~/.harpocrates/grants]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_leaves_the_grants_module_and_read_only_listing_alone[pytest -q cli/tests/test_hooks_grants.py]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_leaves_the_grants_module_and_read_only_listing_alone[sed -i '' s/a/b/ cli/Harpocrates/grants.py]
+cli/tests/test_hooks_allowlist.py::test_fr_read_06_touches_takes_the_working_directory_into_account
+cli/tests/test_hooks_grants.py::test_fr_read_06_a_grant_does_not_cover_the_shell
+cli/tests/test_hooks_grants.py::test_fr_read_06_a_grant_stays_with_its_session_and_its_path
+cli/tests/test_hooks_grants.py::test_fr_read_06_allowlist_still_passes_reads
+cli/tests/test_hooks_grants.py::test_fr_read_06_bash_named_post_with_a_pending_id_grants_nothing
+cli/tests/test_hooks_grants.py::test_fr_read_06_clean_and_new_files_edit_without_a_prompt
+cli/tests/test_hooks_grants.py::test_fr_read_06_corrupt_grant_file_means_no_grants[[]]
+cli/tests/test_hooks_grants.py::test_fr_read_06_corrupt_grant_file_means_no_grants[\x00\xff]
+cli/tests/test_hooks_grants.py::test_fr_read_06_corrupt_grant_file_means_no_grants[]
+cli/tests/test_hooks_grants.py::test_fr_read_06_corrupt_grant_file_means_no_grants[not json]
+cli/tests/test_hooks_grants.py::test_fr_read_06_corrupt_grant_file_means_no_grants[null]
+cli/tests/test_hooks_grants.py::test_fr_read_06_corrupt_grant_file_means_no_grants[{"granted": 5, "pending": "no"}]
+cli/tests/test_hooks_grants.py::test_fr_read_06_corrupt_grant_file_means_no_grants[{"granted": []}]
+cli/tests/test_hooks_grants.py::test_fr_read_06_corrupt_grant_file_means_no_grants[{"granted": {"x": "y"}}]
+cli/tests/test_hooks_grants.py::test_fr_read_06_edit_of_secret_file_asks_and_records_pending[Edit-file_path-extra0]
+cli/tests/test_hooks_grants.py::test_fr_read_06_edit_of_secret_file_asks_and_records_pending[MultiEdit-file_path-extra1]
+cli/tests/test_hooks_grants.py::test_fr_read_06_edit_of_secret_file_asks_and_records_pending[NotebookEdit-notebook_path-extra3]
+cli/tests/test_hooks_grants.py::test_fr_read_06_edit_of_secret_file_asks_and_records_pending[Write-file_path-extra2]
+cli/tests/test_hooks_grants.py::test_fr_read_06_edit_that_cannot_be_applied_falls_back_to_the_new_text
+cli/tests/test_hooks_grants.py::test_fr_read_06_edit_that_keeps_an_existing_placeholder_is_allowed
+cli/tests/test_hooks_grants.py::test_fr_read_06_failed_tool_run_still_grants_but_an_interrupt_does_not
+cli/tests/test_hooks_grants.py::test_fr_read_06_grants_older_than_a_day_are_ignored_and_pruned
+cli/tests/test_hooks_grants.py::test_fr_read_06_missing_or_unusable_ids_deny[-tu-1]
+cli/tests/test_hooks_grants.py::test_fr_read_06_missing_or_unusable_ids_deny[.-tu-1]
+cli/tests/test_hooks_grants.py::test_fr_read_06_missing_or_unusable_ids_deny[../../escape-tu-1]
+cli/tests/test_hooks_grants.py::test_fr_read_06_missing_or_unusable_ids_deny[None-tu-1]
+cli/tests/test_hooks_grants.py::test_fr_read_06_missing_or_unusable_ids_deny[a/b-tu-1]
+cli/tests/test_hooks_grants.py::test_fr_read_06_missing_or_unusable_ids_deny[sess-1-None]
+cli/tests/test_hooks_grants.py::test_fr_read_06_missing_or_unusable_ids_deny[sess-1-]
+cli/tests/test_hooks_grants.py::test_fr_read_06_no_prompt_without_a_human_keeps_the_refusal[False-default]
+cli/tests/test_hooks_grants.py::test_fr_read_06_no_prompt_without_a_human_keeps_the_refusal[True-bypassPermissions]
+cli/tests/test_hooks_grants.py::test_fr_read_06_no_prompt_without_a_human_keeps_the_refusal[True-dontAsk]
+cli/tests/test_hooks_grants.py::test_fr_read_06_no_prompt_without_a_human_keeps_the_refusal[True-something-new]
+cli/tests/test_hooks_grants.py::test_fr_read_06_notebook_source_list_is_joined_before_the_check[source0-True]
+cli/tests/test_hooks_grants.py::test_fr_read_06_notebook_source_list_is_joined_before_the_check[source1-True]
+cli/tests/test_hooks_grants.py::test_fr_read_06_notebook_source_list_is_joined_before_the_check[source2-True]
+cli/tests/test_hooks_grants.py::test_fr_read_06_notebook_source_list_is_joined_before_the_check[source3-False]
+cli/tests/test_hooks_grants.py::test_fr_read_06_notebook_source_list_is_joined_before_the_check[source4-False]
+cli/tests/test_hooks_grants.py::test_fr_read_06_notebook_source_list_is_joined_before_the_check[v = '<<HARPO:generic:ab12>>'-True]
+cli/tests/test_hooks_grants.py::test_fr_read_06_old_session_files_are_swept
+cli/tests/test_hooks_grants.py::test_fr_read_06_placeholder_in_new_content_is_denied_always[Edit-file_path-extra0]
+cli/tests/test_hooks_grants.py::test_fr_read_06_placeholder_in_new_content_is_denied_always[MultiEdit-file_path-extra1]
+cli/tests/test_hooks_grants.py::test_fr_read_06_placeholder_in_new_content_is_denied_always[NotebookEdit-notebook_path-extra3]
+cli/tests/test_hooks_grants.py::test_fr_read_06_placeholder_in_new_content_is_denied_always[Write-file_path-extra2]
+cli/tests/test_hooks_grants.py::test_fr_read_06_placeholder_split_across_two_edits_is_denied
+cli/tests/test_hooks_grants.py::test_fr_read_06_placeholder_split_inside_one_multiedit_or_write_is_denied
+cli/tests/test_hooks_grants.py::test_fr_read_06_post_entry_point_is_silent_and_never_fails
+cli/tests/test_hooks_grants.py::test_fr_read_06_post_names_the_edit_tool_that_was_asked_about
+cli/tests/test_hooks_grants.py::test_fr_read_06_post_turns_pending_into_a_grant
+cli/tests/test_hooks_grants.py::test_fr_read_06_post_without_a_matching_pending_grants_nothing
+cli/tests/test_hooks_grants.py::test_fr_read_06_prompt_shows_the_real_path_and_a_safe_name
+cli/tests/test_hooks_grants.py::test_fr_read_06_read_only_shell_inside_the_state_dir_still_runs[cat allow]
+cli/tests/test_hooks_grants.py::test_fr_read_06_read_only_shell_inside_the_state_dir_still_runs[cd grants && ls]
+cli/tests/test_hooks_grants.py::test_fr_read_06_read_only_shell_inside_the_state_dir_still_runs[ls -la grants]
+cli/tests/test_hooks_grants.py::test_fr_read_06_read_only_shell_inside_the_state_dir_still_runs[ls]
+cli/tests/test_hooks_grants.py::test_fr_read_06_read_only_shell_inside_the_state_dir_still_runs[pwd]
+cli/tests/test_hooks_grants.py::test_fr_read_06_read_only_shell_inside_the_state_dir_still_runs[wc -l allow]
+cli/tests/test_hooks_grants.py::test_fr_read_06_reads_never_prompt_in_ask_mode
+cli/tests/test_hooks_grants.py::test_fr_read_06_session_end_removes_the_grants
+cli/tests/test_hooks_grants.py::test_fr_read_06_shell_inside_the_state_dir_must_be_read_only[cp /dev/null grants/s9.json]
+cli/tests/test_hooks_grants.py::test_fr_read_06_shell_inside_the_state_dir_must_be_read_only[echo x >> allow]
+cli/tests/test_hooks_grants.py::test_fr_read_06_shell_inside_the_state_dir_must_be_read_only[printf '{}' > grants/s9.json]
+cli/tests/test_hooks_grants.py::test_fr_read_06_shell_inside_the_state_dir_must_be_read_only[python -c "open('allow', 'a')"]
+cli/tests/test_hooks_grants.py::test_fr_read_06_shell_inside_the_state_dir_must_be_read_only[rm allow]
+cli/tests/test_hooks_grants.py::test_fr_read_06_shell_inside_the_state_dir_must_be_read_only[sed -i '' 1d allow]
+cli/tests/test_hooks_grants.py::test_fr_read_06_shell_inside_the_state_dir_must_be_read_only[tee grants/s9.json]
+cli/tests/test_hooks_grants.py::test_fr_read_06_unreadable_grant_file_means_no_grants
+cli/tests/test_hooks_grants.py::test_fr_read_06_unreadable_original_judges_the_new_text_alone
+cli/tests/test_hooks_grants.py::test_fr_read_06_unscanned_file_is_named_as_such
+cli/tests/test_hooks_grants.py::test_fr_read_06_unwritable_grants_dir_fails_closed
+cli/tests/test_hot_path_no_xai.py::test_default_scan_path_does_not_import_xai_runtime
+cli/tests/test_hot_path_no_xai.py::test_default_scan_path_does_not_import_xai_static
+sha256:22c6e954a675 (whole-id hashed)
+cli/tests/test_install.py::test_fr_install_01_claude_fresh_install_writes_every_piece
+cli/tests/test_install.py::test_fr_install_01_claude_invalid_settings_refuse_and_write_nothing
+cli/tests/test_install.py::test_fr_install_01_claude_keeps_unrelated_settings_and_order
+cli/tests/test_install.py::test_fr_install_01_claude_missing_prints_the_command_and_still_writes_settings
+cli/tests/test_install.py::test_fr_install_01_claude_re_registers_a_stale_mcp_server
+cli/tests/test_install.py::test_fr_install_01_claude_reinstall_replaces_the_note_block
+cli/tests/test_install.py::test_fr_install_01_claude_replaces_a_stale_harpocrates_hook
+cli/tests/test_install.py::test_fr_install_01_claude_second_install_is_a_no_op
+cli/tests/test_install.py::test_fr_install_01_cli_flags_pick_the_harness_even_when_not_detected
+cli/tests/test_install.py::test_fr_install_01_cli_nothing_detected_is_an_error
+cli/tests/test_install.py::test_fr_install_01_cli_refusal_exits_nonzero
+cli/tests/test_install.py::test_fr_install_01_cli_without_flags_installs_only_what_is_detected
+cli/tests/test_install.py::test_fr_install_01_codex_conflict_outside_the_block_refuses[[mcp_servers.harpocrates]\ncommand = "mine"\n]
+cli/tests/test_install.py::test_fr_install_01_codex_conflict_outside_the_block_refuses[[permissions.harpocrates.filesystem]\n"x" = "deny"\n]
+cli/tests/test_install.py::test_fr_install_01_codex_conflict_outside_the_block_refuses[default_permissions = ":workspace"\n]
+cli/tests/test_install.py::test_fr_install_01_codex_fresh_install
+cli/tests/test_install.py::test_fr_install_01_codex_invalid_toml_refuses
+cli/tests/test_install.py::test_fr_install_01_codex_keeps_user_config_and_replaces_a_stale_block
+cli/tests/test_install.py::test_fr_install_01_codex_second_install_is_a_no_op
+cli/tests/test_install.py::test_fr_install_01_codex_user_hook_table_that_breaks_the_result_writes_nothing
+cli/tests/test_install.py::test_fr_install_01_detection_picks_only_present_harnesses
+cli/tests/test_install.py::test_fr_install_01_dry_run_writes_nothing
+cli/tests/test_install.py::test_fr_install_01_record_is_private_and_stays_accurate_on_reinstall
+cli/tests/test_install.py::test_fr_install_01_record_names_the_interpreter_and_old_records_stay_valid
+cli/tests/test_install.py::test_fr_install_01_record_notes_the_stale_hooks_install_replaced
+cli/tests/test_install.py::test_fr_install_01_uninstall_keeps_the_users_own_identical_rules_and_hooks
+cli/tests/test_install.py::test_fr_install_01_uninstall_leaves_an_mcp_server_the_user_registered
+cli/tests/test_install.py::test_fr_install_01_uninstall_of_a_fresh_install_leaves_no_files
+cli/tests/test_install.py::test_fr_install_01_uninstall_removes_a_stale_path_hook_too
+cli/tests/test_install.py::test_fr_install_01_uninstall_restores_the_originals
+cli/tests/test_install.py::test_fr_install_01_uninstall_without_a_record_leaves_rules_and_mcp
+cli/tests/test_install.py::test_fr_install_01_uninstall_without_install_changes_nothing
+cli/tests/test_install.py::test_fr_install_01_unreadable_record_blocks_install_but_not_uninstall
+cli/tests/test_install.py::test_fr_install_01_writes_through_a_symlinked_settings_file
+cli/tests/test_install.py::test_sec_hijack_reinstall_replaces_hook_commands_and_mcp_registration_that_lack_the_flag
+cli/tests/test_mcp_no_raw_values.py::test_sec_02_contributions_no_raw_value
+cli/tests/test_mcp_no_raw_values.py::test_sec_02_include_token_flag_is_gone
+cli/tests/test_mcp_no_raw_values.py::test_sec_02_safe_read_and_grep_no_raw_value
+cli/tests/test_mcp_no_raw_values.py::test_sec_02_scan_file_no_raw_value[0]
+cli/tests/test_mcp_no_raw_values.py::test_sec_02_scan_file_no_raw_value[1]
+cli/tests/test_mcp_no_raw_values.py::test_sec_02_scan_text_no_raw_value[0]
+cli/tests/test_mcp_no_raw_values.py::test_sec_02_scan_text_no_raw_value[1]
+cli/tests/test_mcp_server.py::test_scan_file_refuses_fifo
+cli/tests/test_mcp_server.py::test_scan_file_respects_max_bytes_ceiling
+cli/tests/test_mcp_server.py::test_scan_file_tool_detects_secret
+cli/tests/test_mcp_server.py::test_scan_file_tool_nonexistent_returns_empty
+cli/tests/test_mcp_server.py::test_scan_text_tool_empty_input
+cli/tests/test_mcp_server.py::test_scan_text_tool_returns_finding_dicts
+cli/tests/test_ml_calibration.py::TestCalibrationIntegration::test_full_calibration_analysis
+cli/tests/test_ml_calibration.py::TestCalibrationIntegration::test_go_nogo_calibration_check
+cli/tests/test_ml_calibration.py::TestCalibrationMetrics::test_band_accuracies
+cli/tests/test_ml_calibration.py::TestCalibrationMetrics::test_brier_score_perfect
+cli/tests/test_ml_calibration.py::TestCalibrationMetrics::test_brier_score_worst
+cli/tests/test_ml_calibration.py::TestCalibrationMetrics::test_empty_predictions
+cli/tests/test_ml_calibration.py::TestCalibrationMetrics::test_perfect_calibration
+cli/tests/test_ml_calibration.py::TestCalibrationMetrics::test_poor_calibration
+cli/tests/test_ml_calibration.py::TestCalibrationThresholds::test_brier_score_threshold
+cli/tests/test_ml_calibration.py::TestCalibrationThresholds::test_ece_threshold
+cli/tests/test_ml_calibration.py::TestCalibrationThresholds::test_high_confidence_accuracy
+cli/tests/test_ml_calibration.py::TestConfidenceMonotonicity::test_confidence_accuracy_correlation
+cli/tests/test_ml_calibration.py::TestConfidenceMonotonicity::test_monotonic_accuracy
+cli/tests/test_ml_calibration.py::TestFeatureImportanceDistribution::test_empty_importances
+cli/tests/test_ml_calibration.py::TestFeatureImportanceDistribution::test_single_dominant_feature
+cli/tests/test_ml_calibration.py::TestFeatureImportanceDistribution::test_uniform_importance
+cli/tests/test_ml_calibration.py::TestFeatureImportanceDistribution::test_with_feature_names
+cli/tests/test_ml_calibration.py::TestFeatureImportanceThresholds::test_importance_entropy
+cli/tests/test_ml_calibration.py::TestFeatureImportanceThresholds::test_max_importance_threshold
+cli/tests/test_ml_calibration.py::TestReliabilityDiagram::test_reliability_diagram_bins
+cli/tests/test_ml_calibration.py::TestReliabilityDiagram::test_reliability_diagram_format
+cli/tests/test_ml_features.py::TestContextExtraction::test_extract_context_at_start
+cli/tests/test_ml_features.py::TestContextExtraction::test_extract_context_basic
+cli/tests/test_ml_features.py::TestContextExtraction::test_is_comment_line
+cli/tests/test_ml_features.py::TestContextExtraction::test_is_test_file
+cli/tests/test_ml_features.py::TestFeatureDifferentiation::test_secret_vs_git_sha_features
+cli/tests/test_ml_features.py::TestFeatureDifferentiation::test_test_file_features
+cli/tests/test_ml_features.py::TestFeatureVector::test_extract_features_aws_key
+cli/tests/test_ml_features.py::TestFeatureVector::test_extract_features_git_sha
+cli/tests/test_ml_features.py::TestFeatureVector::test_feature_names
+cli/tests/test_ml_features.py::TestFeatureVector::test_feature_vector_length
+cli/tests/test_ml_features.py::TestStageBPrecisionFeatures::test_build_path_feature
+cli/tests/test_ml_features.py::TestStageBPrecisionFeatures::test_combined_precision_features
+cli/tests/test_ml_features.py::TestStageBPrecisionFeatures::test_example_path_feature
+cli/tests/test_ml_features.py::TestStageBPrecisionFeatures::test_example_token_still_detected_via_is_test_token
+cli/tests/test_ml_features.py::TestStageBPrecisionFeatures::test_git_related_path_feature
+cli/tests/test_ml_features.py::TestStageBPrecisionFeatures::test_hex_len_40_feature
+cli/tests/test_ml_features.py::TestStageBPrecisionFeatures::test_hex_len_64_feature
+cli/tests/test_ml_features.py::TestStageBPrecisionFeatures::test_test_token_feature
+cli/tests/test_ml_features.py::TestTokenFeatures::test_char_class_count
+cli/tests/test_ml_features.py::TestTokenFeatures::test_is_base64_like
+cli/tests/test_ml_features.py::TestTokenFeatures::test_is_hex_like
+cli/tests/test_ml_features.py::TestTokenFeatures::test_known_prefix_detection
+cli/tests/test_ml_features.py::TestVarNameExtraction::test_env_file
+cli/tests/test_ml_features.py::TestVarNameExtraction::test_js_const_assignment
+cli/tests/test_ml_features.py::TestVarNameExtraction::test_json_key
+cli/tests/test_ml_features.py::TestVarNameExtraction::test_no_variable_name
+cli/tests/test_ml_features.py::TestVarNameExtraction::test_python_assignment
+cli/tests/test_ml_pipeline.py::TestDataGeneration::test_generate_training_data_balance
+cli/tests/test_ml_pipeline.py::TestDataGeneration::test_generate_training_data_count
+cli/tests/test_ml_pipeline.py::TestDataGeneration::test_training_data_has_required_fields
+cli/tests/test_ml_pipeline.py::TestDataGeneration::test_training_data_reproducible
+cli/tests/test_ml_pipeline.py::TestDataset::test_dataset_from_jsonl
+cli/tests/test_ml_pipeline.py::TestDataset::test_dataset_split
+cli/tests/test_ml_pipeline.py::TestFeatureExtraction::test_extract_context_from_pre_split_lines_matches_text_api
+cli/tests/test_ml_pipeline.py::TestFeatureExtraction::test_extract_features_from_finding
+cli/tests/test_ml_pipeline.py::TestFeatureExtraction::test_feature_names_match_array_length
+cli/tests/test_ml_pipeline.py::TestFeatureExtraction::test_feature_vector_has_67_features
+cli/tests/test_ml_pipeline.py::TestFeatureExtraction::test_new_features_are_extracted
+cli/tests/test_ml_pipeline.py::TestVerifierNoCrash::test_feature_extraction_with_empty_context
+cli/tests/test_ml_pipeline.py::TestVerifierNoCrash::test_feature_extraction_with_unicode
+cli/tests/test_ml_pipeline.py::TestVerifierNoCrash::test_verifier_with_various_tokens
+cli/tests/test_ml_regression.py::TestContextDifferentiation::test_same_token_different_file_types
+cli/tests/test_ml_regression.py::TestContextDifferentiation::test_same_token_different_variable_names
+cli/tests/test_ml_regression.py::TestContextDifferentiation::test_semantic_context_score_differentiation
+cli/tests/test_ml_regression.py::TestEdgeCases::test_binary_like_content
+cli/tests/test_ml_regression.py::TestEdgeCases::test_empty_token
+cli/tests/test_ml_regression.py::TestEdgeCases::test_special_characters_in_token
+cli/tests/test_ml_regression.py::TestEdgeCases::test_very_long_token
+cli/tests/test_ml_regression.py::TestKnownNonSecrets::test_aws_example_key
+cli/tests/test_ml_regression.py::TestKnownNonSecrets::test_checksum_hash
+cli/tests/test_ml_regression.py::TestKnownNonSecrets::test_git_sha_in_commit_context
+cli/tests/test_ml_regression.py::TestKnownNonSecrets::test_mock_token_in_test_file
+cli/tests/test_ml_regression.py::TestKnownNonSecrets::test_placeholder_token
+cli/tests/test_ml_regression.py::TestKnownNonSecrets::test_stripe_test_key
+cli/tests/test_ml_regression.py::TestKnownNonSecrets::test_uuid_as_identifier
+cli/tests/test_ml_regression.py::TestKnownNonSecrets::test_version_string
+cli/tests/test_ml_regression.py::TestKnownSecrets::test_aws_key_in_config
+cli/tests/test_ml_regression.py::TestKnownSecrets::test_github_token_in_env_file
+cli/tests/test_ml_regression.py::TestKnownSecrets::test_jwt_in_config_file
+cli/tests/test_ml_regression.py::TestKnownSecrets::test_openai_api_key
+cli/tests/test_ml_regression.py::TestKnownSecrets::test_private_key_pem
+cli/tests/test_ml_regression.py::TestKnownSecrets::test_stripe_live_key
+cli/tests/test_ml_shortcuts.py::TestAdversarialRobustness::test_adversarial_data_balanced
+cli/tests/test_ml_shortcuts.py::TestAdversarialRobustness::test_adversarial_data_is_confusing
+cli/tests/test_ml_shortcuts.py::TestAmbiguousTokenGenerators::test_fake_prefixed_token_has_prefix
+cli/tests/test_ml_shortcuts.py::TestAmbiguousTokenGenerators::test_hex_secret_is_hex
+cli/tests/test_ml_shortcuts.py::TestContextShortcuts::test_file_path_distribution
+cli/tests/test_ml_shortcuts.py::TestDataIntegrity::test_adversarial_data_has_required_fields
+cli/tests/test_ml_shortcuts.py::TestDataIntegrity::test_labels_are_binary
+cli/tests/test_ml_shortcuts.py::TestDataIntegrity::test_training_data_has_required_fields
+cli/tests/test_ml_shortcuts.py::TestFeatureVector::test_feature_count_is_67
+cli/tests/test_ml_shortcuts.py::TestFeatureVector::test_feature_extraction_works
+cli/tests/test_ml_shortcuts.py::TestFeatureVector::test_removed_features_not_present
+cli/tests/test_ml_shortcuts.py::TestGenerateContextExists::test_generate_context_all_languages
+cli/tests/test_ml_shortcuts.py::TestGenerateContextExists::test_generate_context_exists
+cli/tests/test_ml_shortcuts.py::TestTokenFormatShortcuts::test_distribution_sums_to_one
+cli/tests/test_ml_shortcuts.py::TestTokenFormatShortcuts::test_hex_tokens_in_both_classes
+cli/tests/test_ml_shortcuts.py::TestTokenFormatShortcuts::test_prefix_distribution_balanced
+cli/tests/test_ml_shortcuts.py::TestVariableNameShortcuts::test_variable_name_mixing
+cli/tests/test_ml_stress.py::TestAdversarialPerturbation::test_adversarial_sample_generation
+cli/tests/test_ml_stress.py::TestAdversarialPerturbation::test_perturbed_tokens_differ_from_original
+cli/tests/test_ml_stress.py::TestConfidenceBandAnalysis::test_confidence_band_framework
+cli/tests/test_ml_stress.py::TestContextInversion::test_context_inversion_sample_generation
+cli/tests/test_ml_stress.py::TestContextInversion::test_negative_samples_are_uuids
+cli/tests/test_ml_stress.py::TestContextInversion::test_positive_samples_have_real_secrets
+cli/tests/test_ml_stress.py::TestGitSHAMasquerading::test_features_indicate_secret_context
+cli/tests/test_ml_stress.py::TestGitSHAMasquerading::test_hex_secret_sample_generation
+cli/tests/test_ml_stress.py::TestPrefixFormatCollision::test_features_indicate_non_secret_context
+cli/tests/test_ml_stress.py::TestPrefixFormatCollision::test_prefix_collision_sample_generation
+cli/tests/test_ml_stress.py::TestStageRoutingStress::test_routing_analysis_framework
+cli/tests/test_ml_stress.py::TestStressTestIntegration::test_all_generators_produce_valid_records
+cli/tests/test_ml_stress.py::TestStressTestIntegration::test_feature_extraction_on_stress_samples
+cli/tests/test_ml_stress.py::TestStressTestIntegration::test_label_distribution_summary
+cli/tests/test_ml_stress.py::TestTokenLengthDistribution::test_feature_extraction_all_lengths
+cli/tests/test_ml_stress.py::TestTokenLengthDistribution::test_length_sample_generation
+cli/tests/test_ml_stress.py::TestVendorNeutralization::test_vendor_feature_extraction
+cli/tests/test_ml_stress.py::TestVendorNeutralization::test_vendor_sample_generation
+cli/tests/test_nfr_01_feature_latency.py::test_context_window_keeps_token_and_offsets
+cli/tests/test_nfr_01_feature_latency.py::test_nfr_01_long_minified_line_featurizes_fast
+cli/tests/test_nfr_01_feature_latency.py::test_short_lines_unchanged_by_window
+cli/tests/test_no_telemetry.py::test_sec_local_first_onnxruntime_telemetry_disabled[0]
+cli/tests/test_no_telemetry.py::test_sec_local_first_onnxruntime_telemetry_disabled[None]
+cli/tests/test_onnx_verifier.py::test_onnx_model_config_rejects_unsafe_routing_values[config0]
+cli/tests/test_onnx_verifier.py::test_onnx_model_config_rejects_unsafe_routing_values[config1]
+cli/tests/test_onnx_verifier.py::test_onnx_model_config_rejects_unsafe_routing_values[config2]
+cli/tests/test_onnx_verifier.py::test_onnx_model_config_rejects_unsafe_routing_values[config3]
+cli/tests/test_onnx_verifier.py::test_onnx_model_config_rejects_unsafe_routing_values[config4]
+cli/tests/test_onnx_verifier.py::test_onnx_model_config_rejects_unsafe_routing_values[config5]
+cli/tests/test_onnx_verifier.py::test_onnx_schema_mismatch_fails_before_inference
+cli/tests/test_onnx_verifier.py::test_onnx_session_rejects_invalid_probabilities[-0.1]
+cli/tests/test_onnx_verifier.py::test_onnx_session_rejects_invalid_probabilities[1.1]
+cli/tests/test_onnx_verifier.py::test_onnx_session_rejects_invalid_probabilities[inf]
+cli/tests/test_onnx_verifier.py::test_onnx_session_rejects_invalid_probabilities[nan]
+cli/tests/test_onnx_verifier.py::test_onnx_verifier_rejects_tampered_model_before_inference
+cli/tests/test_onnx_verifier.py::test_onnx_verifier_requires_hash_manifest
+cli/tests/test_onnx_verifier.py::test_onnx_verifier_requires_policy_config
+cli/tests/test_onnx_verifier.py::test_real_entropy_candidate_becomes_hybrid
+cli/tests/test_onnx_verifier.py::test_shipped_onnx_schema_matches_feature_contract
+cli/tests/test_onnx_verifier.py::test_shipped_onnx_verifier_executes_real_feature_vector
+cli/tests/test_packaging.py::test_wheel_installs_with_ml_pipeline
+cli/tests/test_path_false_positives.py::test_base32_uppercase_segment_keeps_the_candidate
+cli/tests/test_path_false_positives.py::test_base32_uppercase_segment_still_reaches_the_model
+cli/tests/test_path_false_positives.py::test_base64_secret_with_slashes_still_reaches_the_model
+cli/tests/test_path_false_positives.py::test_base64_with_slashes_is_not_a_path
+cli/tests/test_path_false_positives.py::test_letters_and_digits_segment_keeps_the_path_a_candidate[macos_var_folders]
+cli/tests/test_path_false_positives.py::test_letters_and_digits_segment_keeps_the_path_a_candidate[pnpm_store]
+cli/tests/test_path_false_positives.py::test_one_word_segment_is_not_enough_evidence
+cli/tests/test_path_false_positives.py::test_padded_base64_is_not_a_path
+cli/tests/test_path_false_positives.py::test_path_candidates_never_reach_the_model[pip_cache]
+cli/tests/test_path_false_positives.py::test_path_candidates_never_reach_the_model[uuid_temp_dir]
+cli/tests/test_path_false_positives.py::test_path_candidates_never_reach_the_model[uuid_temp_dir_quoted]
+cli/tests/test_path_false_positives.py::test_path_candidates_never_reach_the_model[xcode_derived_data]
+cli/tests/test_path_false_positives.py::test_path_entropy_tokens_are_benign[pip_cache]
+cli/tests/test_path_false_positives.py::test_path_entropy_tokens_are_benign[uuid_temp_dir]
+cli/tests/test_path_false_positives.py::test_path_entropy_tokens_are_benign[uuid_temp_dir_quoted]
+cli/tests/test_path_false_positives.py::test_path_entropy_tokens_are_benign[xcode_derived_data]
+cli/tests/test_path_false_positives.py::test_path_with_high_entropy_segment_stays_a_candidate
+cli/tests/test_path_false_positives.py::test_query_after_path_keeps_the_candidate
+cli/tests/test_path_false_positives.py::test_read_gate_leaves_paths_alone[pip_cache]
+cli/tests/test_path_false_positives.py::test_read_gate_leaves_paths_alone[uuid_temp_dir]
+cli/tests/test_path_false_positives.py::test_read_gate_leaves_paths_alone[uuid_temp_dir_quoted]
+cli/tests/test_path_false_positives.py::test_read_gate_leaves_paths_alone[xcode_derived_data]
+cli/tests/test_path_false_positives.py::test_read_gate_still_redacts_secrets_in_paths_and_urls[aws_key_as_path_segment]
+cli/tests/test_path_false_positives.py::test_read_gate_still_redacts_secrets_in_paths_and_urls[base64_secret_with_slashes]
+cli/tests/test_path_false_positives.py::test_read_gate_still_redacts_secrets_in_paths_and_urls[s3_presigned_signature]
+cli/tests/test_path_false_positives.py::test_read_gate_still_redacts_secrets_in_paths_and_urls[token_as_plain_path_segment]
+cli/tests/test_path_false_positives.py::test_read_gate_still_redacts_secrets_in_paths_and_urls[url_path_token]
+cli/tests/test_path_false_positives.py::test_regex_tier_is_untouched_by_the_path_rule
+cli/tests/test_path_false_positives.py::test_secret_named_key_before_path_keeps_the_candidate[api_key]
+cli/tests/test_path_false_positives.py::test_secret_named_key_before_path_keeps_the_candidate[auth]
+cli/tests/test_path_false_positives.py::test_secret_named_key_before_path_keeps_the_candidate[credential]
+cli/tests/test_path_false_positives.py::test_secret_named_key_before_path_keeps_the_candidate[password]
+cli/tests/test_path_false_positives.py::test_secret_named_key_before_path_keeps_the_candidate[secret]
+cli/tests/test_path_false_positives.py::test_secret_named_key_before_path_keeps_the_candidate[token]
+cli/tests/test_path_false_positives.py::test_single_segment_is_not_a_path
+cli/tests/test_path_false_positives.py::test_url_lines_are_left_to_the_url_rules
+cli/tests/test_per_type_report.py::test_fr_core_02_every_eval_type_maps_to_a_secret_type
+cli/tests/test_per_type_report.py::test_fr_core_02_summarize_counts_per_type
+cli/tests/test_r2_metrics.py::test_recall_at_precision_never_cuts_inside_a_tie
+cli/tests/test_r2_metrics.py::test_recall_at_precision_picks_the_highest_recall_meeting_the_target
+cli/tests/test_r2_metrics.py::test_record_scores_count_only_overlapping_candidates_for_secrets
+cli/tests/test_r2_metrics.py::test_threshold_for_budget_allows_exactly_the_budgeted_alarms
+cli/tests/test_read_tool.py::test_fr_core_02_every_category_has_a_secret_type
+cli/tests/test_read_tool.py::test_fr_core_06_gate_layer_threshold
+cli/tests/test_read_tool.py::test_fr_read_01_grep_is_not_an_oracle
+cli/tests/test_read_tool.py::test_fr_read_01_line_ranges_keep_numbering
+cli/tests/test_read_tool.py::test_fr_read_01_mcp_server_exposes_tools
+cli/tests/test_read_tool.py::test_fr_read_01_ml_failure_still_redacts
+cli/tests/test_read_tool.py::test_fr_read_01_pathological_line_is_linear
+cli/tests/test_read_tool.py::test_fr_read_01_refuses_binary
+cli/tests/test_read_tool.py::test_fr_read_01_safe_grep_canary_repo_zero_leaks
+cli/tests/test_read_tool.py::test_fr_read_01_safe_read_canary_repo_zero_leaks
+cli/tests/test_read_tool.py::test_fr_read_01_safe_read_redacts_utf16_files[utf-16-be-\xfe\xff]
+cli/tests/test_read_tool.py::test_fr_read_01_safe_read_redacts_utf16_files[utf-16-be-]
+cli/tests/test_read_tool.py::test_fr_read_01_safe_read_redacts_utf16_files[utf-16-le-\xff\xfe]
+cli/tests/test_read_tool.py::test_fr_read_01_safe_read_redacts_utf16_files[utf-16-le-]
+cli/tests/test_read_tool.py::test_fr_read_01_short_prefixed_token_not_shrunk
+cli/tests/test_read_tool.py::test_fr_read_01_still_refuses_other_binary_with_nuls_on_both_parities
+cli/tests/test_read_tool.py::test_fr_read_02_same_secret_same_placeholder
+cli/tests/test_read_tool.py::test_sec_02_session_keys_differ
+cli/tests/test_redaction.py::test_finding_redacted_token_matches_helper
+cli/tests/test_redaction.py::test_finding_redacted_token_none_when_no_token
+cli/tests/test_redaction.py::test_redact_finding_handles_missing_token
+cli/tests/test_redaction.py::test_redact_finding_preserves_all_non_token_fields
+cli/tests/test_redaction.py::test_redact_finding_returns_new_instance_with_redacted_token
+cli/tests/test_redaction.py::test_redact_findings_accepts_any_iterable
+cli/tests/test_redaction.py::test_redact_findings_returns_list_in_order
+cli/tests/test_redaction.py::test_redact_token_boundary_eight_char_token_is_short
+cli/tests/test_redaction.py::test_redact_token_boundary_ten_char_token_is_medium
+cli/tests/test_redaction.py::test_redact_token_handles_multibyte_unicode
+cli/tests/test_redaction.py::test_redact_token_long_token_uses_first_and_last_four_chars
+cli/tests/test_redaction.py::test_redact_token_medium_token_uses_first_and_last_two_chars
+cli/tests/test_redaction.py::test_redact_token_preserves_pattern_for_very_long_tokens
+cli/tests/test_redaction.py::test_redact_token_replaces_too_short_tokens_with_placeholder[\u200b]
+cli/tests/test_redaction.py::test_redact_token_replaces_too_short_tokens_with_placeholder[a]
+cli/tests/test_redaction.py::test_redact_token_replaces_too_short_tokens_with_placeholder[ab]
+cli/tests/test_redaction.py::test_redact_token_replaces_too_short_tokens_with_placeholder[abc]
+cli/tests/test_redaction.py::test_redact_token_replaces_too_short_tokens_with_placeholder[abcd]
+cli/tests/test_redaction.py::test_redact_token_replaces_too_short_tokens_with_placeholder[abcde]
+cli/tests/test_redaction.py::test_redact_token_replaces_too_short_tokens_with_placeholder[abcdef]
+cli/tests/test_redaction.py::test_redact_token_replaces_too_short_tokens_with_placeholder[abcdefg]
+cli/tests/test_redaction.py::test_redact_token_returns_none_for_empty_or_whitespace_input[   ]
+cli/tests/test_redaction.py::test_redact_token_returns_none_for_empty_or_whitespace_input[None]
+cli/tests/test_redaction.py::test_redact_token_returns_none_for_empty_or_whitespace_input[\t\n]
+cli/tests/test_redaction.py::test_redact_token_returns_none_for_empty_or_whitespace_input[]
+cli/tests/test_redaction.py::test_redact_token_short_token_uses_first_and_last_char
+cli/tests/test_redaction.py::test_redact_token_short_unicode_token_is_redacted
+cli/tests/test_regex.py::test_all_signatures_are_compiled
+cli/tests/test_regex.py::test_anthropic_api_key
+cli/tests/test_regex.py::test_aws_access_key_id
+cli/tests/test_regex.py::test_databricks_token
+cli/tests/test_regex.py::test_discord_webhook
+cli/tests/test_regex.py::test_gcp_api_key
+cli/tests/test_regex.py::test_github_pat
+cli/tests/test_regex.py::test_hashicorp_vault_token
+cli/tests/test_regex.py::test_npm_token
+cli/tests/test_regex.py::test_openai_api_key
+cli/tests/test_regex.py::test_openai_legacy_detected_at_high_severity
+sha256:479225a20c18 (whole-id hashed)
+cli/tests/test_regex.py::test_openai_legacy_does_not_fire_on_anthropic_key
+cli/tests/test_regex.py::test_openai_legacy_does_not_fire_on_proj_key
+cli/tests/test_regex.py::test_openai_legacy_fires_on_47_char_key
+cli/tests/test_regex.py::test_openai_legacy_key_does_not_match_stripe
+cli/tests/test_regex.py::test_openai_legacy_key_matches_short_form
+cli/tests/test_regex.py::test_openai_legacy_key_requires_minimum_length
+cli/tests/test_regex.py::test_openai_strict_still_matches_48_char_form
+cli/tests/test_regex.py::test_private_key_header
+cli/tests/test_regex.py::test_pypi_token
+cli/tests/test_regex.py::test_sendgrid_api_key
+cli/tests/test_regex.py::test_signatures_merged_view_is_complete
+cli/tests/test_regex.py::test_slack_bot_token_real_format_matches
+cli/tests/test_regex.py::test_slack_token
+cli/tests/test_regex.py::test_slack_webhook
+cli/tests/test_regex.py::test_stripe_key
+cli/tests/test_regex.py::test_telegram_bot_token_matches
+cli/tests/test_regex.py::test_twilio_api_key
+cli/tests/test_rust_backend.py::test_discover_required_reports_build_instruction
+cli/tests/test_rust_backend.py::test_discover_resolves_configured_relative_executable
+cli/tests/test_rust_backend.py::test_discover_uses_configured_executable
+cli/tests/test_rust_backend.py::test_invalid_finding_payload_does_not_echo_secret
+cli/tests/test_rust_backend.py::test_rust_backend_keeps_python_ml_verifier
+cli/tests/test_rust_backend.py::test_rust_backend_maps_native_findings
+cli/tests/test_rust_backend.py::test_rust_backend_propagates_python_ml_failure
+cli/tests/test_rust_backend.py::test_rust_backend_rejects_process_and_protocol_errors[completed0-native error]
+cli/tests/test_rust_backend.py::test_rust_backend_rejects_process_and_protocol_errors[completed1-invalid JSON]
+cli/tests/test_rust_backend.py::test_rust_backend_rejects_process_and_protocol_errors[completed2-result shape]
+cli/tests/test_rust_backend.py::test_rust_backend_scan_file_filters_unverified_ml
+cli/tests/test_rust_backend.py::test_rust_backend_scan_file_raises_on_native_file_error
+cli/tests/test_rust_backend.py::test_scan_directory_rejects_path_outside_root
+cli/tests/test_rust_backend.py::test_scan_directory_sends_ignore_policy_to_rust
+cli/tests/test_rust_backend.py::test_scan_directory_timeout_is_configurable
+cli/tests/test_rust_backend.py::test_scan_directory_with_ml_batches_python_verification
+cli/tests/test_rust_backend.py::test_scan_directory_with_ml_bounds_verifier_batches
+cli/tests/test_rust_backend.py::test_scan_file_with_ml_propagates_context_read_failure
+cli/tests/test_rust_backend.py::test_scan_files_preserves_partial_errors
+cli/tests/test_rust_backend.py::test_scan_files_rejects_false_clean_metadata
+cli/tests/test_rust_backend.py::test_scan_files_rejects_wrong_protocol_version
+cli/tests/test_rust_backend.py::test_scan_files_starts_one_versioned_native_process
+cli/tests/test_scanner.py::test_agent_configuration_directories_are_not_ignored
+cli/tests/test_scanner.py::test_python_directory_line_count_excludes_binary_payload_lines
+cli/tests/test_scanner.py::test_python_directory_line_count_includes_lines_after_a_finding
+cli/tests/test_scanner.py::test_python_ignore_globs_match_directory_components_and_question_marks
+cli/tests/test_scanner.py::test_python_ignore_patterns_support_character_classes
+cli/tests/test_scanner.py::test_python_scanner_keeps_valid_unicode_text
+cli/tests/test_scanner.py::test_scan_directory_auto_falls_back_after_native_failure
+cli/tests/test_scanner.py::test_scan_directory_custom_ignore
+cli/tests/test_scanner.py::test_scan_directory_deterministic_order
+cli/tests/test_scanner.py::test_scan_directory_explicit_rust_failure_is_fatal
+cli/tests/test_scanner.py::test_scan_directory_ignore_patterns
+cli/tests/test_scanner.py::test_scan_directory_nonexistent
+cli/tests/test_scanner.py::test_scan_directory_recursive
+cli/tests/test_scanner.py::test_scan_directory_rust_engine_owns_traversal
+cli/tests/test_scanner.py::test_scan_directory_rust_ml_owns_traversal
+cli/tests/test_scanner.py::test_scan_directory_symlink_skipped
+cli/tests/test_scanner.py::test_scan_directory_with_secrets
+cli/tests/test_scanner.py::test_scan_file_auto_falls_back_after_native_failure
+cli/tests/test_scanner.py::test_scan_file_nonexistent
+cli/tests/test_scanner.py::test_scan_file_with_secrets
+cli/tests/test_scanner.py::test_scan_file_without_secrets
+cli/tests/test_scanner.py::test_scan_result_summary
+cli/tests/test_severity_calibration.py::test_apim_secret_key_real_secret_severity_is_at_least_medium
+cli/tests/test_severity_calibration.py::test_authenticated_enum_does_not_become_critical
+cli/tests/test_severity_calibration.py::test_critical_unreachable_at_max_confidence
+cli/tests/test_severity_calibration.py::test_entropy_path_produces_high_for_strong_category_signal
+cli/tests/test_severity_calibration.py::test_generic_secret_at_exactly_050_is_info
+cli/tests/test_severity_calibration.py::test_generic_secret_moderate_confidence_is_medium
+cli/tests/test_severity_calibration.py::test_low_confidence_generic_is_info
+cli/tests/test_severity_calibration.py::test_ml_high_confidence_does_not_promote_generic_secret
+cli/tests/test_severity_calibration.py::test_ml_high_confidence_does_not_promote_generic_secret_at_reconstruction_default
+cli/tests/test_severity_calibration.py::test_ml_high_confidence_promotes_moderate_specific_to_high
+sha256:c1c2e3306632 (whole-id hashed)
+sha256:224be1e2b32d (whole-id hashed)
+cli/tests/test_severity_calibration.py::test_specific_category_at_exactly_050_is_info
+cli/tests/test_severity_calibration.py::test_specific_category_low_confidence_is_info
+cli/tests/test_severity_calibration.py::test_specific_category_moderate_is_medium
+cli/tests/test_severity_calibration.py::test_specific_category_strong_is_high
+cli/tests/test_slot_set.py::test_malformed_marker_is_rejected
+cli/tests/test_slot_set.py::test_multiline_value_is_rejected
+cli/tests/test_slot_set.py::test_slots_become_labeled_records
+cli/tests/test_slot_set.py::test_unknown_kind_is_rejected
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_concatenated_strings
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_empty_line
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_empty_token
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_escaped_quotes
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_go_assignment
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_json_style_assignment
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_multiple_quotes_same_line
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_python_assignment
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_shell_export
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_after_unrelated_quotes
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_between_different_quote_types
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_in_backticks
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_in_comment
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_in_double_quotes
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_in_env_file
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_in_longer_string
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_in_single_quotes
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_not_found
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_token_not_in_quotes
+cli/tests/test_string_literal_detection.py::TestStringLiteralDetection::test_yaml_style_assignment
+cli/tests/test_string_literal_detection.py::TestStringLiteralFeatureIntegration::test_feature_extraction_no_var_name
+cli/tests/test_string_literal_detection.py::TestStringLiteralFeatureIntegration::test_feature_extraction_with_quoted_token
+cli/tests/test_string_literal_detection.py::TestStringLiteralFeatureIntegration::test_feature_extraction_without_quotes
+cli/tests/test_tokens.py::test_codecontext_token_match_assignable
+cli/tests/test_tokens.py::test_codecontext_token_match_default_none
+cli/tests/test_tokens.py::test_detector_populates_token_offsets_for_regex_findings
+cli/tests/test_tokens.py::test_detector_populates_token_offsets_for_sensitive_assignment
+cli/tests/test_tokens.py::test_entropy_candidate_has_no_offsets
+cli/tests/test_tokens.py::test_finding_token_offsets_default_none
+cli/tests/test_tokens.py::test_finding_token_offsets_excluded_from_json_dict
+cli/tests/test_tokens.py::test_finding_token_offsets_excluded_without_include_token
+cli/tests/test_tokens.py::test_tokenmatch_is_frozen
+cli/tests/test_tokens.py::test_tokenmatch_kind_defaults_to_none
+cli/tests/test_train_pipeline_features.py::test_candidates_on_record_line_are_labeled_by_overlap
+cli/tests/test_train_pipeline_features.py::test_negative_record_candidates_are_all_negative

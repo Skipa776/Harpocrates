@@ -1,0 +1,136 @@
+{
+  "cli_exit": 0,
+  "cli_scan_json_findings": 17,
+  "generated_file_sha256": {
+    ".env": "7fa51a88823741c7c554d6c82f8eb841563218cf6d02506710de51bbae40c0bf",
+    ".npmrc": "d8f245cedba04047f33677532f9952a7fb4b736978f668355fb2d47cb83c9d7b",
+    "README.md": "14e3f4a866037fd40c045a32dbfef5b8fa7f549e488e039067adcb24c2653a9e",
+    "config/app.yaml": "630759cd89005ce7e6e55bff65094df892595af8395ac7244b82b2578195290d",
+    "config/settings.py": "2b8d43e725f3b5952205c35b34c6e4d5123fd84b2fa68fd52a586ff18558ecc3",
+    "deploy/id_rsa": "2697b62c2677404186e51d77cf5805d2536ecf7431802a9307b016c2aef3639f",
+    "docker-compose.yml": "9715d15237a4a6b21237488cba67943d3ce97716f87470b1cfa5672f5b1341f7",
+    "src/client.js": "c2ecc1d8cd999fe526d5d3539de1fd578f83bb5e35669ecba560c7dec52bf87c"
+  },
+  "layers": {
+    "commit": {
+      "canary_found": 14,
+      "canary_kinds_found": [
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "db_password",
+        "db_url",
+        "gcp_api_key",
+        "github_token",
+        "jwt",
+        "npm_token",
+        "openai_key",
+        "private_key",
+        "sendgrid_key",
+        "slack_token",
+        "stripe_key",
+        "twilio_auth_token"
+      ],
+      "canary_total": 15,
+      "findings": 17
+    },
+    "gate": {
+      "canary_found": 14,
+      "canary_kinds_found": [
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "db_password",
+        "db_url",
+        "gcp_api_key",
+        "github_token",
+        "jwt",
+        "npm_token",
+        "openai_key",
+        "private_key",
+        "sendgrid_key",
+        "slack_token",
+        "stripe_key",
+        "twilio_auth_token"
+      ],
+      "canary_total": 15,
+      "findings": 17
+    }
+  },
+  "manifest": [
+    {
+      "file": ".env",
+      "kind": "aws_access_key_id",
+      "value_sha256_16": "49346a75852e03b3"
+    },
+    {
+      "file": ".env",
+      "kind": "aws_secret_access_key",
+      "value_sha256_16": "a1f0b47eb66b32bb"
+    },
+    {
+      "file": ".env",
+      "kind": "openai_key",
+      "value_sha256_16": "a3aa9e85a710780f"
+    },
+    {
+      "file": ".env",
+      "kind": "db_url",
+      "value_sha256_16": "591ecf63c33cf88a"
+    },
+    {
+      "file": ".env",
+      "kind": "db_password",
+      "value_sha256_16": "adde3ecbf4ae216d"
+    },
+    {
+      "file": "config/settings.py",
+      "kind": "github_token",
+      "value_sha256_16": "85d78554e3513281"
+    },
+    {
+      "file": "config/settings.py",
+      "kind": "slack_token",
+      "value_sha256_16": "e43b68ec1530f2ff"
+    },
+    {
+      "file": "config/app.yaml",
+      "kind": "sendgrid_key",
+      "value_sha256_16": "eb8e72a630c58912"
+    },
+    {
+      "file": "config/app.yaml",
+      "kind": "stripe_key",
+      "value_sha256_16": "4de5af44f1e4d166"
+    },
+    {
+      "file": "docker-compose.yml",
+      "kind": "postgres_password",
+      "value_sha256_16": "f83ca7ba6b10566c"
+    },
+    {
+      "file": "src/client.js",
+      "kind": "twilio_auth_token",
+      "value_sha256_16": "4b0d44baa86b6b8e"
+    },
+    {
+      "file": "src/client.js",
+      "kind": "gcp_api_key",
+      "value_sha256_16": "ef1281bc11abe6f0"
+    },
+    {
+      "file": "src/client.js",
+      "kind": "jwt",
+      "value_sha256_16": "0456df506bdd0874"
+    },
+    {
+      "file": ".npmrc",
+      "kind": "npm_token",
+      "value_sha256_16": "0febaf085ef54896"
+    },
+    {
+      "file": "deploy/id_rsa",
+      "kind": "private_key",
+      "value_sha256_16": "c538bb90db0ccb16"
+    }
+  ],
+  "seed": 0
+}

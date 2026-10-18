@@ -1,0 +1,37 @@
+{
+  "data": [
+    "/Users/joshuado/harpocrates/cli/tests/fixtures/positive_holdout_v4.jsonl"
+  ],
+  "stage": "ml",
+  "records": 300,
+  "tp": 89,
+  "fp": 0,
+  "fn": 211,
+  "tn": 0,
+  "recall": 0.2966666666666667,
+  "precision": null,
+  "slices": {
+    "secret_type": {
+      "ENTROPY_CANDIDATE": {
+        "records": 300,
+        "tp": 89,
+        "fp": 0,
+        "fn": 211,
+        "tn": 0,
+        "recall": 0.2966666666666667,
+        "precision": null
+      }
+    },
+    "source": {
+      "llm_holdout": {
+        "records": 300,
+        "tp": 89,
+        "fp": 0,
+        "fn": 211,
+        "tn": 0,
+        "recall": 0.2966666666666667,
+        "precision": null
+      }
+    }
+  }
+}
