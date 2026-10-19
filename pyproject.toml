@@ -67,9 +67,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# N803/N806: uppercase X_train/X_val follow sklearn/numpy ML convention
-"cli/Harpocrates/training/train_model.py" = ["N803", "N806"]
-"cli/Harpocrates/training/generators/generate_data.py" = ["N806"]
 # bench/ is a dev-only exploratory tool — ML naming conventions and late imports expected
 "bench/*.py" = ["N803", "N806", "E402", "F841"]
 

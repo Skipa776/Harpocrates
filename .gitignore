@@ -177,3 +177,12 @@ cli/tests/test_data_07_eval_set.py
 cli/tests/test_slot_set.py
 cli/tests/test_clean_v4.py
 cli/tests/test_generate_llm_slots.py
+cli/Harpocrates/training/__init__.py
+cli/Harpocrates/training/data/.gitkeep
+cli/Harpocrates/training/dataset.py
+cli/Harpocrates/training/generators/__init__.py
+cli/Harpocrates/training/generators/context_templates.py
+cli/Harpocrates/training/generators/generate_data.py
+cli/Harpocrates/training/train_model.py
+cli/tests/test_data_generator.py
+cli/tests/test_ml_shortcuts.py
