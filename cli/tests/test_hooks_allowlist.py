@@ -10,13 +10,16 @@ import json
 from pathlib import Path
 
 import pytest
+from cli_entry import with_each_name
 
 from bench.canary_repo import build
 from Harpocrates import allowlist, hooks
 
 
 def _both(cmds: list[str]) -> list[str]:
-    """FR-NAME-04: every command that names ~/.harpocrates, once more naming ~/.harpo; the others once."""
+    """FR-NAME-04: every command that names ~/.harpocrates, once more naming ~/.harpo; the others once.
+    FR-NAME-02: a <bin> in a command is the program word, once as `harpo` and once as `harpocrates`."""
+    cmds = with_each_name(cmds)
     return cmds + [c.replace(".harpocrates", ".harpo") for c in cmds if ".harpocrates" in c]
 
 
@@ -102,16 +105,16 @@ def test_fr_read_05_without_ask_flag_still_denies(repo, capsys) -> None:
 
 
 @pytest.mark.parametrize("cmd", _both([
-    "harpocrates allow graphify-out",
+    "<bin> allow graphify-out",
     "python -m Harpocrates.cli allow .",
     "echo /tmp >> ~/.harpocrates/allow",
     "bash -c 'printf x > $HOME/.harpocrates/allow'",
-    "/home/u/.venv/bin/harpocrates allow ~/.ssh",
+    "/home/u/.venv/bin/<bin> allow ~/.ssh",
     "cd ~/.harpocrates && echo /x >> allow",
     "cd ~; cd .harpocrates; echo / >> allow",
     "D=~/.harpocrates; echo / >> $D/allow",
     "echo / >> ~/.harpo\"\"crates/allow",
-    "harpocrates 'allow' /",
+    "<bin> 'allow' /",
     "python -c \"from Harpocrates import allowlist; allowlist.add(Path('/'))\"",
     "rm -rf ~/.harpocrates",
 ]))
@@ -130,7 +133,8 @@ def test_fr_read_05_agent_cannot_edit_the_allowlist(repo, capsys, cmd) -> None:
     "grep -rn allow /Users/joshuado/harpocrates/cli",
     "cd /Users/joshuado/harpocrates && git log --grep allow",
     "cd /Users/joshuado/harpocrates && pytest cli/tests/test_hooks_allowlist.py",
-    "harpocrates scan --help",
+    "<bin> scan --help",
+    "<bin> --version",
     "cat < ~/.harpocrates/allow",
     "cd ~/.harpocrates && ls -l | wc -l",
 ]))
@@ -158,33 +162,34 @@ def test_fr_read_05_touches_allows_read_only_commands(cmd) -> None:
     "cat ~/.harp*/allow > /tmp/x",
     "cat ~/.harp*/allow\nrm ~/.harpocrates/allow",
     "/bin/cat ~/.harpocrates/allow",
-    "harpocrates allow /etc",
-    "/usr/local/bin/harpocrates allow .",
+    "<bin> allow /etc",
+    "/usr/local/bin/<bin> allow .",
     "python -m Harpocrates.cli allow .",
     ".venv/bin/python3 -m Harpocrates allow .",
-    "sudo harpocrates allow x",
-    "sudo -u root harpocrates allow x",
-    "env A=1 harpocrates allow x",
-    "bash -c \"harpocrates allow x\"",
-    "sh -lc 'ls && harpocrates allow x'",
-    "echo x | xargs harpocrates allow",
-    "ls && (harpocrates allow x)",
+    "sudo <bin> allow x",
+    "sudo -u root <bin> allow x",
+    "env A=1 <bin> allow x",
+    "bash -c \"<bin> allow x\"",
+    "sh -lc 'ls && <bin> allow x'",
+    "echo x | xargs <bin> allow",
+    "ls && (<bin> allow x)",
     "cat <(cp evil ~/.harpocrates/allow)",
     "cat < <(rm ~/.harpocrates/allow)",
     "diff <(tee -a ~/.harpocrates/allow) x",
     "cat <<EOF ~/.harpocrates/allow\nrm ~/.harpocrates/allow\nEOF",
-    "$(which harpocrates) allow x",
-    "`which harpocrates` allow x",
+    "$(which <bin>) allow x",
+    "`which <bin>` allow x",
     "python -c \"from Harpocrates import allowlist; allowlist.add('/')\"",
     "echo 'unbalanced ~/.harpocrates",
-    "{ harpocrates allow /x; }",
-    "if true; then harpocrates allow /x; fi",
-    "for i in 1; do harpocrates allow /x; done",
-    "time harpocrates allow /x",
-    "timeout 5 harpocrates allow /x",
-    "! harpocrates allow /x",
-    "nice harpocrates allow x",
+    "{ <bin> allow /x; }",
+    "if true; then <bin> allow /x; fi",
+    "for i in 1; do <bin> allow /x; done",
+    "time <bin> allow /x",
+    "timeout 5 <bin> allow /x",
+    "! <bin> allow /x",
+    "nice <bin> allow x",
     "git -C /Users/joshuado/harpocrates log --grep allow",  # accepted over-block: the repo dir is named like the tool
+    "git -C /Users/joshuado/harpo log --grep allow",  # the same over-block, for the short name
     "echo /x | sed -n 'w/Users/me/.harpocrates/allow'",
     "sed -n '-ew F' ~/.harpocrates/allow",
     "echo /x | sort --out=$HOME/.harpocrates/allow",
@@ -346,6 +351,7 @@ def _obfuscated_cmds() -> list[str]:
         ]
     return out + [
         "h''" + "arpocrates allow /",
+        "h''" + "arpo allow /",
         "rm -rf .[a-z]*cache",  # accepted over-block: a dot-glob in a non-read-only command
     ]
 
@@ -356,7 +362,7 @@ def test_fr_read_05_touches_blocks_obfuscated_spellings(cmd) -> None:
 
 
 @pytest.mark.parametrize("cmd", _both([
-    "harpocrates scan .",
+    "<bin> scan .",
     "python -m Harpocrates.cli scan .",
     "cd /Users/joshuado/harpocrates && pytest -q",
     ".venv/bin/python -m pytest cli/tests/test_hooks_allowlist.py",
@@ -657,20 +663,20 @@ def test_fr_read_05_cli_json_shapes(allow_file: Path, tmp_path: Path) -> None:
     assert code == 1 and body["ok"] is False and body["needs_confirmation"] is False
 
 
-@pytest.mark.parametrize("cmd", [
-    "harpocrates allow --name graphify-out",
-    "harpocrates allow --name src --yes",
-    "harpocrates allow --remove /x",
-    "harpocrates allow --remove --name x",
-    "harpocrates allow --list",  # read-only, but refused too: simpler, fail closed
-    "harpocrates allow --list --json",
-    "harpocrates allow --json --name x",
-    "/usr/local/bin/harpocrates allow --name x",
+@pytest.mark.parametrize("cmd", with_each_name([
+    "<bin> allow --name graphify-out",
+    "<bin> allow --name src --yes",
+    "<bin> allow --remove /x",
+    "<bin> allow --remove --name x",
+    "<bin> allow --list",  # read-only, but refused too: simpler, fail closed
+    "<bin> allow --list --json",
+    "<bin> allow --json --name x",
+    "/usr/local/bin/<bin> allow --name x",
     "python -m Harpocrates.cli allow --name x --yes",
-    "sudo harpocrates allow --remove --name x",
+    "sudo <bin> allow --remove --name x",
     "python -c \"from Harpocrates import allowlist; allowlist.add_name('x')\"",
     "python -c \"from Harpocrates import allowlist; allowlist.remove('/x')\"",
-])
+]))
 def test_fr_read_05_touches_blocks_name_remove_and_list_flags(cmd) -> None:
     assert allowlist.touches(cmd), cmd
 # ---- security review round 1 ----

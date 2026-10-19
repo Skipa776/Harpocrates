@@ -104,6 +104,7 @@ _HEREDOC = re.compile(
 # elsewhere, so every word in the command counts as read. A `$` inside an awk or sed program (it has spaces) is no operand.
 _DYNAMIC = re.compile(r"""[^\s'"]*(?:\$[\w@*#?!]|\$\{|\$$|`)[^\s'"]*""")
 _CLI_MODULE = re.compile(r"Harpocrates(\.cli(\.__main__)?)?$")
+_CLI_NAMES = ("harpo", "harpocrates")  # the command and its old name (FR-NAME-02): both print values when they scan
 SCAN_REFUSAL = ("harpocrates scan prints secret values. Use mcp__harpocrates__scan_file or scan_text, which return "
                 "findings without values.")
 SCAN_UNCHECKABLE = SCAN_REFUSAL + " (git history and --show-secrets can't be checked)"
@@ -1417,12 +1418,12 @@ def _scan_operands(argv: list[str]) -> Optional[list[str]]:
         argv: Command words including possible wrappers or Python module invocation.
     Output: Non-option words after scan, or None when no scan runs or help is requested; raises
         _ScanUncheckableError for --history or --show-secrets.
-    Notes: The non-option words after `scan` if this command runs `harpocrates scan` (the script, or
-        `python -m Harpocrates[.cli]`, behind any wrapper); None if it doesn't, or only asks for
-        --help.
+    Notes: The non-option words after `scan` if this command runs `harpo scan` or `harpocrates scan` (the
+        script, in any letter case since the default macOS file system folds it, or `python -m
+        Harpocrates[.cli]`, behind any wrapper); None if it doesn't, or only asks for --help.
     """
     for i, tok in enumerate(argv):
-        if Path(tok).name == "harpocrates":
+        if Path(tok).name.casefold() in _CLI_NAMES:
             rest = argv[i + 1:]
         elif tok == "-m" and i + 1 < len(argv) and _CLI_MODULE.match(argv[i + 1]):
             rest = argv[i + 2:]

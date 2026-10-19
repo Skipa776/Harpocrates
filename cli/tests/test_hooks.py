@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 import pytest
+from cli_entry import with_each_name
 
 from bench.canary_repo import build
 from Harpocrates import hooks
@@ -996,23 +997,26 @@ def test_fr_read_03_hook_agent_run_scan_prints_values_and_is_refused(repo, capsy
     dirty = _git_repo(tmp_path / "dirty", "", {"src/app.py": "print('foo')\n", "cfg.py": f'GITHUB_TOKEN = "{token}"\n'},
                       tracked=("src/app.py", "cfg.py"))
     clean = _git_repo(tmp_path / "clean", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
-    scans = ("harpocrates scan", "harpocrates scan .", "harpocrates scan --json", "harpocrates scan --json .",
-             "harpocrates scan . --json --fail-on none", "harpocrates scan cfg.py", f"harpocrates scan {dirty}",
-             ".venv/bin/harpocrates scan .", "python -m Harpocrates.cli scan .", "python3 -m Harpocrates scan",
-             "python -m Harpocrates.cli --help scan x; python -m Harpocrates.cli scan", "sudo harpocrates scan .",
-             "cd src && harpocrates scan ..", "uv run harpocrates scan .", "harpocrates scan . | head",
-             "bash -c 'harpocrates scan .'", "harpocrates scan --engine python .")
+    # FR-NAME-02: <bin> is `harpocrates` and `harpo`; the agent can run either, and both print the values
+    scans = with_each_name(["<bin> scan", "<bin> scan .", "<bin> scan --json", "<bin> scan --json .",
+                            "<bin> scan . --json --fail-on none", "<bin> scan cfg.py", f"<bin> scan {dirty}",
+                            ".venv/bin/<bin> scan .", "python -m Harpocrates.cli scan .", "python3 -m Harpocrates scan",
+                            "python -m Harpocrates.cli --help scan x; python -m Harpocrates.cli scan",
+                            "sudo <bin> scan .", "cd src && <bin> scan ..", "uv run <bin> scan .",
+                            "<bin> scan . | head", "bash -c '<bin> scan .'", "<bin> scan --engine python ."])
+    # the default macOS file system folds case, so these run the same program
+    scans += ["HARPO scan .", "Harpo scan --json", "HARPOCRATES scan .", "./Harpocrates scan cfg.py"]
     for cmd in scans:
         code, out = _run(_bash(dirty, cmd), capsys)
         message = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out else ""
         assert code == 0 and _denied(out) and token[:12] not in out, cmd
         assert message == ("harpocrates scan prints secret values. Use mcp__harpocrates__scan_file or scan_text, "
                            "which return findings without values."), cmd
-    for cmd in ("harpocrates scan", "harpocrates scan .", "harpocrates scan src", "python -m Harpocrates.cli scan src",
-                "harpocrates scan --help", "harpocrates scan -h", "harpocrates --version", "harpocrates --help",
-                "harpocrates install --dry-run", "python -m Harpocrates.cli --version", "echo harpocrates scan"):
+    for cmd in with_each_name(["<bin> scan", "<bin> scan .", "<bin> scan src", "python -m Harpocrates.cli scan src",
+                               "<bin> scan --help", "<bin> scan -h", "<bin> --version", "<bin> --help",
+                               "<bin> install --dry-run", "python -m Harpocrates.cli --version", "echo <bin> scan"]):
         assert _run(_bash(clean, cmd), capsys) == (0, ""), cmd
-    for cmd in ("harpocrates --version", "harpocrates --help", "harpocrates scan --help", "harpocrates scan src"):
+    for cmd in with_each_name(["<bin> --version", "<bin> --help", "<bin> scan --help", "<bin> scan src"]):
         assert _run(_bash(dirty, cmd), capsys) == (0, ""), cmd
 
 
@@ -1062,15 +1066,15 @@ def test_fr_read_03_hook_agent_scan_with_history_or_show_secrets_is_refused(repo
         files["cfg.py"] = f'GITHUB_TOKEN = "{_canary_token(canaries)}"\n'
     root = _git_repo(tmp_path / where, "", files, tracked=tuple(files))
     suffix = "(git history and --show-secrets can't be checked)"
-    for cmd in ("harpocrates scan --history", "harpocrates scan . --history", "harpocrates scan --show-secrets .",
-                "harpocrates scan --history --show-secrets --json", "python -m Harpocrates scan --history --json",
-                "python -m Harpocrates.cli scan . --show-secrets", "sudo harpocrates scan src --history",
-                "bash -c 'harpocrates scan --history'", "uv run harpocrates scan --show-secrets"):
+    for cmd in with_each_name(["<bin> scan --history", "<bin> scan . --history", "<bin> scan --show-secrets .",
+                               "<bin> scan --history --show-secrets --json", "python -m Harpocrates scan --history --json",
+                               "python -m Harpocrates.cli scan . --show-secrets", "sudo <bin> scan src --history",
+                               "bash -c '<bin> scan --history'", "uv run <bin> scan --show-secrets"]):
         code, out = _run(_bash(root, cmd), capsys)
         reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out else ""
         assert code == 0 and _denied(out) and reason.startswith("harpocrates scan prints secret values.")
         assert reason.endswith(suffix), cmd
-    for cmd in ("harpocrates scan --help --history", "echo harpocrates scan --history", "harpocrates --version"):
+    for cmd in with_each_name(["<bin> scan --help --history", "echo <bin> scan --history", "<bin> --version"]):
         assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
 
 

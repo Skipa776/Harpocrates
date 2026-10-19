@@ -23,6 +23,12 @@ from typer.testing import CliRunner
 from Harpocrates.cli import app, main
 
 COMMAND_NAMES = ("harpo", "harpocrates")
+BIN = "<bin>"  # in a shell command under test: the program word, run once under each command name
+
+
+def with_each_name(cmds: list[str]) -> list[str]:
+    """Each command holding the BIN placeholder, once per command name (in order); the others once."""
+    return [out for c in cmds for out in ([c.replace(BIN, n) for n in COMMAND_NAMES] if BIN in c else [c])]
 
 
 class _Entry:

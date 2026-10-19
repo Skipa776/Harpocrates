@@ -7,10 +7,10 @@ resolving symlinks: a link inside an allowed folder that points elsewhere is sti
 rule but pointing elsewhere does not match (its target's components count). Every pass is appended to allow.log
 (time, tool, path; never content), as design.md's "explicit overrides, always logged" asks.
 
-Only the user edits the list: `harpocrates allow` (add, --name, --remove, --list), or the file by hand. The hook
-refuses Bash commands that change it or call `harpocrates allow` with any flags (read-only commands pass), refuses
-Edit/Write-tool calls whose target is inside ~/.harpo or ~/.harpocrates (inside_state_dir, any mode, before any
-grant or prompt), and the Claude Code settings deny Edit/Write on both as well.
+Only the user edits the list: `harpo allow` (add, --name, --remove, --list; `harpocrates allow` still works,
+FR-NAME-02), or the file by hand. The hook refuses Bash commands that change it or call either name's `allow` with
+any flags (read-only commands pass), refuses Edit/Write-tool calls whose target is inside ~/.harpo or ~/.harpocrates
+(inside_state_dir, any mode, before any grant or prompt), and the Claude Code settings deny Edit/Write on both as well.
 Trade-off of name rules: they are broader than a path. add_name refuses names of secret stores, of system folders
 and of anything in the home path, and asks for confirmation on the likes of `src` or `secrets`. Names are compared
 NFKC-folded and case-folded (the default macOS file system treats `.AWS` as `.aws`). A name rule never covers a path
@@ -68,8 +68,9 @@ def log_file() -> Path:
 # ponytail: text match, best effort. A script that builds the path at runtime gets past it, but such a
 # script could just as well open the secret file itself, a gap the hook already has (hooks.py docstring).
 # The egress gate (M2) sees whatever reaches the provider either way.
-# Rule: `harpocrates ... allow` anywhere in a segment is refused (only a mid-path `harpocrates/` is
-# exempt), so a repo directory of that name over-blocks `git -C .../harpocrates log --grep allow`. A
+# Rule: `harpo ... allow` or `harpocrates ... allow` anywhere in a segment is refused (FR-NAME-02: the command is
+# `harpo` now and `harpocrates` still works; only a mid-path `harpo/` or `harpocrates/` is exempt, and `harpoon` or
+# `harpo_x` are other words), so a repo directory of that name over-blocks `git -C .../harpocrates log --grep allow`. A
 # mention of the directory (`.harp`, also `~/.harp*`) passes only when it is a plain read: no output
 # redirect, substitution or heredoc, and every command word in _READ_ONLY. Fail closed on anything else.
 # Both state folders are covered (FR-NAME-04): `.harp` is the start of `.harpo` and of `.harpocrates`, so the first
@@ -79,9 +80,21 @@ def log_file() -> Path:
 # substitution, printf) matches nothing; that is the script gap above. Matching runs on the raw command and on
 # a normalised copy (see _normalise). Accepted over-block: `rm -rf .[a-z]*cache`.
 _ALLOW_CMD = re.compile(
-    r"\bharpocrates(?:\.cli)?\b(?!/)[^;&|\n]*\ballow\b"  # harpocrates / python -m Harpocrates.cli ... allow
-    r"|(?:\$\([^)]*\)|`[^`]*`|\$\{?\w+\}?)\s*['\"]?allow\b"  # $(which harpocrates) allow
+    r"\bharpo(?:crates)?(?:\.cli)?\b(?!/)[^;&|\n]*\ballow\b"  # harpo / harpocrates / python -m Harpocrates.cli ... allow
+    r"|(?:\$\([^)]*\)|`[^`]*`|\$\{?\w+\}?)\s*['\"]?allow\b"  # $(which harpo) allow
     r"", re.I)
+# A glob in the program word (`/usr/bin/harpocra*s allow /`): the shell expands it to the program, so the text never
+# holds the name. Refused when a word in a segment fnmatches a program name (the four console scripts) and a later word
+# of that segment is `allow`. Accepted over-blocks: `ls h* allow.txt`, and a glob that picks several files (it cannot be
+# told which exist). A word of only `*` and `?` is no mention (`git commit -m "* allow ..."`). Known gaps, as for any
+# spelling built at runtime: a glob in `allow` itself (`harpo al*` with a file named allow in the folder), a brace
+# expansion that spells the name across alternatives (`harp{o,x}`), an alias, a link or copy under another name.
+_PROGRAMS = ("harpo", "harpo-mcp", "harpocrates", "harpocrates-mcp")
+_GLOB_WORD = re.compile(r"[*?\[]")
+_ONLY_WILDCARDS = re.compile(r"[*?]+")
+_SEGMENT_END = re.compile(r"[;&|\n]")
+_WORD_END = re.compile(r"[\s()`]+")
+_ALLOW_WORD = re.compile(r"\ballow\b", re.I)
 _DIR = re.compile(r"""\.harp|(?:^|[/\s'"=~])\.[^/\s'";&|]*[*?\[{]""", re.I)
 _UNSAFE_TEXT = re.compile(r">|\$\(|`|<\(|<<")
 _READ_ONLY = frozenset(
@@ -516,12 +529,15 @@ def _normalise(command: str) -> str:
     Description: Undo shell spelling tricks so state-directory guards see obfuscated mentions.
     Parameters:
         command: Shell command text to normalize.
-    Output: Text with ANSI-C escapes decoded and backslashes, quotes, braces, and commas removed.
-    Notes: Spelling tricks undone: $'...' escapes decoded, then backslashes, quotes, braces and
+    Output: Text with ANSI-C escapes decoded and backslashes, line continuations, quotes, braces, and commas
+        removed.
+    Notes: Spelling tricks undone: $'...' escapes decoded, then backslash-newline pairs (a line continuation:
+        `harpo \\<newline>allow` is `harpo allow`), then backslashes, quotes, braces and
         commas removed, so `.h\\arpocrates`, `.ha""rpocrates`, `{.,}harpocrates` and
         `$'\\056harpocrates'` read as `.harpocrates`.
     """
     decoded = _ANSI_C.sub(lambda m: _ESCAPE.sub(_decode_escape, m.group(1)), command)
+    decoded = re.sub(r"\\\r?\n", "", decoded)  # a backslash-newline is gone before the shell reads a word
     return re.sub(r"[\\'\"{},]", "", decoded)
 
 
@@ -601,6 +617,29 @@ def _edits_module(text: str) -> bool:
     return bool(_MODULE.search(text) and _EDIT_WORD.search(text))
 
 
+def _glob_runs_allow(command: str) -> bool:
+    """
+    Description: Detect a glob in the program word that the shell would expand to a Harpocrates program, followed by
+        `allow` in the same command.
+    Parameters:
+        command: Shell command text to inspect.
+    Output: True when a word of some segment fnmatches harpo, harpo-mcp, harpocrates or harpocrates-mcp (by its last
+        path component, case-folded) and a later word of that segment is allow; otherwise False. Words are taken from
+        the normalised text, also with braces and commas read as spaces. Words made only of * and ? never count. No
+        filesystem access.
+    """
+    for text in (_normalise(command), _normalise(re.sub(r"[{},]", " ", command))):
+        for segment in _SEGMENT_END.split(text):
+            words = [w for w in _WORD_END.split(segment) if w]
+            for i, word in enumerate(words):
+                base = word.rsplit("/", 1)[-1].casefold()
+                if (_GLOB_WORD.search(base) and not _ONLY_WILDCARDS.fullmatch(base)
+                        and any(fnmatch.fnmatchcase(program, base) for program in _PROGRAMS)
+                        and _ALLOW_WORD.search(" ".join(words[i + 1:]))):
+                    return True
+    return False
+
+
 def touches(command: str, cwd: Optional[Path] = None) -> bool:
     """
     Description: Detect shell commands that could modify the allowlist or session grants so the hook
@@ -612,11 +651,14 @@ def touches(command: str, cwd: Optional[Path] = None) -> bool:
         mentions and working directories; otherwise False. Directory resolution errors propagate for
         caller refusal.
     Notes: Whether a shell command could change the allowlist or the session grants: it runs
-        `harpocrates allow`, or mentions the ~/.harpo or ~/.harpocrates directory (also in a quoted,
-        escaped, braced or globbed spelling), or runs with either as its working directory (cwd), in
-        anything but a provably read-only command.
+        `harpo allow` or `harpocrates allow` (also with a glob in the program word), or mentions the
+        ~/.harpo or ~/.harpocrates directory (also in a quoted, escaped, braced or globbed spelling),
+        or runs with either as its working directory (cwd), in anything but a provably read-only
+        command.
     """
     norm = _normalise(command)
     if _ALLOW_CMD.search(command) or _ALLOW_CMD.search(norm) or _edits_module(command) or _edits_module(norm):
+        return True
+    if _glob_runs_allow(command):
         return True
     return (_mentions_dir(command, norm) or inside_state_dir(cwd)) and not _read_only(command)
