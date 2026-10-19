@@ -26,26 +26,19 @@ _REDACTED_PLACEHOLDER = "[REDACTED]"
 
 def redact_token(token: Optional[str]) -> Optional[str]:
     """
-    Return a redacted display form of ``token``.
-
-    Returns ``None`` when ``token`` is ``None``, empty, or whitespace-only
-    so callers can cleanly distinguish "no token to show" from a redacted value.
-    Tokens shorter than ``_MIN_SAFE_LEN`` are replaced entirely with
-    ``"[REDACTED]"`` because slicing them would disclose a disproportionate
+    Description: Return a redacted display form of ``token``.
+    Parameters:
+        token: Optional token to render for display.
+    Output: None for absent/blank input, the full redaction placeholder below eight characters, or
+    an ellipsis with 1, 2, or 4 characters from each end at lengths 8, 9-10, or 11+. No side
+    effects.
+    Returns ``None`` when ``token`` is ``None``, empty, or whitespace-only so callers can cleanly
+    distinguish "no token to show" from a redacted value. Tokens shorter than ``_MIN_SAFE_LEN`` are
+    replaced entirely with ``"[REDACTED]"`` because slicing them would disclose a disproportionate
     fraction of the original (e.g. a 2-char token would leak both chars).
-
-    Examples:
-        >>> redact_token(None)
-        >>> redact_token("")
-        >>> redact_token("   ")
-        >>> redact_token("ab")
-        '[REDACTED]'
-        >>> redact_token("abcdefgh")
-        'a...h'
-        >>> redact_token("abcdefghij")
-        'ab...ij'
-        >>> redact_token("AKIAIOSFODNN7EXAMPLE")
-        'AKIA...MPLE'
+    Examples: >>> redact_token(None) >>> redact_token("") >>> redact_token(" ") >>>
+    redact_token("ab") '[REDACTED]' >>> redact_token("abcdefgh") 'a...h' >>>
+    redact_token("abcdefghij") 'ab...ij' >>> redact_token("abcdefghijklmnopqr") 'abcd...opqr'
     """
     if token is None or not token.strip():
         return None

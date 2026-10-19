@@ -111,4 +111,5 @@ enforce = [
     "cli/Harpocrates/ml/onnx_verifier.py",
     "cli/Harpocrates/ml/tokens.py",
     "cli/Harpocrates/ml/verifier.py",
+    "cli/Harpocrates/utils/redaction.py",
 ]
