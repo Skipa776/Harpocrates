@@ -38,11 +38,13 @@ dev = [
 mcp = [
     "mcp>=1.27,<2",
 ]
-# Model training and export (training pipeline at tag v1.3.0). Not needed to scan.
+# Runtime needs of `--explain` (TreeSHAP). Not needed to scan.
+explain = [
+    "xgboost>=2.0.0,<4",
+]
+# deprecated alias of explain, remove after two minor releases
 train = [
     "xgboost>=2.0.0,<4",
-    "scikit-learn>=1.3.0",
-    "onnxmltools>=1.12.0",
 ]
 
 [project.scripts]

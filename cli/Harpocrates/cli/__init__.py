@@ -314,7 +314,7 @@ def scan(
             from Harpocrates.ml.context import extract_context_from_finding
             from Harpocrates.ml.explain import explain_finding
         except ImportError:
-            error_console.print("[red]✗[/red] --explain requires xgboost: pip install xgboost")
+            error_console.print("[red]✗[/red] --explain requires xgboost: pip install 'harpocrates[explain]'")
             raise typer.Exit(code=2)
 
         payload = []

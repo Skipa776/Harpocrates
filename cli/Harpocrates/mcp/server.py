@@ -115,7 +115,7 @@ def scan_text(text: str, include_contributions: bool = False) -> List[Dict[str, 
         text: The text content to scan.
         include_contributions: If True, each finding gains an `explanation` key
                                with TreeSHAP per-feature contributions. Requires
-                               xgboost: pip install 'harpocrates[train]'.
+                               xgboost: pip install 'harpocrates[explain]'.
     """
     findings: List[Finding] = detect_text(text)
     if not include_contributions:
