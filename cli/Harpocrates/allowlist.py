@@ -8,8 +8,9 @@ rule but pointing elsewhere does not match (its target's components count). Ever
 (time, tool, path; never content), as design.md's "explicit overrides, always logged" asks.
 
 Only the user edits the list: `harpocrates allow` (add, --name, --remove, --list), or the file by hand. The hook
-refuses Bash commands that change it or call `harpocrates allow` with any flags (read-only commands pass) and the
-Claude Code settings deny Edit/Write on ~/.harpo and ~/.harpocrates.
+refuses Bash commands that change it or call `harpocrates allow` with any flags (read-only commands pass), refuses
+Edit/Write-tool calls whose target is inside ~/.harpo or ~/.harpocrates (inside_state_dir, any mode, before any
+grant or prompt), and the Claude Code settings deny Edit/Write on both as well.
 Trade-off of name rules: they are broader than a path. add_name refuses names of secret stores, of system folders
 and of anything in the home path, and asks for confirmation on the likes of `src` or `secrets`. Names are compared
 NFKC-folded and case-folded (the default macOS file system treats `.AWS` as `.aws`). A name rule never covers a path
@@ -351,17 +352,40 @@ def _mentions_dir(command: str, norm: str) -> bool:
                 or (_DOTGLOB.search(norm) and re.search(r"[*?\[]", norm)))
 
 
-def _inside_state_dir(cwd: Optional[Path]) -> bool:
-    """Whether the working directory is ~/.harpo or ~/.harpocrates, or under either (links resolved): a command run
-    there names its files without the directory, so the text alone shows nothing. Both names are checked whichever
-    one is in use, and without running the migration."""
-    if cwd is None:
+def inside_state_dir(path: Optional[Path]) -> bool:
+    """
+    Description: Whether path is ~/.harpo or ~/.harpocrates, or lies under either: links resolved, names compared
+        NFKC- and case-folded (the default macOS file system treats .HARPO as .harpo), and by file identity where
+        the folder exists. A command run there names its files without the directory, so for a shell command the
+        working directory is what shows it; for an Edit or Write tool call it is the target path.
+    Parameters:
+        path: an absolute path, or one relative to the current directory; it need not exist. None means no path.
+    Output: True when inside either folder, False when not or when path is None. Both names are checked whichever
+        one is in use, and the migration is not run. Raises OSError or RuntimeError when the path cannot be
+        resolved; callers treat that as a refusal.
+    """
+    if path is None:
         return False
-    real = cwd.resolve()
+    real = path.resolve()
     home = Path.home()  # looked up per call so a test can move HOME
+    folded = [_fold(part) for part in real.parts]
+    ids = set()
     for name in STATE_DIR_NAMES:
         state = (home / name).resolve()
-        if real == state or real.is_relative_to(state):
+        wanted = [_fold(part) for part in state.parts]
+        if folded[:len(wanted)] == wanted:
+            return True
+        try:
+            st = os.stat(state)
+        except OSError:
+            continue  # not there (yet): the name comparison above is all there is to check
+        ids.add((st.st_dev, st.st_ino))
+    for ancestor in (real, *real.parents):
+        try:
+            st = os.stat(ancestor)
+        except OSError:
+            continue
+        if (st.st_dev, st.st_ino) in ids:
             return True
     return False
 
@@ -385,4 +409,4 @@ def touches(command: str, cwd: Optional[Path] = None) -> bool:
     norm = _normalise(command)
     if _ALLOW_CMD.search(command) or _ALLOW_CMD.search(norm) or _edits_module(command) or _edits_module(norm):
         return True
-    return (_mentions_dir(command, norm) or _inside_state_dir(cwd)) and not _read_only(command)
+    return (_mentions_dir(command, norm) or inside_state_dir(cwd)) and not _read_only(command)

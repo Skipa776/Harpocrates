@@ -6,7 +6,8 @@ so a process never mixes the two folders.
 Migration (the first state_dir() call in a process finds ~/.harpo missing and ~/.harpocrates present):
   * It copies, never moves. ~/.harpocrates is only read: not changed, not deleted, no file added to it.
   * It copies only when ~/.harpo does not exist. A ~/.harpo that exists is the state, even if ~/.harpocrates holds
-    more; the agent-cannot-edit guard (allowlist.touches, the Edit deny rules) covers both folders for that reason.
+    more; the agent-cannot-edit guard (allowlist.touches for Bash, the hook's refusal of Edit/Write targets, the
+    Edit deny rules) covers both folders for that reason.
   * It fails closed. Anything doubtful keeps ~/.harpocrates in use (never an empty allowlist that lost its grants) and
     prints one line to stderr, with no file contents: ~/.harpocrates or anything inside it is a symlink or not a
     plain file or folder, ~/.harpo exists but is a symlink or a file, or a copy, fsync or rename step failed. After a

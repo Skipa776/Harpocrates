@@ -155,7 +155,7 @@ Your allowlist, session grants and install record now live in `~/.harpo`. The fi
 
 The copy is skipped, and `~/.harpocrates` stays in use, when `~/.harpocrates` or anything inside it is a symlink, when `~/.harpo` already exists as a symlink or a file, or when any step of the copy fails. One line on stderr says so, with no file contents. Harpo never starts from an empty allowlist that has lost your grants. A `~/.harpo` that already exists as a plain folder is used as it is, with no copy.
 
-After upgrading, run `harpocrates install` again. It adds `Edit(~/.harpo/**)` to the Claude Code deny rules and denies both folders in the Codex profile. Until you do, the new folder is guarded only by the Bash hook, which refuses an agent command that names either folder or runs inside it, in any quoting; the Edit and Write tools are not yet blocked from it.
+After upgrading, run `harpocrates install` again. It adds `Edit(~/.harpo/**)` to the Claude Code deny rules and denies both folders in the Codex profile. The hook already guards both folders before you do: it refuses an agent's Edit, MultiEdit, Write or NotebookEdit call on either folder (in every mode, even if you approved an edit earlier in the session) and a Bash command that names either folder or runs inside it, in any quoting. The deny rules are a second layer.
 
 The environment variables `HARPO_RUST_SCANNER`, `HARPO_RUST_TIMEOUT_SECONDS`, `HARPO_RUST_WORKERS` and `HARPO_REQUIRE_RUST` are read first. The `HARPOCRATES_` names still work. No variable moves the state folder.
 

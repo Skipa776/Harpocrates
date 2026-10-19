@@ -521,3 +521,139 @@ def test_fr_name_04_install_writes_the_deny_rules_for_both_dirs(home: Path) -> N
     cfg = tomllib.loads((home / ".codex" / "config.toml").read_text())
     filesystem = cfg["permissions"]["harpocrates"]["filesystem"]
     assert filesystem["~/.harpo"] == "deny" and filesystem["~/.harpocrates"] == "deny"
+
+
+# ---- part 5: the hook refuses Edit, MultiEdit, Write and NotebookEdit under either state directory ---------------
+
+EDIT_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
+
+
+def _edit_event(tool: str, target: str, cwd: Path, mode: str = "default") -> dict:
+    key = "notebook_path" if tool == "NotebookEdit" else "file_path"
+    return {"tool_name": tool, "cwd": str(cwd), "permission_mode": mode, "session_id": "s1", "tool_use_id": "t1",
+            "tool_input": {key: target, "old_string": "a", "new_string": "b", "content": "b", "new_source": "b"}}
+
+
+def _pre(event: dict, capsys, ask: bool = True) -> tuple[int, str]:
+    code = hooks.decide(json.dumps(event), ask=ask)
+    out = capsys.readouterr().out
+    return code, (json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else "")
+
+
+def _layout(home: Path, layout: str) -> None:
+    """none: neither folder exists (the agent writes before anything exists); old-only: the state before migration;
+    both: after it."""
+    if layout in ("old-only", "both"):
+        (home / ".harpocrates" / "grants").mkdir(parents=True)
+        (home / ".harpocrates" / "allow").write_text("# mine\n")
+    if layout == "both":
+        (home / ".harpo" / "grants").mkdir(parents=True)
+        (home / ".harpo" / "allow").write_text("# mine\n")
+    (home / "work" / "deep").mkdir(parents=True)
+
+
+# {home} and {d} (the folder name) are filled in per case. Each of these must land in the state directory.
+_EDIT_TARGETS = [
+    "~/{d}/allow",
+    "~/{d}/grants/s1.json",
+    "{home}/{d}/allow",
+    "{home}/{d}/allow.log",
+    "{home}/{d}/grants/s1.json",
+    "{home}/{d}/install.json",
+    "{home}/{d}/new-file-that-does-not-exist",
+    "{home}/{d}",
+    "{home}/{d}/",
+    "{home}/{d}/allow/",
+    "{home}/{d}/../{d}/allow",
+    "{home}/work/../{d}/allow",
+    "{home}/./{d}/./allow",
+    "{home}//{d}//allow",
+    "{home}/{d}/grants/../allow",
+    "{home}/{D}/allow",  # other case: the default macOS file system treats .HARPO as .harpo
+    "{home}/{T}/allow",
+    "{home}/{W}/allow",  # NFKC variants (full-width dot or letter), folded as the name rules are
+    "{home}/{F}/allow",
+]
+_RELATIVE_TARGETS = [  # (target, folder to run in, under the home folder)
+    ("{d}/allow", ""),
+    ("./{d}/allow", ""),
+    ("../{d}/allow", "work"),
+    ("../../{d}/allow", "work/deep"),
+    ("{d}/grants/s1.json", ""),
+]
+
+
+def _fill(template: str, home: Path, d: str) -> str:
+    n = d[1:]
+    return (template.replace("{home}", str(home)).replace("{d}", d).replace("{D}", "." + n.upper())
+            .replace("{T}", "." + n.title()).replace("{W}", "．" + n).replace("{F}", ".ｈ" + n[1:]))
+
+
+@pytest.mark.parametrize("layout", ["none", "old-only", "both"])
+@pytest.mark.parametrize("d", BOTH)
+@pytest.mark.parametrize("tool", EDIT_TOOLS)
+def test_fr_name_04_hook_refuses_edits_under_either_dir(home: Path, capsys, tool: str, d: str, layout: str) -> None:
+    _layout(home, layout)
+    for template in _EDIT_TARGETS:
+        target = _fill(template, home, d)
+        for ask in (True, False):  # with and without --ask: the refusal does not depend on a human being there
+            assert _pre(_edit_event(tool, target, home), capsys, ask) == (0, "deny"), (target, ask)
+    for template, where in _RELATIVE_TARGETS:
+        target = _fill(template, home, d)
+        assert _pre(_edit_event(tool, target, home / where), capsys) == (0, "deny"), (target, where)
+
+
+@pytest.mark.parametrize("d", BOTH)
+@pytest.mark.parametrize("tool", EDIT_TOOLS)
+def test_fr_name_04_hook_refuses_edits_through_a_symlink(home: Path, capsys, tool: str, d: str) -> None:
+    (home / "work").mkdir()
+    (home / "dangling").symlink_to(home / d, target_is_directory=True)  # the state folder does not exist yet
+    (home / "homelink").symlink_to(home, target_is_directory=True)
+    for target in ("dangling/allow", f"{home}/dangling/grants/s1.json", f"homelink/{d}/allow", f"{home}/homelink/{d}"):
+        assert _pre(_edit_event(tool, target, home), capsys) == (0, "deny"), target
+    (home / d / "grants").mkdir(parents=True)  # and once it exists
+    (home / "shortcut").symlink_to(home / d, target_is_directory=True)
+    (home / "work" / "up").symlink_to(home / "work" / ".." / d, target_is_directory=True)
+    for target in ("shortcut/allow", f"{home}/work/up/allow", f"{home}/shortcut/grants/s1.json", "shortcut"):
+        assert _pre(_edit_event(tool, target, home), capsys) == (0, "deny"), target
+
+
+@pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
+@pytest.mark.parametrize("ask", [True, False])
+def test_fr_name_04_hook_refusal_comes_before_any_grant_or_prompt(home: Path, capsys, mode: str, ask: bool) -> None:
+    (home / ".harpo").mkdir()
+    secret_file = home / ".harpo" / "allow"
+    secret_file.write_text('TOKEN = "' + "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" + '"\n')  # a canary: would be asked about
+    event = _edit_event("Edit", str(secret_file), home, mode)
+    assert _pre(event, capsys, ask) == (0, "deny")
+    # even a grant the user gave earlier in this session does not open the state directory
+    assert grants.add_pending("s1", "t0", secret_file, "Edit")
+    grants.promote("s1", "t0", "Edit")
+    assert os.path.realpath(secret_file) in grants.granted("s1")
+    assert _pre(event, capsys, ask) == (0, "deny")
+
+
+@pytest.mark.parametrize("d", BOTH)
+@pytest.mark.parametrize("tool", EDIT_TOOLS)
+def test_fr_name_04_hook_leaves_other_edits_alone(home: Path, capsys, tool: str, d: str) -> None:
+    _layout(home, "both")
+    (home / "work" / d).mkdir()  # a project folder that happens to carry the name is not the state directory
+    for target in (f"{home}/work/notes.txt", f"{home}/work/{d}/x", f"{home}/{d}-not/x", f"{home}/{d}x/x",
+                   f"{home}/{d}/../work/y", f"{home}/.config/x", "~/notes.txt", f"{home}/work/deep/z"):
+        assert _pre(_edit_event(tool, target, home), capsys) == (0, ""), target
+    assert _pre(_edit_event(tool, f"{d}/x", home / "work"), capsys) == (0, "")  # relative to a project folder
+
+
+@pytest.mark.parametrize("tool", EDIT_TOOLS)
+def test_fr_name_04_hook_refuses_when_the_target_cannot_be_placed(home: Path, capsys, monkeypatch, tool: str) -> None:
+    def boom(*args, **kwargs):
+        raise OSError(errno.EIO, "cannot resolve")
+
+    monkeypatch.setattr(allowlist, "inside_state_dir", boom)
+    assert _pre(_edit_event(tool, f"{home}/work/notes.txt", home), capsys) == (0, "deny")  # fail closed
+
+
+def test_fr_name_04_hook_refusal_text_points_to_the_user(home: Path, capsys) -> None:
+    hooks.decide(json.dumps(_edit_event("Write", "~/.harpo/allow", home)), ask=True)
+    reason = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith("Only the user can change the Harpocrates allowlist")

@@ -124,6 +124,8 @@ MATCH_TIMEOUT = 5.0  # seconds for one pattern match over a tree (runs in a chil
 BUDGET = 25.0  # seconds for the whole decision; Codex's documented example hook timeout is 30
 _deadline = float("inf")
 _EDIT_TOOLS = {"Edit", "MultiEdit", "Write", "NotebookEdit"}
+STATE_REFUSAL = ("Only the user can change the Harpocrates allowlist. Ask them to run "
+                 "`harpocrates allow <path>` in their own terminal.")
 _PROMPTING_MODES = {"default", "acceptEdits", "plan", "auto"}  # auto: a hook's ask forces a real prompt
 _can_ask = False
 
@@ -388,13 +390,22 @@ def _adds_placeholder(tool: str, args: dict, path: Path) -> bool:
 
 def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
     """Edit, MultiEdit, Write or NotebookEdit (the tool result echoes the edited file back to the model).
-    Deny an edit that would add a placeholder first (_adds_placeholder; any mode, granted or not). Then a
+    First of all, deny a target inside ~/.harpo or ~/.harpocrates (allowlist.inside_state_dir; any mode, with or
+    without --ask, granted or not; a target that cannot be placed is refused too): only the user changes the
+    allowlist, and a ~/.harpo the agent made would replace the migrated one. Then deny an edit that would add a
+    placeholder (_adds_placeholder; any mode, granted or not). Then a
     secret-bearing file asks the user
     when a human can answer, after recording the call as pending so `--post` can turn Yes into a grant; with no
     session_id or tool_use_id to record it under, or no human, it is refused (fail closed)."""
     from Harpocrates import allowlist, grants
 
     path = cwd / os.path.expanduser(args.get("file_path") or args["notebook_path"])
+    try:
+        in_state_dir = allowlist.inside_state_dir(path)
+    except (OSError, RuntimeError, ValueError):  # the target cannot be placed: fail closed
+        in_state_dir = True
+    if in_state_dir:
+        return _deny(STATE_REFUSAL)
     if _adds_placeholder(tool, args, path):
         return _deny("That edit would write a Harpocrates placeholder into the file, replacing a real secret with a "
                      "fake value. Edit around the secret, or ask the user to change it.")
@@ -1080,8 +1091,7 @@ def _bash(command: str, cwd: Path) -> int:
     from Harpocrates.read import Redactor
 
     if allowlist.touches(command, cwd):
-        return _deny("Only the user can change the Harpocrates allowlist. Ask them to run "
-                     "`harpocrates allow <path>` in their own terminal.")
+        return _deny(STATE_REFUSAL)
     env_reason = _check_env(command)
     if env_reason:
         return _deny(env_reason)
