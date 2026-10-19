@@ -108,28 +108,37 @@ Security modules (`hooks.py`, `allowlist.py`, `grants.py`, `harness.py`, `mcp/`,
 
 ## 5. Lines of code before and after (FR-CLEAN-04)
 
-Code lines (non-blank, non-comment) in tracked files. "Before" is `main` at `b2f9873`, counted by `bench/results/r0-before/tools/loc.py`. "After" is measured after the last approved cut.
+Two views, because the counter used for "before" (`bench/results/r0-before/tools/loc.py`) treats docstrings as code. R0 also gave 423 functions and classes multi-line docstrings (DOC-DOCSTRING-01), which inflates that count.
 
-| Package | Files | Before | After |
+**Package executable code** (`cli/Harpocrates`, non-blank, non-comment lines, docstrings excluded, from `git show` at each revision):
+
+| Package | Before (`origin/main` `b2f9873`) | After (`r0/cleanup` `0667e92`) | Change |
 | --- | ---: | ---: | ---: |
-| `cli/Harpocrates` top-level modules | 7 | 2,161 | |
-| `cli/Harpocrates/cli` | 2 | 432 | |
-| `cli/Harpocrates/core` | 6 | 1,990 | |
-| `cli/Harpocrates/detectors` | 4 | 218 | |
-| `cli/Harpocrates/mcp` | 2 | 144 | |
-| `cli/Harpocrates/ml` | 12 | 2,477 | |
-| `cli/Harpocrates/training` | 8 | 4,133 | |
-| `cli/Harpocrates/utils` | 3 | 132 | |
-| `cli/tests` | 53 | 8,086 | |
-| `core` (Rust) | 9 | 1,593 | |
-| `bench` | 9 | 3,177 | |
-| `scripts` | 22 | 6,865 | |
-| `docs` | 24 | 1,456 | |
-| `plugins` | 11 | 1,704 | |
-| root, `.github`, `.claude-plugin` | 14 | 601 | |
-| **Total** | 186 | **35,169** | |
+| `training/` | 3,374 | 0 (untracked) | −3,374 |
+| top-level modules | 1,857 | 2,281 | +424: `paths.py`, `envvars.py`, `deprecated.py` and the SEC-08/09 guard work |
+| `ml/` | 1,803 | 1,820 | +17 |
+| `core/` | 1,734 | 1,742 | +8 |
+| `cli/` | 398 | 467 | +69 (help moved into `help=`, SEC-01 output masking) |
+| `detectors/` | 149 | 149 | 0 |
+| `mcp/` | 82 | 82 | 0 |
+| `utils/` | 63 | 86 | +23 (SEC-01 `mask_secrets`) |
+| **Package total** | **9,460** | **6,627** | **−2,833 (−30%)** |
 
-The line counts in §1–§3 are total lines from `wc -l`, so they run higher than the code-line counts here.
+**Whole repository** (tracked files, `loc.py`, docstrings counted as code):
+
+| Group | Files before | Code lines before | Files after | Code lines after |
+| --- | ---: | ---: | ---: | ---: |
+| `cli/Harpocrates` (all) | 46 | 11,309 | 39 | 11,152 |
+| `cli/tests` | 53 | 8,086 | 66 | 10,261 |
+| `core` (Rust) | 9 | 1,593 | 9 | 1,594 |
+| `bench` | 9 | 3,177 | 30 | 4,663 (includes the R0 snapshot tools, the moved canary generator and demo measurement) |
+| `scripts` | 22 | 6,865 | 2 | 137 |
+| `docs` | 24 | 1,456 | 21 | 1,059 |
+| `plugins` | 11 | 1,704 | 11 | 1,972 |
+| root, `.github`, `.claude-plugin` | 14 | 601 | 15 | 811 |
+| **Total** | **186** | **35,169** | **193** | **31,649** |
+
+Shipped code fell by 30%. Tests grew by 2,175 lines: 64 tests left with the training code, and new tests were added for FR-CORE-07, SEC-01, SEC-07, SEC-08, SEC-09, FR-NAME, DOC-DOCSTRING-01 and DOC-DEMO.
 
 ## 6. Baseline behavior (FR-CLEAN-02)
 
