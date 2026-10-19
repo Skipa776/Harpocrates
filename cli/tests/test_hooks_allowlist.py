@@ -257,7 +257,7 @@ def test_fr_read_05_claude_code_settings_use_ask_and_protect_allowlist() -> None
     cfg = claude_code_settings()
     assert cfg["hooks"]["PreToolUse"][0]["hooks"][0]["command"].count("-m Harpocrates.hooks --ask || exit 2") == 1
     deny = cfg["permissions"]["deny"]
-    assert "Edit(~/.harpocrates/**)" in deny
+    assert "Edit(~/.harpo/**)" in deny and "Edit(~/.harpocrates/**)" in deny
     assert not any(rule.startswith("Write(") for rule in deny)  # Claude Code ignores Write(path) rules
     assert "--ask" not in codex_config()
 

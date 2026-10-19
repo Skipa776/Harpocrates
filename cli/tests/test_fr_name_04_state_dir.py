@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from Harpocrates import allowlist, envvars, grants, hooks, install, paths
+from Harpocrates import allowlist, envvars, grants, harness, hooks, install, paths
 
 SID = "sess-1"
 CANARY_PATH = "/proj/canary-0123456789/app.py"  # in the fixture files, so a leak into a message is visible
@@ -484,3 +484,40 @@ def test_fr_name_04_name_rules_never_cover_a_path_under_either_dir(home: Path, n
     assert not allowlist.allowed(inside)
 
 
+# ---- part 4: deny rules for both directories --------------------------------------------------------------------
+
+def test_fr_name_04_claude_settings_deny_edits_of_both_dirs() -> None:
+    deny = harness.claude_code_settings()["permissions"]["deny"]
+    assert "Edit(~/.harpo/**)" in deny and "Edit(~/.harpocrates/**)" in deny
+    assert not any(rule.startswith("Write(") for rule in deny)  # Claude Code ignores Write(path) rules
+
+
+def test_fr_name_04_codex_profile_denies_both_dirs() -> None:
+    tomllib = pytest.importorskip("tomllib")
+    cfg = tomllib.loads(harness.codex_config())
+    filesystem = cfg["permissions"][cfg["default_permissions"]]["filesystem"]
+    assert filesystem["~/.harpo"] == "deny" and filesystem["~/.harpocrates"] == "deny"
+    for d in harness.SENSITIVE_HOME_DIRS:  # the secret folders are still there
+        assert filesystem[d] == "deny"
+
+
+def test_fr_name_04_setup_output_lists_both_deny_rules() -> None:
+    from typer.testing import CliRunner
+
+    from Harpocrates.cli import app
+
+    runner = CliRunner()
+    claude = runner.invoke(app, ["setup", "claude-code"])
+    assert claude.exit_code == 0 and "Edit(~/.harpo/**)" in claude.output and "Edit(~/.harpocrates/**)" in claude.output
+    codex = runner.invoke(app, ["setup", "codex"])
+    assert codex.exit_code == 0 and '"~/.harpo" = "deny"' in codex.output and '"~/.harpocrates" = "deny"' in codex.output
+
+
+def test_fr_name_04_install_writes_the_deny_rules_for_both_dirs(home: Path) -> None:
+    tomllib = pytest.importorskip("tomllib")
+    install.install_harnesses(["claude-code", "codex"])
+    deny = json.loads((home / ".claude" / "settings.json").read_text())["permissions"]["deny"]
+    assert "Edit(~/.harpo/**)" in deny and "Edit(~/.harpocrates/**)" in deny
+    cfg = tomllib.loads((home / ".codex" / "config.toml").read_text())
+    filesystem = cfg["permissions"]["harpocrates"]["filesystem"]
+    assert filesystem["~/.harpo"] == "deny" and filesystem["~/.harpocrates"] == "deny"

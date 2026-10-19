@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from Harpocrates.paths import STATE_DIR_NAMES
+
 # File names that hold secrets far more often than not, matched at any depth.
 SENSITIVE_FILES = (
     ".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ecdsa*", "id_ed25519*",
@@ -24,6 +26,9 @@ SENSITIVE_FILES = (
 )
 # Credential stores in the home directory, blocked as a whole.
 SENSITIVE_HOME_DIRS = ("~/.ssh", "~/.aws", "~/.azure", "~/.config/gcloud", "~/.kube", "~/.docker", "~/.gnupg")
+# The user's own data (the allowlist, the grants, the install record): ~/.harpo, and ~/.harpocrates until it is gone.
+# Both are protected from the agent's edits whichever one is in use (FR-NAME-04, paths.py).
+STATE_DIRS = tuple(f"~/{name}" for name in STATE_DIR_NAMES)
 
 MCP_TOOLS = ("mcp__harpocrates__safe_read", "mcp__harpocrates__safe_grep")
 AGENT_NOTE = (
@@ -126,7 +131,8 @@ def claude_code_settings() -> dict:
     """Lines for ~/.claude/settings.json. `//**/` anchors at the filesystem root, so a rule in user
     settings covers every project and any file outside the working directory."""
     deny = [f"Read(//**/{name})" for name in SENSITIVE_FILES] + [f"Read({d}/**)" for d in SENSITIVE_HOME_DIRS]
-    deny.append("Edit(~/.harpocrates/**)")  # only the user edits the allowlist; Edit rules cover Write too
+    # only the user edits the allowlist; Edit rules cover Write too
+    deny.extend(f"Edit({d}/**)" for d in STATE_DIRS)
     command, _ = mcp_server()
     # Content-aware: also blocks built-in reads of any other file that holds a secret (Harpocrates/hooks.py).
     # --ask: an edit of such a file prompts the user instead of being refused (reads are always refused, FR-READ-06).
@@ -147,7 +153,7 @@ def codex_config_parts() -> tuple[str, str]:
     content-aware check as Claude Code's: it refuses shell commands that would print a file holding a secret."""
     command, args = mcp_server()
     files = "\n".join(f'"**/{name}" = "deny"' for name in SENSITIVE_FILES)
-    dirs = "\n".join(f'"{d}" = "deny"' for d in SENSITIVE_HOME_DIRS)
+    dirs = "\n".join(f'"{d}" = "deny"' for d in (*SENSITIVE_HOME_DIRS, *STATE_DIRS))
     root = 'default_permissions = "harpocrates"\n'
     tables = f"""[mcp_servers.harpocrates]
 command = {json.dumps(command, ensure_ascii=False)}
@@ -210,7 +216,7 @@ safe_read / safe_grep, in every mode. Only an EDIT of such a file prompts you ("
 file), once per file and session, even in accept-edits mode; Yes lets Claude change it (and read it
 as-is, so its values reach the provider), No leaves it untouched. A folder of known false alarms (hashes,
 build output) can be allowed for good with `harpocrates allow <path>`; each pass is logged in
-~/.harpocrates/allow.log. The deny rules above still win over the allowlist.
+~/.harpo/allow.log. The deny rules above still win over the allowlist.
 Limit: a script that opens files itself gets through; the egress
 gate covers that. For OS-level blocking of the secret paths, see the sandbox step in docs/setup.md."""
     if harness == "codex":

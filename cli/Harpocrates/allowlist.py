@@ -9,7 +9,7 @@ rule but pointing elsewhere does not match (its target's components count). Ever
 
 Only the user edits the list: `harpocrates allow` (add, --name, --remove, --list), or the file by hand. The hook
 refuses Bash commands that change it or call `harpocrates allow` with any flags (read-only commands pass) and the
-Claude Code settings deny Edit/Write on ~/.harpocrates.
+Claude Code settings deny Edit/Write on ~/.harpo and ~/.harpocrates.
 Trade-off of name rules: they are broader than a path. add_name refuses names of secret stores, of system folders
 and of anything in the home path, and asks for confirmation on the likes of `src` or `secrets`. Names are compared
 NFKC-folded and case-folded (the default macOS file system treats `.AWS` as `.aws`). A name rule never covers a path
