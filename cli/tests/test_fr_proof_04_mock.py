@@ -185,3 +185,38 @@ def test_fr_proof_04_mock_a_request_without_tools_gets_a_plain_text_turn() -> No
     assert mock.turn_for({"input": "x", "tools": [{"type": "function"}]}, "responses", turns) is turns[0]
     assert mock.turn_for({"input": "x"}, "responses", turns) == {}
     assert mock.turn_for("not an object", "responses", turns) == {}
+
+
+# --- no header outside the redaction set can hold a credential -------------------------------------------------------
+
+import glob  # noqa: E402
+
+# Header names that the agents were seen to send (G2 probe run 20261019T175710Z-g2) and that are not redacted. Each one
+# carries a version, an id, a content-negotiation value or a fixed flag; none is a credential. A header that is neither
+# credential-named nor in this set makes the test below fail, so a new agent version cannot slip a new header, whose value
+# might be a credential, into the recording unreviewed.
+BENIGN_HEADERS = frozenset({
+    "accept", "accept-encoding", "anthropic-beta", "anthropic-dangerous-direct-browser-access", "anthropic-version",
+    "cache-control", "connection", "content-encoding", "content-length", "content-type", "host", "openai-beta", "originator", "thread-id",
+    "transfer-encoding", "upgrade", "user-agent", "version", "x-app", "x-client-request-id", "x-codex-beta-features",
+    "x-codex-routing-hint", "x-codex-turn-metadata", "x-codex-turn-state", "x-codex-window-id",
+})
+BENIGN_PREFIXES = ("x-stainless-", "sec-websocket-")
+
+
+def test_fr_proof_04_mock_no_header_outside_the_redaction_set_could_hold_a_credential() -> None:
+    reports = sorted(glob.glob(str(Path(mock.__file__).resolve().parent / "results" / "proof" / "g2-probes-*.json")))
+    assert reports, "the committed G2 probe report is missing"
+    seen: set[str] = set()
+    for path in reports:
+        for probe in json.loads(Path(path).read_text())["probes"]:
+            transport = probe.get("observations", {}).get("transport")
+            if transport:
+                seen |= set(transport["header_names"])
+    assert len(seen) > 20
+    kept = {name for name in seen if not mock.is_credential_header(name)}
+    unreviewed = {name for name in kept if name not in BENIGN_HEADERS and not name.startswith(BENIGN_PREFIXES)}
+    assert not unreviewed, f"review these headers, then add them to BENIGN_HEADERS or to the redaction words: {sorted(unreviewed)}"
+    # And the ones that were redacted really are credential-named: the session ids, keys and tokens among them.
+    redacted = seen - kept
+    assert {"x-api-key", "authorization", "session-id", "x-claude-code-session-id", "chatgpt-account-id"} <= redacted
