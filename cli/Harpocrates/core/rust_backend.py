@@ -39,12 +39,30 @@ _ML_BATCH_SIZE = 1024
 
 
 class RustScannerError(RuntimeError):
-    """Raised when the native scanner cannot be located or executed."""
+    """
+    Description: Represent failures locating, executing, or validating results from the native
+        scanner.
+    Parameters:
+        *args: Exception arguments forwarded to RuntimeError.
+    Output: RuntimeError instances carrying scanner failure details.
+    Notes: Raised when the native scanner cannot be located or executed.
+    """
 
 
 @dataclass(frozen=True)
 class NativeFileResult:
-    """Result and accounting metadata for one native file scan."""
+    """
+    Description: Represent findings and accounting metadata for one native file scan.
+    Parameters:
+        path: Scanned or attempted file path.
+        findings: Mapped Python findings for the file.
+        scanned: Whether the file was successfully scanned.
+        line_count: Number of scanned lines.
+        bytes_scanned: Number of scanned bytes.
+        error: Failure explanation, or None.
+    Output: Immutable dataclass instances exposing per-file scan results and metadata.
+    Notes: Result and accounting metadata for one native file scan.
+    """
 
     path: Path
     findings: list[Finding]
@@ -56,38 +74,87 @@ class NativeFileResult:
 
 @dataclass(frozen=True)
 class NativeBatchResult:
-    """Validated aggregate returned by the versioned native protocol."""
+    """
+    Description: Represent a validated aggregate returned by the versioned native protocol.
+    Parameters:
+        files: Per-file scan results in protocol order.
+    Output: Immutable dataclass instances with aggregate findings, scanned-file and line counts, and
+        errors.
+    Notes: Validated aggregate returned by the versioned native protocol.
+    """
 
     files: list[NativeFileResult]
 
     @property
     def findings(self) -> list[Finding]:
+        """
+        Description: Flatten findings across all file results for consumers.
+        Parameters: None
+        Output: List of all findings in file and finding order.
+        """
         return [finding for result in self.files for finding in result.findings]
 
     @property
     def scanned_files(self) -> int:
+        """
+        Description: Count successfully scanned file results.
+        Parameters: None
+        Output: Integer sum of the scanned flags.
+        """
         return sum(result.scanned for result in self.files)
 
     @property
     def total_lines(self) -> int:
+        """
+        Description: Total line counts only for successfully scanned files.
+        Parameters: None
+        Output: Integer count of scanned lines.
+        """
         return sum(result.line_count for result in self.files if result.scanned)
 
     @property
     def errors(self) -> list[str]:
+        """
+        Description: Collect file-qualified native scan errors for reporting.
+        Parameters: None
+        Output: List of path-prefixed error strings for results whose error is not None.
+        """
         return [
             f"{result.path}: {result.error}" for result in self.files if result.error is not None
         ]
 
 
 class RustScannerBackend:
-    """Invoke the native scanner and map its candidates to Python findings."""
+    """
+    Description: Represent an invocation boundary that maps native scanner candidates to Python
+        findings.
+    Parameters:
+        executable: Path to the native scanner executable.
+    Output: Instances providing native text, file, batch, and directory scans with optional Python
+        ML verification.
+    Notes: Invoke the native scanner and map its candidates to Python findings.
+    """
 
     def __init__(self, executable: str | Path) -> None:
+        """
+        Description: Store the native executable path for subsequent scanner calls.
+        Parameters:
+            executable: String or Path naming the scanner executable.
+        Output: None; sets executable as a Path without validating or launching it.
+        """
         self.executable = Path(executable)
 
     @classmethod
     def discover(cls, *, required: bool = False) -> Optional["RustScannerBackend"]:
-        """Find an installed binary or a binary built in this source checkout."""
+        """
+        Description: Find an executable scanner using configured, installed, and source-checkout
+            locations in order.
+        Parameters:
+            required: Whether absence of an executable must raise an error.
+        Output: Backend instance or None when optional and absent; raises RustScannerError when
+            required and missing. Path expansion or resolution errors may propagate.
+        Notes: Find an installed binary or a binary built in this source checkout.
+        """
         candidates: list[Path] = []
         configured = envvars.getenv(_BINARY_ENV)
         if configured:
@@ -116,7 +183,15 @@ class RustScannerBackend:
         return None
 
     def scan_text(self, text: str, *, file: Optional[str] = None) -> list[Finding]:
-        """Scan text natively, excluding unverified ML-only candidates."""
+        """
+        Description: Scan text natively while excluding unverified ML-only candidates.
+        Parameters:
+            text: Text to send to the native process.
+            file: Optional file label for findings.
+        Output: List of non-ML findings; invokes the scanner and raises RustScannerError for
+            execution or result validation failures.
+        Notes: Scan text natively, excluding unverified ML-only candidates.
+        """
         findings = self._collect_text(text, file=file)
         return [finding for finding in findings if finding.evidence != EvidenceType.ML]
 
@@ -126,7 +201,15 @@ class RustScannerBackend:
         *,
         max_bytes: Optional[int] = None,
     ) -> list[Finding]:
-        """Scan a file natively, excluding unverified ML-only candidates."""
+        """
+        Description: Scan one file natively while excluding unverified ML-only candidates.
+        Parameters:
+            path: File path to scan.
+            max_bytes: Optional native read limit.
+        Output: List of findings; invokes a native batch scan and raises RustScannerError for
+            invalid single-file results, scan errors, or protocol failures.
+        Notes: Scan a file natively, excluding unverified ML-only candidates.
+        """
         batch = self.scan_files([Path(path)], max_bytes=max_bytes)
         if len(batch.files) != 1:
             raise RustScannerError("Rust scanner returned an invalid single-file result")
@@ -141,7 +224,15 @@ class RustScannerBackend:
         *,
         max_bytes: Optional[int] = None,
     ) -> NativeBatchResult:
-        """Scan files in one versioned native process, sorted deterministically."""
+        """
+        Description: Scan deterministically sorted files through one versioned native process.
+        Parameters:
+            paths: File paths to scan.
+            max_bytes: Optional per-file native read limit.
+        Output: NativeBatchResult excluding unverified ML-only candidates; launches the scanner and
+            raises RustScannerError on execution or validation failure.
+        Notes: Scan files in one versioned native process, sorted deterministically.
+        """
         ordered_paths = sorted(Path(path) for path in paths)
         request = {
             "protocol_version": PROTOCOL_VERSION,
@@ -161,7 +252,18 @@ class RustScannerBackend:
         max_file_size: int,
         ignore_patterns: set[str],
     ) -> NativeBatchResult:
-        """Traverse and scan a directory natively with Python-owned policy."""
+        """
+        Description: Traverse and scan a directory natively using Python-owned policy.
+        Parameters:
+            root: Directory to scan.
+            recursive: Whether to traverse subdirectories.
+            max_file_size: Maximum file size accepted by native traversal.
+            ignore_patterns: Patterns passed to native traversal for exclusion.
+        Output: NativeBatchResult excluding ML-only candidates; invokes the scanner and raises
+            RustScannerError for execution, timeout configuration, or protocol failures. Path
+            resolution errors may propagate.
+        Notes: Traverse and scan a directory natively with Python-owned policy.
+        """
         return self._collect_directory(
             root,
             recursive=recursive,
@@ -180,7 +282,21 @@ class RustScannerBackend:
         ignore_patterns: set[str],
         ml_threshold: float = 0.5,
     ) -> NativeBatchResult:
-        """Traverse once in Rust and verify candidates in bounded Python batches."""
+        """
+        Description: Traverse once in Rust and verify non-regex candidates in bounded Python
+            batches.
+        Parameters:
+            root: Directory to scan.
+            verifier: Python ML verifier for non-regex candidates.
+            recursive: Whether to traverse subdirectories.
+            max_file_size: Native file-size limit and Python text-read character limit.
+            ignore_patterns: Patterns excluded by native traversal.
+            ml_threshold: Minimum ML verification score, defaulting to 0.5.
+        Output: NativeBatchResult retaining regex and verified findings; launches native scanning
+            and rereads candidate files. Raises RustScannerError for native or reread failures; path
+            resolution and verifier errors may propagate.
+        Notes: Traverse once in Rust and verify candidates in bounded Python batches.
+        """
         batch = self._collect_directory(
             root,
             recursive=recursive,
@@ -192,6 +308,12 @@ class RustScannerBackend:
         verified_by_file: dict[str, list[Finding]] = {}
 
         def flush_pending() -> None:
+            """
+            Description: Verify a bounded pending batch and distribute accepted findings by file.
+            Parameters: None
+            Output: None; updates verified_by_file and clears pending after verification. Verifier
+                errors propagate.
+            """
             if not pending:
                 return
             verified = _apply_ml_verification_with_contexts(
@@ -249,6 +371,19 @@ class RustScannerBackend:
         ignore_patterns: set[str],
         include_ml_candidates: bool,
     ) -> NativeBatchResult:
+        """
+        Description: Request native traversal and validate ordered unique results confined to the
+            resolved scan root.
+        Parameters:
+            root: Directory root to resolve and scan.
+            recursive: Whether traversal is recursive.
+            max_file_size: Maximum file size passed to native traversal.
+            ignore_patterns: Exclusion patterns serialized in sorted order.
+            include_ml_candidates: Whether to retain unverified ML-only findings.
+        Output: Validated NativeBatchResult; launches the scanner and raises RustScannerError for
+            invalid paths, metadata, timeout settings, or execution failures. Path resolution errors
+            may propagate.
+        """
         root_path = Path(root).resolve()
         request = {
             "protocol_version": PROTOCOL_VERSION,
@@ -281,6 +416,13 @@ class RustScannerBackend:
 
     @staticmethod
     def _directory_timeout() -> float:
+        """
+        Description: Read and validate the configured native directory-scan timeout.
+        Parameters: None
+        Output: Positive float from HARPO_RUST_TIMEOUT_SECONDS or HARPOCRATES_RUST_TIMEOUT_SECONDS,
+            defaulting to 300 seconds; raises RustScannerError for nonnumeric or nonpositive values,
+            including NaN.
+        """
         raw_timeout = envvars.getenv(_DIRECTORY_TIMEOUT_ENV)
         if raw_timeout is None:
             return _DEFAULT_DIRECTORY_TIMEOUT_SECONDS
@@ -304,7 +446,19 @@ class RustScannerBackend:
         max_bytes: Optional[int] = None,
         ml_threshold: float = 0.5,
     ) -> list[Finding]:
-        """Scan a file in Rust and call the existing Python ML verifier."""
+        """
+        Description: Scan a file in Rust and apply the existing Python ML verifier to non-regex
+            candidates.
+        Parameters:
+            path: File path to scan and reread for verification.
+            verifier: Python ML verifier.
+            max_bytes: Optional native byte limit, also used as the Python text-read character
+                limit.
+            ml_threshold: Minimum ML verification score, defaulting to 0.5.
+        Output: Regex and verified findings; invokes scanning and rereads content when findings
+            exist. Raises RustScannerError for native or read failures; verifier errors propagate.
+        Notes: Scan a file in Rust and call the existing Python ML verifier.
+        """
         path_obj = Path(path)
         findings = self._collect_file(path_obj, max_bytes=max_bytes)
         if not findings:
@@ -321,6 +475,14 @@ class RustScannerBackend:
         return self._verify_candidates(findings, content, verifier, ml_threshold)
 
     def _collect_text(self, text: str, *, file: Optional[str]) -> list[Finding]:
+        """
+        Description: Invoke native text scanning and map all returned candidates.
+        Parameters:
+            text: Text sent on standard input.
+            file: Optional file label added to invocation and mapped findings.
+        Output: List of findings including ML candidates; raises RustScannerError for execution,
+            payload-shape, or mapping failures.
+        """
         arguments = [str(self.executable), "scan-text"]
         if file is not None:
             arguments.extend(("--file", file))
@@ -328,6 +490,14 @@ class RustScannerBackend:
         return self._map_findings(payload, file=file)
 
     def _collect_file(self, path: Path, *, max_bytes: Optional[int]) -> list[Finding]:
+        """
+        Description: Invoke native file scanning with an optional read limit and map all candidates.
+        Parameters:
+            path: File path sent to the scanner.
+            max_bytes: Optional maximum byte count for the native read.
+        Output: List of findings including ML candidates; launches the scanner and raises
+            RustScannerError for execution or result failures.
+        """
         arguments = [str(self.executable), "scan-file", str(path)]
         if max_bytes is not None:
             arguments.extend(("--max-bytes", str(max_bytes)))
@@ -341,6 +511,15 @@ class RustScannerBackend:
         input_text: Optional[str] = None,
         timeout: Optional[float] = 60,
     ) -> Any:
+        """
+        Description: Run the native scanner and decode its successful JSON response.
+        Parameters:
+            arguments: Subprocess argument list.
+            input_text: Optional text sent on standard input.
+            timeout: Subprocess timeout in seconds, or None; defaults to 60.
+        Output: Decoded JSON value; launches a subprocess with captured output. Raises
+            RustScannerError for OS or subprocess errors, nonzero exit status, or invalid JSON.
+        """
         try:
             completed = subprocess.run(
                 arguments,
@@ -364,6 +543,13 @@ class RustScannerBackend:
 
     @staticmethod
     def _expect_findings_payload(payload: Any) -> list[dict[str, Any]]:
+        """
+        Description: Validate the outer shape of a native findings response.
+        Parameters:
+            payload: Decoded native response to check.
+        Output: Original list of dictionaries; raises RustScannerError if the payload is not a list
+            of dictionaries.
+        """
         if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
             raise RustScannerError("Rust scanner returned an invalid result shape")
         return payload
@@ -376,6 +562,17 @@ class RustScannerBackend:
         *,
         include_ml_candidates: bool = False,
     ) -> NativeBatchResult:
+        """
+        Description: Validate versioned batch paths and accounting invariants before mapping native
+            findings.
+        Parameters:
+            payload: Decoded batch response.
+            requested_paths: Expected paths in exact response order.
+            include_ml_candidates: Whether to retain unverified ML-only findings.
+        Output: NativeBatchResult; raises RustScannerError for invalid version, shape, path order,
+            metadata, or findings. Unscanned files must contain only an error and zero accounting;
+            scanned files cannot contain an error.
+        """
         if not isinstance(payload, dict):
             raise RustScannerError("Rust scanner returned an invalid batch result shape")
         if payload.get("protocol_version") != PROTOCOL_VERSION:
@@ -439,6 +636,15 @@ class RustScannerBackend:
 
     @staticmethod
     def _map_findings(payload: list[dict[str, Any]], *, file: Optional[str]) -> list[Finding]:
+        """
+        Description: Map native candidates to Python findings with Python-owned category and
+            severity inference.
+        Parameters:
+            payload: List of raw finding dictionaries.
+            file: Optional file label attached to every mapped finding.
+        Output: List of Finding objects; raises RustScannerError for missing, invalidly typed, or
+            invalid-valued payload fields.
+        """
         findings = []
         for index, raw in enumerate(payload):
             try:
@@ -500,6 +706,16 @@ class RustScannerBackend:
         verifier: "Verifier",
         ml_threshold: float,
     ) -> list[Finding]:
+        """
+        Description: Retain regex findings and verify all remaining candidates against source
+            context.
+        Parameters:
+            findings: Native findings to partition by evidence.
+            content: Full or bounded source text used for verification context.
+            verifier: Python ML verifier.
+            ml_threshold: Minimum verification score.
+        Output: Regex findings followed by verified non-regex findings; verifier errors propagate.
+        """
         regex_findings = [finding for finding in findings if finding.evidence == EvidenceType.REGEX]
         candidates = [finding for finding in findings if finding.evidence != EvidenceType.REGEX]
         if not candidates:
@@ -514,6 +730,13 @@ class RustScannerBackend:
 
 
 def _optional_int(value: object) -> Optional[int]:
+    """
+    Description: Convert optional integer metadata while explicitly rejecting booleans.
+    Parameters:
+        value: Integer, integer string, or None to convert.
+    Output: Integer or None; raises TypeError for booleans and unsupported types, or ValueError for
+        invalid integer strings.
+    """
     if value is None:
         return None
     if isinstance(value, bool):

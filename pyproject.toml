@@ -107,6 +107,7 @@ enforce = [
     "cli/Harpocrates/core/classification.py",
     "cli/Harpocrates/core/detector.py",
     "cli/Harpocrates/core/result.py",
+    "cli/Harpocrates/core/rust_backend.py",
     "cli/Harpocrates/core/scanner.py",
     "cli/Harpocrates/detectors/entropy_detector.py",
     "cli/Harpocrates/detectors/path_tokens.py",
