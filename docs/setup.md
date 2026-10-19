@@ -149,6 +149,16 @@ codex sandbox -- cat .env           # cat: .env: Operation not permitted
 
 **Limit:** the profile is off when Codex runs unsandboxed, with `sandbox_mode = "danger-full-access"` or `--dangerously-bypass-approvals-and-sandbox`.
 
+## Migrating from ~/.harpocrates
+
+Your allowlist, session grants and install record now live in `~/.harpo`. The first time anything needs them, `~/.harpocrates` is copied there. It is a copy, not a move: `~/.harpocrates` stays exactly as it was, and once `~/.harpo` exists it is no longer read. The copy is made in a temporary folder inside your home folder and renamed into place, so no process ever sees half of it, and two processes starting together cannot corrupt it.
+
+The copy is skipped, and `~/.harpocrates` stays in use, when `~/.harpocrates` or anything inside it is a symlink, when `~/.harpo` already exists as a symlink or a file, or when any step of the copy fails. One line on stderr says so, with no file contents. Harpo never starts from an empty allowlist that has lost your grants. A `~/.harpo` that already exists as a plain folder is used as it is, with no copy.
+
+After upgrading, run `harpocrates install` again. It adds `Edit(~/.harpo/**)` to the Claude Code deny rules and denies both folders in the Codex profile. Until you do, the new folder is guarded only by the Bash hook, which refuses an agent command that names either folder or runs inside it, in any quoting; the Edit and Write tools are not yet blocked from it.
+
+The environment variables `HARPO_RUST_SCANNER`, `HARPO_RUST_TIMEOUT_SECONDS`, `HARPO_RUST_WORKERS` and `HARPO_REQUIRE_RUST` are read first. The `HARPOCRATES_` names still work. No variable moves the state folder.
+
 ## What was verified
 
 | Check | Result |
