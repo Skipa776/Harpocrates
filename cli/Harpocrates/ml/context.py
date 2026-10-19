@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Pattern, Sequence, Tuple
 
+from Harpocrates.core.classification import _VAR_NAME_WINDOW
 from Harpocrates.ml.tokens import TokenMatch
 
 if TYPE_CHECKING:
@@ -152,11 +153,13 @@ def feature_var_name(line: str, token: str) -> Optional[str]:
     if token_pos == -1:
         return None
 
-    # Look for variable assignment before token
-    prefix = line[:token_pos]
+    # Only the text just left of the token can hold `name =`. Searching the whole prefix is
+    # quadratic in word-character runs (minified JS, inline base64). `search(line, start, end)`
+    # bounds the scan while `^` still anchors at the real line start.
+    window_start = max(0, token_pos - _VAR_NAME_WINDOW)
 
     for pattern_name, pattern in VAR_ASSIGNMENT_PATTERNS:
-        match = pattern.search(prefix)
+        match = pattern.search(line, window_start, token_pos)
         if match:
             return match.group(1)
 
