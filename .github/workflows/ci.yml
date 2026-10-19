@@ -105,3 +105,15 @@ jobs:
 
       - name: Run integration tests
         run: pytest -q -m integration -v
+
+  plugin-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.302
+      - name: Run harpocrates-prompt plugin tests
+        run: claude plugin test plugins/harpocrates-prompt
