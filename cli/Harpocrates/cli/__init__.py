@@ -12,7 +12,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from Harpocrates.core.result import ScanResult, Severity
+from Harpocrates.core.result import ScanResult, Severity, findings_to_json
 from Harpocrates.core.scanner import ScanEngine, scan_directory, scan_file, scan_git_history
 from Harpocrates.paths import StateDirUnusableError
 
@@ -406,11 +406,12 @@ def scan(
             raise typer.Exit(code=2)
 
         payload = []
-        for f in result.findings:
+        shown = findings_to_json(result.findings, include_token=show_secrets)
+        for f, finding_json in zip(result.findings, shown):
             ctx = extract_context_from_finding(f)
             explanation = explain_finding(f, ctx)
             payload.append({
-                "finding": f.to_json_dict(include_token=show_secrets),
+                "finding": finding_json,
                 "explanation": explanation.to_dict() if explanation else None,
             })
         print(json.dumps({"findings": payload}, indent=2))

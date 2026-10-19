@@ -183,8 +183,7 @@ def test_cli_scan_table_shows_full_token_with_flag(tmp_path: Path) -> None:
 def test_cli_scan_json_omits_token_by_default(tmp_path: Path) -> None:
     """JSON output must not include a raw token field by default.
 
-    Note: the snippet field may still contain the raw token — snippet-level
-    redaction is handled by the reusable redaction helper (Task 4).
+    The snippet is redacted too; test_sec_01_scan_json.py covers that.
     """
     file_path = _write_github_token(tmp_path)
 

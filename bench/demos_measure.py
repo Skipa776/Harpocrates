@@ -4,9 +4,9 @@
     python bench/demos_measure.py [--seed N] [--out bench/results/demos/scan-vs-gitleaks.json]
 
 Generates the canary repo in a throwaway directory, runs `gitleaks dir` and
-`harpo scan --json` (default settings) on it, and writes one record per canary: its
-file, its kind, and which tool found it. Canary values are used for matching only and
-never written to the output. A tool "found" a canary when it reported a finding in the
+`harpo scan --json --show-secrets` on it (the match reads each finding's snippet, which is
+redacted by default), and writes one record per canary: its file, its kind, and which tool
+found it. Canary values are used for matching only and never written to the output. A tool "found" a canary when it reported a finding in the
 canary's file whose text contains the start of the value (or, for a multi-line value, whose line
 range includes the canary's first line).
 """
@@ -62,7 +62,7 @@ def _run_gitleaks(repo: Path, report: Path) -> list[dict]:
 
 
 def _run_harpo(repo: Path) -> list[dict]:
-    proc = subprocess.run([sys.executable, "-m", "Harpocrates.cli", "scan", str(repo), "--json"],
+    proc = subprocess.run([sys.executable, "-m", "Harpocrates.cli", "scan", str(repo), "--json", "--show-secrets"],
                           capture_output=True, text=True, check=False)
     return json.loads(proc.stdout)["findings"]
 

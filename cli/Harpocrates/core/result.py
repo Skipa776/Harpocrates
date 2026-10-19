@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
+from Harpocrates.utils.redaction import mask_secrets
 
 
 class EvidenceType(Enum):
@@ -117,17 +120,26 @@ class Finding:
         result.pop('token_end', None)
         return result
 
-    def to_json_dict(self, include_token: bool = False) -> Dict[str, Any]:
+    def to_json_dict(
+        self, include_token: bool = False, also_mask: Iterable[Optional[str]] = ()
+    ) -> Dict[str, Any]:
         """
-        Description: Serialize a finding with optional raw-token inclusion for JSON consumers.
+        Description: Serialize a finding with optional raw-token inclusion for JSON consumers (SEC-01).
         Parameters:
-            include_token: Whether to retain raw tokens in serialized findings.
-        Output: Dictionary excluding token by default; snippet remains present and is not redacted
-        here.
+            include_token: Whether to retain raw tokens and unredacted text in serialized findings.
+            also_mask: Other secrets to hide from the text fields, such as the tokens of the other
+                findings on the same line; ignored when include_token is true.
+        Output: Dictionary excluding token by default. Unless include_token is true, snippet and
+        category_reason carry each occurrence of the token (and of also_mask) in redacted form,
+        so no field holds a plaintext secret. Field names are unchanged.
         """
         d = self.to_dict()
         if not include_token:
             d.pop('token', None)
+            hidden = [self.token, *also_mask]
+            d['snippet'] = mask_secrets(self.snippet, hidden)
+            if self.category_reason:
+                d['category_reason'] = mask_secrets(self.category_reason, hidden)
         return d
 
     def __str__(self) -> str:
@@ -144,6 +156,22 @@ class Finding:
             f"[{self.severity.value.upper()}] {self.type}{cat_str} "
             f"at {loc} (evidence: {self.evidence.value})"
         )
+
+def findings_to_json(findings: List[Finding], include_token: bool = False) -> List[Dict[str, Any]]:
+    """
+    Description: Serialize findings for JSON output, hiding every finding's token from the text fields
+        of all findings on the same line (SEC-01).
+    Parameters:
+        findings: Findings to serialize, in order.
+        include_token: Whether to keep raw tokens and unredacted text (the --show-secrets opt-in).
+    Output: One dictionary per finding, in the same order, as Finding.to_json_dict returns. Two
+        findings on one line mask each other's secrets, so a snippet never shows a neighbour's value.
+    """
+    by_line: Dict[Any, List[Optional[str]]] = {}
+    for f in findings:
+        by_line.setdefault((f.file, f.line), []).append(f.token)
+    return [f.to_json_dict(include_token=include_token, also_mask=by_line[(f.file, f.line)]) for f in findings]
+
 
 @dataclass
 class ScanResult:
@@ -212,11 +240,11 @@ class ScanResult:
         Parameters:
             include_token: Whether to retain raw tokens in serialized findings.
         Output: Dictionary of findings, statistics, errors, and counts; raw tokens are excluded
-        unless requested, while snippets remain.
+        unless requested, and so is every plaintext secret in snippets (SEC-01).
         Convert scan result to a dictionary
         """
         return {
-            "findings": [f.to_json_dict(include_token=include_token) for f in self.findings],
+            "findings": findings_to_json(self.findings, include_token=include_token),
             "scanned_files": self.scanned_files,
             "total_lines": self.total_lines,
             "duration_ms": self.duration_ms,
@@ -241,4 +269,4 @@ class ScanResult:
             f"[{self.duration_ms:.2f}ms]"
         )
 
-__all__ = ["Finding", "ScanResult", "EvidenceType", "Severity"]
+__all__ = ["Finding", "ScanResult", "EvidenceType", "Severity", "findings_to_json"]
