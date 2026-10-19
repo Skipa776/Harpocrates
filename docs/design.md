@@ -195,6 +195,151 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | TEST-03 **(proposed)** | End-to-end tests for the critical flows, run in CI against an installed wheel in a fixture home directory: (a) an agent read of a canary file is refused and `safe_read` returns placeholders; (b) the pre-commit hook blocks a staged canary; (c) `install`, then a hook call, then `uninstall` restores every settings file byte-identical | One `test_test_03_*` integration test per flow, all passing in CI | R0 |
 | TEST-04 **(proposed)** | Josh verifies every test. Each pull request lists its new and changed tests by requirement ID, and Josh ticks each one before merge | Pull request template has the checklist; no merge with an unticked test | R0 |
 
+## Roadmap after R0: proof, serving, learning, lifecycle, service and detections
+
+Added Oct 18, 2026, from Josh's milestone plan. Targets marked **(proposed)** are starting points for Josh to confirm or change. Once a target is confirmed, it may be loosened only with a written trade-off note, never silently. Rows marked **(Josh writes)** are the five parts Josh implements by hand. For those, the assistant writes only the spec, interface signatures and test fixtures, and reviews Josh's code on request. **M8 is deferred** (Josh, Oct 18).
+
+Working rules for this section, on top of the six in `AGENTS.md`: one requirement ID at a time, with its acceptance test first and named after the ID; a spec of a page or less (inputs, outputs, failure behavior, test plan) approved before any delegated component is coded; one function per commit, each commit naming its ID.
+
+### Baseline (v17, detector 1.2)
+
+Every target below is measured against these numbers. Re-measured Oct 18, 2026 on an Apple M3 Pro (12 cores, 18 GB), Python 3.12.12. Raw results are in `bench/results/r0-before/`.
+
+| Metric | Gate threshold (0.1904) | Commit threshold (0.5559) | Source |
+| --- | --- | --- | --- |
+| Benchmark recall / precision | 94.96% / 90.41% | 93.94% / 94.36% | `model_config.json`, re-measured identical |
+| OSS test recall / precision | 99.33% / 94.54% | 98.73% / 97.11% | `model_config.json`, re-measured identical |
+| Candidate AUC, benchmark / OSS | 0.9856 / 0.9996 | same model | `model_config.json` |
+| ML alarms per 1,000 real files, 16 validation repos | 56.8 | 14.9 | README |
+
+| Speed | Oct 16 reference (v1.3.0) | Oct 18 re-measure, median / p95 |
+| --- | --- | --- |
+| Model inference, one candidate | 0.013 ms | 0.0073 / 0.0082 ms |
+| Model inference, batch of 256 | 2.0 ms | 0.41 / 0.49 ms |
+| Hook call, clean file | about 90 ms | 68 / 107 ms |
+| Hook call that loads the model | 230 to 280 ms | 171 / 212 ms |
+| Bare Python start (`python -c pass`) | n/a | about 12 ms |
+
+### Do not build
+
+| Not built | Why |
+| --- | --- |
+| INT8 quantization | The model is a `TreeEnsembleClassifier`. ONNX dynamic quantization targets matrix-multiply and convolution weights, so there is nothing to quantize |
+| Micro-batching | Only if the `FR-SERVE-01` profile shows model inference is a top-two cost |
+| Suppression based on the shape of the value | Real secrets of one type share entropy, length, character mix and prefixes, so a value-shape match would hide real secrets. The M5 suppressor matches where a string appears, not what it looks like |
+| Local retraining of the base model | One user's few labels would overfit, and every user would run a different untested model. Base-model retraining stays central (M6) |
+| A write-ahead log | Small state files need only write-to-temp, `fsync`, then rename |
+
+### M3 additions: proof that the provider receives only redacted text
+
+These extend M3, which already has the mock-server canary harness and `FR-INSTALL-02` (`harpo doctor`). The proof covers what passes through the gate. Before the gate ships, the README shows only the read-tool path, with the live result of 0 of 15 canaries, and says so.
+
+| ID | Requirement | Acceptance test | Milestone |
+| --- | --- | --- | --- |
+| FR-PROOF-01 | The egress gate writes an audit entry for every outbound request: time, provider, a SHA-256 hash of the exact bytes forwarded, and placeholder counts by type. Never values | Schema test, plus a scan of the log for secrets | M3 |
+| FR-PROOF-02 | Audit entries are hash-chained: each entry includes the previous entry's hash, so a deleted or edited entry is detectable | Tamper test: editing or deleting any entry fails verification | M3 |
+| FR-PROOF-03 | `harpo proof` shows the last N forwarded requests as the provider received them, with placeholders, and verifies the chain | CLI test on a fixture log | M3 |
+| FR-PROOF-04 | In CI, the mock provider records every request from scripted and live agent sessions over a seeded canary repo. Publish canaries received out of canaries planted | 0 known-format canaries received | M3 |
+| FR-PROOF-05 | `harpo doctor` fails loudly when any configured agent sends traffic that bypassed the gate | Deliberately misconfigured agent is caught | M3 |
+| DOC-DEMO-03 | README scene: an agent session next to `harpo proof`, showing placeholders where the canaries were | GIF in the README | M3 |
+
+### M4: Serving and reliability
+
+| ID | Requirement | Acceptance test | Milestone |
+| --- | --- | --- | --- |
+| FR-SERVE-01 **(Josh writes the analysis)** | Profile a full-repo scan and a history scan by stage: file reads, candidate extraction, features, model, output. Commit the profile script and results | Stage breakdown table in `docs/`, with the top two costs named | M4 |
+| FR-SERVE-02 | A local detector daemon keeps the model loaded and serves scan requests over a Unix socket owned by the user, mode `0600` | Socket permissions test, plus a request/response test | M4 |
+| FR-SERVE-03 | The hook becomes a thin client to the daemon. Consider writing the client in the existing Rust core, since Python startup alone costs tens of milliseconds (12 ms measured) | Hook tests pass unchanged against the daemon | M4 |
+| FR-SERVE-04 | If the daemon is missing, slow or crashes, the hook falls back to in-process scanning within its time budget, and blocks if that also fails. It never allows by default | Kill, stall and garble-the-daemon tests: every case scans or blocks | M4 |
+| NFR-03 | Warm hook latency for files up to 100 KB: p50 ≤ 25 ms and p95 ≤ 50 ms **(proposed)**, matching `NFR-01` | Latency benchmark over 1,000 calls in CI | M4 |
+| NFR-04 | Cold fallback latency: p95 ≤ 350 ms **(proposed)** | Same benchmark with the daemon stopped | M4 |
+| FR-REL-01 | History scans checkpoint by commit and resume after `kill -9` | Findings after kill and resume equal an uninterrupted scan exactly: 0 missed, 0 duplicated | M4 |
+| FR-REL-02 | Every state file is written to a temp file, `fsync`ed, then renamed into place | Fault-injection test kills the writer at each step and finds no corrupt state | M4 |
+| NFR-05 | Peak memory stays flat as history grows: ≤ 256 MB at both 1 million and 10 million lines **(proposed)** | Memory benchmark at both sizes | M4 |
+| NFR-06 | Backfill throughput at least 2× the `FR-SERVE-01` baseline after fixing the top bottleneck, and scaling to 4 workers at ≥ 70% efficiency **(proposed)** | Throughput benchmark, lines per second | M4 |
+
+### M5: Learns your false alarms, not your secrets
+
+Three parts: a person labels uncertain blocks, exact fingerprints remember single values, and a small local model learns the places where false alarms appear.
+
+**Asking the user.** The hook cannot show UI inside the agent session, and its time budget is 25 s (Codex documents 30 s). It must not wait for an answer. The read is refused immediately, as `FR-READ-06` requires, and the question is asked out of band. Before any code, a spec covers how each supported OS and agent shows the notification. **`FR-READ-06` wording change (proposed):** add "The read is refused without prompting; any question about it is asked separately, out of band (FR-ASK-01 to FR-ASK-07), never through the agent." The requirement and its tests otherwise stay as they are.
+
+| ID | Requirement | Acceptance test | Milestone |
+| --- | --- | --- | --- |
+| FR-ASK-01 | Ask only about uncertain ML findings. Use the calibrated probability `p` (isotonic, already in `model_config.json`). Ask when 0.20 ≤ p < 0.80 **(proposed)**: in that range the calibrated model is wrong 20% to 80% of the time. Above 0.80, block without asking and list the finding in `harpo review`. Never ask about known-format regex matches. Map the existing gate threshold onto the calibrated scale and document the mapping | Band test on fixture candidates at known probabilities | M5 |
+| FR-ASK-02 | A desktop notification reads: "Harpo blocked a possible secret from Claude Code (or Codex). Is this a real secret?" It shows the secret type, file and line, the value masked with a local reveal option, and the confidence. The choices are "Real secret, keep blocking" (the default), "Not a secret, allow it here" and "Not sure, keep blocking". Clicking opens `harpo review`, a terminal UI that works without notifications | UI test, plus a headless test of `harpo review` | M5 |
+| FR-ASK-03 | No answer, a timeout or "Not sure" keeps blocking and records no label | Timeout test | M5 |
+| FR-ASK-04 | The agent cannot answer. Questions never go to the agent's channel. The hook refuses agent-run `harpo review`, `harpo allow` and `harpo learn` commands, extending the existing guard in `allowlist.py`. Label files sit under `~/.harpo`, which the hook and the harness deny rules protect from agent edits (`FR-NAME-04`, `SEC-09`) | Agent-initiated answer, allow and label-file edit are all refused | M5 |
+| FR-ASK-05 | No more than 3 notifications an hour **(proposed)**. Batch the rest into `harpo review` | Rate-limit test | M5 |
+| FR-ASK-06 | Hook latency is unchanged by asking: `NFR-03` holds with questions pending | Latency benchmark with a full question queue | M5 |
+| FR-ASK-07 | Labeling study, once on Josh's machine and once with his team. Seed a session with 20 known-format canaries, 20 ML-only canary passwords and 20 benign look-alikes **(proposed)**. Measure questions per hour of agent work, answer accuracy and time to answer. Target: median ≤ 2 questions an hour, and no canary answered "Not a secret" **(proposed)** | Study report in `docs/` | M5 |
+| FR-GATE-08 (extended) **(Josh writes)** | Extends the M3 `FR-GATE-08`. A "Not a secret" answer, or a `harpo allow`, stores an HMAC of the value with a per-install key kept outside the repo, plus the path and rule. Each is scoped to one repo, expires (default 90 days, **proposed**), is logged on every use, and only the user can add it, never the agent. Trade-off against `SEC-02`: fingerprints need a key that survives sessions, so this key is per install, not per session; `SEC-02` still governs placeholders and logs | A real secret with the same shape as an allowlisted one is still caught; an expired entry stops applying; agent-initiated adds are refused | M5 |
+
+**The local suppressor.** A second, small, local model that retrains itself when enough similar false alarms pile up. It uses only context features, meaning where a string appears: the file path pattern and type, generated-file and lockfile markers, the key or field name, the enclosing structure (such as an `integrity` field in `package-lock.json`), and how often similar strings repeat in the file. It never uses value-shape features: entropy, length, character classes or prefixes.
+
+| ID | Requirement | Acceptance test | Milestone |
+| --- | --- | --- | --- |
+| FR-LEARN-01 | Retrain trigger: when one context cluster collects at least 5 "Not a secret" answers from at least 3 different files in a repo **(proposed)**, rebuild that repo's suppressor. It is a nearest-neighbor index or a logistic regression over context features, and rebuilds in seconds | Trigger test: 4 answers do nothing, 5 rebuild | M5 |
+| FR-LEARN-02 | The suppressor's input contains no value-shape features | Feature-list test fails if any value-shape feature appears | M5 |
+| FR-LEARN-03 **(Josh writes)** | The suppressor outputs a calibrated probability that a finding is a false alarm. It may suppress only when that probability is at least 0.95, measured on held-out answers. The 95% is confidence that the finding is a false alarm, not a similarity score | Calibration report on held-out answers | M5 |
+| FR-LEARN-04 **(Josh writes)** | It never suppresses a known-format regex match, and never suppresses a finding the base model scores above 0.80 calibrated **(proposed)** | Canary test: known-format canaries planted inside learned contexts are always caught | M5 |
+| FR-LEARN-05 **(Josh writes)** | Every suppression is logged. `harpo learn` lists each learned context with its examples and its count of suppressions, and can revoke it. A learned context expires after 90 days without a new answer **(proposed)** | Revoke and expiry tests | M5 |
+| FR-LEARN-06 | The miss rate is measured and published. Plant ML-only canary passwords inside learned contexts and report how many are suppressed. This is the accepted risk of the feature, and the README states it | Report in the README | M5 |
+| FR-LEARN-07 | Benchmark behind the claim. On held-out repos, chart real-code alarms per 1,000 files against the number of answers given. Target: at least 50% fewer alarms after 20 answers in a repo, with known-format canary recall unchanged **(proposed)** | Chart and raw results in `bench/results/` | M5 |
+| DOC-DEMO-04 | README scenes: a question answered in `harpo review`, then the same kind of false alarm suppressed later while a planted known-format canary in the same file is still caught | GIFs in the README | M5 |
+
+The tagline "learns your false alarms, not your secrets" may appear in the README only once `FR-LEARN-06` and `FR-LEARN-07` are published.
+
+### M6: Model lifecycle
+
+The training pipeline was untracked in R0 (reproduce v17 at tag `v1.3.0`). `FR-ML-02` rebuilds it as one command.
+
+| ID | Requirement | Acceptance test | Milestone |
+| --- | --- | --- | --- |
+| FR-ML-01 | `harpo feedback export` writes only "Not a secret" answers as labeled rows: features, label, source, a hashed repo ID and a timestamp. Never values, real paths or real detections, since a real secret's features still reveal its length and character mix. The user sees every row before anything is shared, and sharing is always opt-in | Schema test, a scan of the export for secrets, and a test that true detections are never exported | M6 |
+| FR-ML-02 **(Josh writes)** | One command retrains from a pinned snapshot with a fixed seed and produces the same model hash twice. It also writes `xgboost_model.json`'s entry into the hash manifest (`SEC-07`) | Reproducibility test | M6 |
+| FR-ML-03 **(Josh writes)** | Splits are by repository. A repo that supplied labels never appears in the evaluation of those labels (`DATA-07`). No single contributor supplies more than 20% of a snapshot's labels **(proposed)**, to limit poisoning | Split audit and contributor-share tests | M6 |
+| FR-ML-04 **(Josh writes)** | A CI evaluation gate decides on validation evidence only, as the README already requires. The benchmark and OSS test sets are reported after a model is frozen and never used to pick models (`DATA-09`) | Gate runs in CI on every candidate | M6 |
+| FR-ML-05 **(Josh writes)** | Gate criteria. A candidate passes only if all hold **(proposed)**: (1) mean leave-one-LLM-family-out recall at least v17's, and no family more than 1 point lower, at matched alarm rates; (2) real-code alarm rate within 5% of 56.8 (gate) and 14.9 (commit) per 1,000 files at the new thresholds, or lower; (3) no secret type's validation recall more than 2 points below v17's; (4) calibration error on validation ≤ 0.05; (5) 0 known-format canaries leak in the canary harness; (6) inference time per candidate no more than 2× v17's | A deliberately worse model is rejected | M6 |
+| FR-ML-06 **(Josh writes)** | A passing model runs in shadow beside the live one on the same inputs and logs where they disagree, without changing any decision | Shadow report with disagreement counts by type | M6 |
+| FR-ML-07 | Models ship as versioned manifests (model hash, thresholds, data snapshot hash, gate report). The package keeps the previous model, and `harpo model rollback` switches to it | Rollback test restores the earlier hash and thresholds | M6 |
+| FR-ML-08 | Feedback retrain target: on repos held out from the labels, real-code alarms fall at least 20% at unchanged family recall **(proposed)** | Before-and-after table in the README | M6 |
+
+### M7: Org scanning service
+
+| ID | Requirement | Acceptance test | Milestone |
+| --- | --- | --- | --- |
+| FR-STREAM-01 | A generator replays the commit history of public repositories, with planted canary secrets, as push events at a set rate | Rate test, plus a planted-canary manifest | M7 |
+| FR-STREAM-02 | Events go to a 3-broker Redpanda topic in Docker Compose, keyed by repository so each repo's commits stay in order. Supersedes the Phase 2 "No Kafka" note (Josh, Oct 18) | Ordering test per repo | M7 |
+| FR-STREAM-03 **(Josh writes)** | A consumer group of 3 scanner workers uses the shared detector, and commits offsets only after findings are written | Worker-kill test: 0 missed, 0 duplicated | M7 |
+| FR-STREAM-04 **(Josh writes)** | Findings are stored with the fingerprint as a unique key, so redelivery is harmless | Replaying the same events twice leaves one finding each | M7 |
+| FR-STREAM-05 | Commits that fail to parse or time out go to a dead-letter topic, with deterministic regex and entropy redaction as the fallback | Malformed-event test | M7 |
+| FR-STREAM-06 | Survives a worker joining or leaving, and one broker stopping mid-run | 0 missed, 0 duplicated, rebalance under 30 s **(proposed)** | M7 |
+| NFR-07 | Report the highest sustained commit rate at which lag does not grow. At that rate, end-to-end delay p95 ≤ 5 s, lag recovers within 60 s after a 5× burst, and lag is reported on a hot partition when one repo sends 10× the commits of the rest **(proposed)** | Load test report | M7 |
+
+### M8: Detections, cloud and publication (deferred)
+
+Deferred by Josh on Oct 18, 2026. Kept here so the IDs are reserved and the plan is complete. Needs a Linux VM Josh owns and an AWS sandbox account.
+
+| ID | Requirement | Acceptance test | Milestone |
+| --- | --- | --- | --- |
+| FR-DET-01 | Map Harpo to ATT&CK: T1552.001 Credentials In Files, T1552.004 Private Keys, T1567 Exfiltration Over Web Service | Mapping table in `docs/` | M8 |
+| FR-DET-02 | The hook logs every decision as JSON: time, tool, path, decision and finding types. Never values | Log schema test, plus a scan of the log for secrets | M8 |
+| FR-DET-03 | Sigma rules, each with an ADS document, for four Atomic Red Team T1552.001 tests on a Linux VM Josh owns, using auditd or Sysmon for Linux: Find AWS credentials, Extract passwords with grep, Search for Git Credential Files, Find .env Files Containing Application Credentials | Each rule fires on its recording | M8 |
+| FR-DET-04 | Two Sigma rules over the hook decision log as a custom log source: a denied file retried through a script, and file contents sent out with `curl` | Each fires on its recording | M8 |
+| FR-DET-05 | Rules run in CI against recorded attack logs and at least 8 hours of benign activity from the same VM **(proposed)** | Every rule fires on its attack and raises 0 alerts on benign logs | M8 |
+| FR-CLOUD-01 | Terraform for a VPC, 1 m7i.xlarge running Redpanda, 4 c7i.xlarge (3 workers and 1 load generator), an S3 bucket for findings, least-privilege IAM roles and a CloudTrail trail. Delegated one resource per commit | Josh reviews `terraform plan`; Harpo runs on it as a pre-commit hook | M8 |
+| FR-CLOUD-02 | `terraform destroy` leaves no billable resources | A resource listing after destroy is empty | M8 |
+| FR-CLOUD-03 | A canary secret in Secrets Manager, Stratus Red Team's `aws.credential-access.secretsmanager-retrieve-secrets`, and a Sigma rule over CloudTrail that catches it | The rule fires on the Stratus run and not on a day of normal account activity | M8 |
+| FR-CLOUD-04 | A $25 billing alert exists before the first `apply` | A check script fails `apply` without it | M8 |
+| NFR-08 | Six cloud runs of 4 hours: sustained, burst and skewed load. Budget ≤ $25 on demand **(proposed)** | Cost report with cost per million lines | M8 |
+| NFR-09 (stretch) | Egress gate under 1, 10 and 50 concurrent agents: `NFR-01` holds at 10, with p99 ≤ 100 ms at 10 **(proposed)**. At 50, requests queue and then block, never pass unscanned | Concurrency benchmark | M8 |
+| DOC-BENCH-01 | README benchmark section. Each benchmark lists its method, hardware and date, with raw results in `bench/results/`. The README must publish: (1) scan time by stage; (2) hook latency p50, p95 and p99, cold and warm, by file size; (3) backfill throughput in lines per second, and peak memory at 1 and 10 million lines; (4) missed and duplicated findings after a scan kill, a worker kill and a broker stop (target 0 and 0); (5) canaries received out of canaries planted at the mock provider; (6) questions per hour and answer accuracy from the labeling study; (7) alarms per 1,000 files against the number of answers, with the suppressor's measured miss rate; (8) the evaluation-gate report for every released model, and real-code alarms before and after a feedback retrain; (9) benchmark and OSS test results for each frozen release, kept even when a later version does better (`DATA-09`); (10) consumer lag under sustained, burst and skewed load; (11) cost per million lines scanned in the cloud runs | Every listed benchmark is in the README with method, hardware, date and raw results. Items land with the milestone that produces them | M3 to M8 |
+
+### Priority if time runs short
+
+Finish in this order, and treat each finished item as a release: (1) R0 cleanup, docstrings, rename and the first two demos; (2) M2 egress gate and the M3 proof requirements; (3) M4 profiling and daemon; (4) M5 asking, fingerprints and the local suppressor; (5) M6 lifecycle; (6) M4 backfill reliability; (7) M7; (8) M8. A smaller system that meets its targets beats a larger one that does not.
+
 ## Threat model
 
 The trust boundary is the network edge between your machine and the cloud LLM provider. Everything that crosses it is treated as potentially leaked.
@@ -480,6 +625,12 @@ v1 ships in about 8 weeks. Apply to internships from week 2 onward; don't wait f
 | M1: Read tool | Oct 6 to Oct 19 | `safe_read` and `safe_grep`; typed placeholders; Claude Code and Codex setup docs with deny rules; secret-type labels in core | Agent can read a repo with planted canaries and none appear in its context |
 | M2: Egress gate | Oct 20 to Nov 9 | Localhost proxy; full-request scanning; fail closed; audit log; mock server and canary harness; Claude Code and Codex install adapters with harpo doctor | 0 known-format canaries reach the mock server across all read paths |
 | M3: Evaluate and publish | Nov 10 to Nov 23 | Evasion and prompt-injection suites; utility, latency, and competitor comparison study; SARIF and GitHub Action; write-up and 2-minute demo video | All targets in the Evaluation plan measured and published, including failures |
+| R0: Cleanup, docs and rename | Oct 18 to Oct 19 (inserted before M2) | Cleanup review and untracks; docstrings enforced in CI; rename to Harpo (`harpo`, `harpo-mcp`, `~/.harpo`, pre-commit `harpo`, MCP server `harpo`); first two README demos; security fixes FR-CORE-07, SEC-01, SEC-07 to SEC-09 | Findings byte-identical to before the cleanup; full suite and coverage floor green; `docs/cleanup-report.md` complete |
+| M4: Serving and reliability | Dates set aside (Josh, Oct 18) | Stage profile; detector daemon and thin hook client; fallback that never allows; checkpointed history scans; atomic state files | NFR-03 to NFR-06 met and published |
+| M5: Learns false alarms, not secrets | Dates set aside | Out-of-band questions and `harpo review`; fingerprint allowlist; local context-only suppressor | FR-LEARN-06 and FR-LEARN-07 published; labeling study done |
+| M6: Model lifecycle | Dates set aside | Feedback export; one-command retrain; CI evaluation gate; shadow runs; versioned manifests and rollback | A deliberately worse model is rejected; feedback retrain target met |
+| M7: Org scanning service | Dates set aside | Replay generator; 3-broker Redpanda; scanner consumer group; dead-letter topic | 0 missed and 0 duplicated under worker kill and broker stop; NFR-07 load report |
+| M8: Detections, cloud and publication (deferred) | Deferred (Josh, Oct 18) | ATT&CK map; Sigma rules; Terraform deployment; cost runs; README benchmark section | Every rule fires on its recording and is silent on benign logs; cost report |
 
 **After v1:** v1.1 (January 2027) ships the retrained detector from Detector training data. v1.2 (February 2027) ships repo preflight. The lab repo starts after that. Each release must leave the repo finished and demoable.
 

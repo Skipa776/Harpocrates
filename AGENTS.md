@@ -9,7 +9,7 @@ Harpocrates Guard is a local security boundary that stops secrets from leaving a
 ## Commands
 
 ```bash
-pip install -e ".[dev,train,mcp]"
+pip install -e ".[dev,explain,mcp]"
 cargo build --release --manifest-path core/Cargo.toml
 python -m pytest -q
 ruff check .
@@ -26,5 +26,7 @@ cargo fmt --manifest-path core/Cargo.toml --check && cargo clippy --manifest-pat
 6. Every pull request lists the requirement IDs it closes and the tests that prove them.
 
 ## Current milestone
+
+**R0: Cleanup, docs and rename** (done Oct 19, branch `r0/cleanup`, see `docs/cleanup-report.md`). M1 is done except the fresh-machine setup by someone else and the Codex `/hooks` trust. Next: M2, the egress gate, then the M3 proof requirements. M4 to M8 are in `docs/design.md` under "Roadmap after R0", awaiting Josh's review; M8 is deferred. Five parts are Josh's to write by hand (marked **(Josh writes)** there): write only specs, interfaces and fixtures for them.
 
 **M1: Read tool** (Oct 6 – Oct 19). Done: FR-READ-01, FR-READ-02, SEC-02, FR-CORE-02, FR-CORE-03, SEC-06, FR-INSTALL-03. FR-READ-03 shipped with a content-aware read hook. Exit criterion met live on Claude Code (0/15 canaries); the Codex hook awaits one-time /hooks trust, and the fresh-machine setup by someone else is pending. Next: M2, egress gate.
