@@ -184,6 +184,15 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | DOC-02 | Dataset provenance and license for all training and benchmark data | `docs/data.md` exists | M0 |
 | DOC-03 | Published known-bypass list | `docs/bypasses.md` exists and matches the evasion results | M3 |
 
+**Testing**
+
+| ID | Requirement | Acceptance test | Milestone |
+| --- | --- | --- | --- |
+| TEST-01 | Line coverage of the shipped package (`cli/Harpocrates`, excluding the untracked local training code) is measured in CI and fails below a floor. The floor starts at 90% (measured 92.9% on Oct 18, 2026, Apple M3 Pro) and rises toward the measured value as gaps close. It is never lowered without a trade-off note | The CI unit job fails a change that drops coverage below `fail_under` in `pyproject.toml` | R0 |
+| TEST-02 **(proposed)** | Every requirement ID from a finished milestone has at least one test whose name contains the ID (lowercase, `-` as `_`), or a named non-test acceptance artifact (a report or doc) | `scripts/check_req_tests.py` lists IDs without one; CI fails on any ID from a finished milestone | R0 |
+| TEST-03 **(proposed)** | End-to-end tests for the critical flows, run in CI against an installed wheel in a fixture home directory: (a) an agent read of a canary file is refused and `safe_read` returns placeholders; (b) the pre-commit hook blocks a staged canary; (c) `install`, then a hook call, then `uninstall` restores every settings file byte-identical | One `test_test_03_*` integration test per flow, all passing in CI | R0 |
+| TEST-04 **(proposed)** | Josh verifies every test. Each pull request lists its new and changed tests by requirement ID, and Josh ticks each one before merge | Pull request template has the checklist; no merge with an unticked test | R0 |
+
 ## Threat model
 
 The trust boundary is the network edge between your machine and the cloud LLM provider. Everything that crosses it is treated as potentially leaked.

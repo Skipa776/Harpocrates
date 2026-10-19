@@ -51,7 +51,7 @@ jobs:
         run: python scripts/check_docstrings.py --enforce
 
       - name: Run pytest (unit + smoke, no integration)
-        run: pytest -q -m "not integration"
+        run: pytest -q -m "not integration" --cov --cov-report=term  # TEST-01: fails below fail_under in pyproject.toml
 
   # FR-CORE-01: build the Rust binary so engine=auto paths (CLI tests) and the
   # Rust/Python parity test run against it. Unit tests pinned to engine=python
@@ -83,7 +83,7 @@ jobs:
       - name: Run pytest against the Rust core
         env:
           HARPOCRATES_REQUIRE_RUST: "1"
-        run: pytest -q -m "not integration"
+        run: pytest -q -m "not integration" --cov --cov-report=term  # TEST-01: fails below fail_under in pyproject.toml
 
   integration:
     runs-on: ubuntu-latest

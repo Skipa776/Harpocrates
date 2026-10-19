@@ -120,3 +120,11 @@ enforce = [
     "cli/Harpocrates/utils/file_utils.py",
     "cli/Harpocrates/utils/redaction.py",
 ]
+
+[tool.coverage.run]
+# TEST-01. training/ is untracked (kept locally for reproducibility), so it never counts.
+source = ["cli/Harpocrates"]
+omit = ["cli/Harpocrates/training/*"]
+
+[tool.coverage.report]
+fail_under = 90
