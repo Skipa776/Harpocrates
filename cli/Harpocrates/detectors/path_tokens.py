@@ -58,7 +58,14 @@ _MIN_URLSAFE_ALNUM = 16
 
 
 def _segment_is_candidate(segment: str) -> bool:
-    """Would this segment alone look like a machine-generated secret?"""
+    """
+    Description: Check a path segment for machine-generated secret characteristics to avoid
+    suppressing credentials.
+    Parameters:
+        segment: Single path segment to classify.
+    Output: True for a qualifying non-UUID, non-hex segment; otherwise False.
+    Would this segment alone look like a machine-generated secret?
+    """
     if _UUID.fullmatch(segment) or _HEX.fullmatch(segment):
         return False
     if not any(c.isdigit() for c in segment) and _WORD_SEGMENT.fullmatch(segment):
@@ -73,7 +80,17 @@ def _segment_is_candidate(segment: str) -> bool:
 
 
 def _in_url_position(token: str, line: str) -> bool:
-    """URL/query/userinfo position, or a secret-named key earlier on the line: leave it to the other rules."""
+    """
+    Description: Recognize URL or secret-key context that must remain eligible for other detection
+    rules.
+    Parameters:
+        token: Entropy candidate, optionally prefixed by an assignment name.
+        line: Original line used to check URL and secret-key context.
+    Output: True for URL/query/userinfo context, an earlier secret-named key, or a token absent from
+    the line; otherwise False.
+    URL/query/userinfo position, or a secret-named key earlier on the line: leave it to the other
+    rules.
+    """
     if "://" in line:
         return True
     at = line.find(token)
@@ -85,7 +102,14 @@ def _in_url_position(token: str, line: str) -> bool:
 
 
 def benign_path_token(token: str, line: str) -> bool:
-    """True when an entropy token is a filesystem path with no secret-looking segment."""
+    """
+    Description: True when an entropy token is a filesystem path with no secret-looking segment.
+    Parameters:
+        token: Entropy candidate, optionally prefixed by an assignment name.
+        line: Original line used to check URL and secret-key context.
+    Output: True for a qualifying filesystem path with at least two word segments and no secret-like
+    segment; otherwise False.
+    """
     body = _NAME_PREFIX.sub("", token, count=1)
     if "/" not in body or "=" in body:
         return False
