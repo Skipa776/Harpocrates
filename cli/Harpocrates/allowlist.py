@@ -605,6 +605,9 @@ def inside_state_dir(path: Optional[Path]) -> bool:
         for an Edit or Write tool call it is the target path. True when inside either folder, False
         when not or when path is None. Both names are checked whichever     one is in use, and the
         migration is not run. Both homes are checked (SEC-08): the real one (paths.home) and the one $HOME names.
+        Any path whose first component under either home folder starts with .harpo (folded) is inside too
+        (SEC-09), so the migration's temp folder (~/.harpo.migrating.x) and a backup (~/.harpocrates.bak) are
+        guarded; an unrelated ~/.harpoon is over-blocked on purpose. A project folder named .harpo elsewhere is not.
         Raises OSError or RuntimeError when the path cannot be     resolved;
         callers treat that as a refusal.
     """
@@ -612,8 +615,12 @@ def inside_state_dir(path: Optional[Path]) -> bool:
         return False
     real = path.resolve()
     folded = [_fold(part) for part in real.parts]
+    guarded = _fold(paths.NEW_DIR)  # ".harpo": also the start of ".harpocrates", ".harpo.migrating.x", ".harpocrates.bak"
     ids = set()
     for home in _homes():
+        under = [_fold(part) for part in home.resolve().parts]
+        if folded[:len(under)] == under and len(folded) > len(under) and folded[len(under)].startswith(guarded):
+            return True  # SEC-09: any first component under the home folder that starts with .harpo (over-blocks .harpoon)
         for name in STATE_DIR_NAMES:
             state = (home / name).resolve()
             wanted = [_fold(part) for part in state.parts]

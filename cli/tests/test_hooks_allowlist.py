@@ -416,7 +416,8 @@ def test_fr_read_06_touches_takes_the_working_directory_into_account(tmp_path: P
     assert allowlist.touches("echo x >> allow", state) and allowlist.touches("tee s9.json", state / "grants")
     assert not allowlist.touches("ls -la", state) and not allowlist.touches("cat allow", state)
     assert not allowlist.touches("echo x >> allow", other) and not allowlist.touches("echo x >> allow")
-    assert not allowlist.touches("echo x >> allow", tmp_path / f"{name}-not")  # a sibling is not inside
+    assert allowlist.touches("echo x >> allow", tmp_path / f"{name}-not")  # SEC-09 F5: a sibling that shares the prefix is guarded
+    assert not allowlist.touches("echo x >> allow", other / name)  # a project folder carrying the name is not
 
 
 # ---- name rules, remove, list, CLI (FR-READ-05, name:<NAME> lines) ----

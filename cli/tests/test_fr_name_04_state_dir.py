@@ -457,9 +457,11 @@ def test_fr_name_04_working_directory_inside_either_dir(home: Path, name: str) -
     assert allowlist.touches("echo x >> allow", state) and allowlist.touches("tee s9.json", state / "grants")
     assert not allowlist.touches("ls -la", state) and not allowlist.touches("cat allow", state)
     assert not allowlist.touches("echo x >> allow", home / "work") and not allowlist.touches("echo x >> allow")
-    for sibling in (name + "-not", name + "x"):  # a sibling is not inside, whatever the shared prefix
+    for sibling in (name + "-not", name + "x"):  # SEC-09 F5: a sibling that shares the prefix is guarded too
         (home / sibling).mkdir()
-        assert not allowlist.touches("echo x >> allow", home / sibling)
+        assert allowlist.touches("echo x >> allow", home / sibling)
+    (home / "work" / name).mkdir()  # a project folder that carries the name is not directly under the home folder
+    assert not allowlist.touches("echo x >> allow", home / "work" / name)
 
 
 def test_fr_name_04_working_directory_through_a_link_is_resolved(home: Path) -> None:
@@ -642,7 +644,7 @@ def test_fr_name_04_hook_refusal_comes_before_any_grant_or_prompt(home: Path, ca
 def test_fr_name_04_hook_leaves_other_edits_alone(home: Path, capsys, tool: str, d: str) -> None:
     _layout(home, "both")
     (home / "work" / d).mkdir()  # a project folder that happens to carry the name is not the state directory
-    for target in (f"{home}/work/notes.txt", f"{home}/work/{d}/x", f"{home}/{d}-not/x", f"{home}/{d}x/x",
+    for target in (f"{home}/work/notes.txt", f"{home}/work/{d}/x",
                    f"{home}/{d}/../work/y", f"{home}/.config/x", "~/notes.txt", f"{home}/work/deep/z"):
         assert _pre(_edit_event(tool, target, home), capsys) == (0, ""), target
     assert _pre(_edit_event(tool, f"{d}/x", home / "work"), capsys) == (0, "")  # relative to a project folder

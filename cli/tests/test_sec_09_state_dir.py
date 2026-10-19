@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from Harpocrates import allowlist, grants, install, paths
+from Harpocrates import allowlist, grants, hooks, install, paths
 
 SID = "sess-1"
 CANARY_PATH = "/proj/canary-0123456789/app.py"
@@ -276,3 +276,67 @@ def test_sec_09_f4_a_failed_migration_still_falls_back_until_harpo_appears(home:
     os.symlink(_foreign(home), home / ".harpo")  # now ~/.harpo exists, in a form that is unusable
     assert paths.state_dir() == home / ".harpo"
     assert allowlist.names() == [] and allowlist.entries() == []
+
+
+# ---- F5: any home component that starts with .harpo is guarded ------------------------------------------------------
+
+def _edit(target: str, cwd: Path, capsys, tool: str = "Edit") -> tuple[int, str]:
+    key = "notebook_path" if tool == "NotebookEdit" else "file_path"
+    event = {"tool_name": tool, "cwd": str(cwd), "permission_mode": "default", "session_id": "s1", "tool_use_id": "t1",
+             "tool_input": {key: target, "old_string": "a", "new_string": "b", "content": "b", "new_source": "b"}}
+    code = hooks.decide(json.dumps(event), ask=True)
+    out = capsys.readouterr().out
+    return code, (json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else "")
+
+
+F5_GUARDED = [
+    ".harpo.migrating.abc/allow",  # the temp folder the migration renames into place
+    ".harpocrates.bak/allow",  # a backup of the old folder
+    ".HARPO.x/allow",  # other case
+    ".Harpocrates.bak/grants/s1.json",
+    "．harpo.bak/allow",  # NFKC: a full-width dot
+    ".ｈarpo.old/allow",  # NFKC: a full-width letter
+    ".harpoonx/allow",  # accepted over-block: it starts with .harpo
+    ".harpo-not/x",
+    ".harpocrates-not/x",
+    ".harpo.migrating.abc",  # the folder itself
+]
+F5_FREE = [
+    "work/.harpo/x",  # not directly under the home folder: a project folder that happens to carry the name
+    "work/.harpo.bak/allow",
+    ".harp/x",  # does not start with .harpo
+    "harpo/x",  # no dot
+    "x.harpo/x",
+    ".config/harpo/x",
+]
+
+
+@pytest.mark.parametrize("rel", F5_GUARDED)
+def test_sec_09_f5_a_home_component_that_starts_with_harpo_is_state(home: Path, rel: str, capsys) -> None:
+    assert allowlist.inside_state_dir(home / rel)
+    assert _edit(str(home / rel), home, capsys) == (0, "deny")
+    assert _edit(rel, home, capsys) == (0, "deny")  # relative to the home folder
+    assert allowlist.touches("echo x >> allow", home / rel)  # and as the working directory of a command
+
+
+@pytest.mark.parametrize("rel", F5_FREE)
+def test_sec_09_f5_other_paths_are_not_state(home: Path, rel: str, capsys) -> None:
+    assert not allowlist.inside_state_dir(home / rel)
+    assert _edit(str(home / rel), home, capsys) == (0, "")
+    assert not allowlist.inside_state_dir(home.parent / ".harpo" / "allow")  # a sibling of the home folder is not under it
+    assert not allowlist.inside_state_dir(home)
+
+
+def test_sec_09_f5_the_temp_folder_of_a_running_migration_is_guarded(home: Path, monkeypatch, capsys) -> None:
+    """While the copy runs the agent could edit the tmp folder before it is renamed into place."""
+    _make_old(home)
+    seen: list[bool] = []
+    real = paths._assert_plain_tree
+
+    def spy(root: Path) -> None:
+        seen.append(allowlist.inside_state_dir(root / "allow"))
+        real(root)
+
+    monkeypatch.setattr(paths, "_assert_plain_tree", spy)
+    paths.state_dir()
+    assert seen == [True]
