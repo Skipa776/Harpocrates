@@ -1453,7 +1453,10 @@ def _extract_context_features(
         re.compile(r"^\s*def\s+\w+\s*\(", re.M),  # Python
         re.compile(r"^\s*function\s+\w+\s*\(", re.M),  # JavaScript
         re.compile(r"^\s*func\s+\w+\s*\(", re.M),  # Go
-        re.compile(r"^\s*(public|private|protected)?\s*(static)?\s*\w+\s+\w+\s*\(", re.M),  # Java
+        re.compile(
+            r"^[ \t]*(?:(?:public|private|protected)[ \t]+)?(?:static[ \t]+)?\w+[ \t]+\w+[ \t]*\(",
+            re.M,
+        ),  # Java
     ]
     has_func_def = any(p.search(full_text) for p in func_patterns)
 

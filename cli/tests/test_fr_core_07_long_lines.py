@@ -1,5 +1,6 @@
 """FR-CORE-07: feature extraction runs in time linear in line length (minified JS, inline base64)."""
 
+import re
 import time
 
 import pytest
@@ -48,7 +49,9 @@ def test_fr_core_07_feature_var_name_normal_lines_unchanged():
     # Pinned to the behavior before the window was added; the model features depend on it.
     assert feature_var_name('api_key = "abc123secretvalue"', "abc123secretvalue") == "api_key"
     assert feature_var_name('DB_PASSWORD: "Wint3r#9"', "Wint3r#9") == "DB_PASSWORD"
-    assert feature_var_name('  DB_PASSWORD: "Wint3r#9"', "Wint3r#9") is None  # `^` anchors at line start
+    assert (
+        feature_var_name('  DB_PASSWORD: "Wint3r#9"', "Wint3r#9") is None
+    )  # `^` anchors at line start
     assert feature_var_name('connect("abc123secretvalue")', "abc123secretvalue") is None
     assert feature_var_name("TOKEN=abc123secretvalue", "abc123secretvalue") == "TOKEN"
 
@@ -68,3 +71,81 @@ def test_fr_core_07_extract_features_long_line(kind):
     context = extract_context(line, 1)
     extract_features(finding, context)
     assert time.perf_counter() - start < _TIME_BOUND_SECONDS
+
+
+def _spaces_then_assignment(count: int) -> str:
+    """
+    Description: Build a whitespace run followed by an assignment, to stress whitespace-adjacent regexes.
+    Parameters:
+        count: number of spaces before the assignment.
+    Output: the line.
+    """
+    return " " * count + f'var k="{_TOKEN}";'
+
+
+@pytest.mark.parametrize("count", [5_000, 50_000])
+def test_fr_core_07_java_func_pattern_whitespace_run(count):
+    line = _spaces_then_assignment(count)
+    finding = Finding(
+        type="ENTROPY_CANDIDATE",
+        snippet="whitespace",
+        evidence=EvidenceType.ENTROPY,
+        severity=Severity.HIGH,
+        token=_TOKEN,
+        line=1,
+    )
+    start = time.perf_counter()
+    context = extract_context(line, 1)
+    extract_features(finding, context)
+    assert time.perf_counter() - start < _TIME_BOUND_SECONDS
+
+
+_OLD_JAVA_FUNC_PATTERN = re.compile(
+    r"^\s*(public|private|protected)?\s*(static)?\s*\w+\s+\w+\s*\(", re.M
+)
+_NEW_JAVA_FUNC_PATTERN = re.compile(
+    r"^[ \t]*(?:(?:public|private|protected)[ \t]+)?(?:static[ \t]+)?\w+[ \t]+\w+[ \t]*\(", re.M
+)
+
+_JAVA_FUNC_SNIPPETS = [
+    "public static void main(String[] args) {",
+    "private int foo (int a) {",
+    "protected final void run() {",
+    "String bar(int x) {",
+    "static int x() {",
+    "int total(",
+    "    public void indented() {",
+    "\tprivate String tabbed(String s) {",
+    "\t\tstatic int deep(",
+    "\n\n  public int leadingBlank() {",
+    "x = 1\npublic void second() {\n}",
+    "return a + b(",
+    "x = foo(1)",
+    "foo(1, 2)",
+    "def helper(self, x):",
+    "    def method(self):",
+    "function render(props) {",
+    "func Handle(w http.ResponseWriter) {",
+    "const f = (a) => a",
+    "api_key = 'abc'\nconnect(api_key)",
+    "if (x > 1) {",
+    "new Thing(a)",
+    "public\nvoid run(",
+    "public static\nvoid run(",
+    "\n\n\n  \n    \nint x(",
+]
+
+
+@pytest.mark.parametrize("text", _JAVA_FUNC_SNIPPETS)
+def test_fr_core_07_java_func_pattern_same_results(text):
+    assert bool(_NEW_JAVA_FUNC_PATTERN.search(text)) == bool(_OLD_JAVA_FUNC_PATTERN.search(text))
+
+
+# Known, accepted semantic difference: the old pattern let `\s` span a newline, so a type and name
+# (or name and `(`) split across lines counted as a function definition. The linear pattern is
+# line-bounded; `\s` across newlines is what made it cubic. Real Java signatures with the whole
+# `type name(` on one line, and any such line inside a multi-line context, match identically.
+@pytest.mark.parametrize("text", ["int\nfoo(", "void run\n("])
+def test_fr_core_07_java_func_pattern_newline_split_differs(text):
+    assert _OLD_JAVA_FUNC_PATTERN.search(text)
+    assert not _NEW_JAVA_FUNC_PATTERN.search(text)
