@@ -48,7 +48,13 @@ _VALID_ENGINES = ("auto", "python", "rust")
 
 
 def _resolve_fail_on(raw: str) -> Optional[Severity]:
-    """Parse --fail-on into a minimum Severity, or None to disable the gate."""
+    """
+    Description: Parse the minimum severity used to gate scan exit status.
+    Parameters:
+        raw: User-supplied --fail-on value, normalized by trimming and lowercasing.
+    Output: Severity or None for none; raises typer.BadParameter for unsupported values.
+    Notes: Parse --fail-on into a minimum Severity, or None to disable the gate.
+    """
     normalized = raw.strip().lower()
     if normalized == _FAIL_ON_NONE:
         return None
@@ -62,13 +68,26 @@ def _resolve_fail_on(raw: str) -> Optional[Severity]:
 
 
 def _fail_on_callback(value: str) -> str:
-    """Validate --fail-on at argument-parse time so bad input fails fast."""
+    """
+    Description: Validate --fail-on during argument parsing so invalid input fails before scanning.
+    Parameters:
+        value: User-supplied severity threshold text.
+    Output: Original value after validation; raises typer.BadParameter for invalid thresholds.
+    Notes: Validate --fail-on at argument-parse time so bad input fails fast.
+    """
     _resolve_fail_on(value)
     return value
 
 
 def _engine_callback(value: str) -> str:
-    """Validate the selected scan engine at argument-parse time."""
+    """
+    Description: Validate and normalize the scan-engine choice during argument parsing.
+    Parameters:
+        value: User-supplied engine name.
+    Output: Trimmed lowercase auto, python, or rust; raises typer.BadParameter for unsupported
+        names.
+    Notes: Validate the selected scan engine at argument-parse time.
+    """
     normalized = value.strip().lower()
     if normalized not in _VALID_ENGINES:
         valid = ", ".join(_VALID_ENGINES)
@@ -77,7 +96,16 @@ def _engine_callback(value: str) -> str:
 
 
 def _should_fail(findings, min_severity: Optional[Severity]) -> bool:
-    """Return True if any finding meets or exceeds the minimum severity."""
+    """
+    Description: Determine whether findings meet the configured minimum severity for a failing exit
+        status.
+    Parameters:
+        findings: Iterable of findings with severity values.
+        min_severity: Minimum failing severity, or None to disable the gate.
+    Output: True if any finding meets the threshold, otherwise False; unknown severity keys raise
+        KeyError.
+    Notes: Return True if any finding meets or exceeds the minimum severity.
+    """
     if min_severity is None:
         return False
     threshold = _SEVERITY_RANK[min_severity]
@@ -85,6 +113,12 @@ def _should_fail(findings, min_severity: Optional[Severity]) -> bool:
 
 
 def _version_callback(value: bool) -> None:
+    """
+    Description: Handle the eager version flag without running a scan.
+    Parameters:
+        value: Whether --version was requested.
+    Output: None when false; otherwise prints the package version and raises typer.Exit with code 0.
+    """
     if value:
         from Harpocrates import __version__
 
@@ -92,17 +126,68 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit(code=0)
 
 
-@app.callback()
+@app.callback(help=(
+    'Harpocrates - Secrets detection for code repositories'
+))
 def _main(
     version: bool = typer.Option(
         False, "--version", callback=_version_callback, is_eager=True,
         help="Show the version and exit.",
     ),
 ) -> None:
-    """Harpocrates - Secrets detection for code repositories."""
+    """
+    Description: Provide the root CLI callback for Harpocrates secret detection.
+    Parameters:
+        version: Eager version flag handled by _version_callback.
+    Output: None; the callback body has no side effects.
+    Notes: Harpocrates - Secrets detection for code repositories.
+    """
 
 
-@app.command()
+@app.command(help=(
+    '\n'
+    '    Scan a file or directory for secrets.\n'
+    '\n'
+    '    By default, detected secret tokens are redacted in both table and JSON\n'
+    '    output. Pass --show-secrets to display full tokens (use with caution).\n'
+    '\n'
+    '    Examples:\n'
+    '\n'
+    '        # Scan a single file\n'
+    '        harpocrates scan config.env\n'
+    '\n'
+    '        # Scan a directory recursively\n'
+    '        harpocrates scan ./my_project\n'
+    '\n'
+    '        # Output as JSON\n'
+    '        harpocrates scan ./my_project --json\n'
+    '\n'
+    '        # Ignore specific patterns\n'
+    '        harpocrates scan ./my_project --ignore "*.test.js,test_*"\n'
+    '\n'
+    '        # Fewer, higher-confidence findings\n'
+    '        harpocrates scan ./my_project --ml-threshold 0.7\n'
+    '\n'
+    '        # Require the native regex/entropy scanner; ML still runs in Python\n'
+    '        harpocrates scan ./my_project --engine rust\n'
+    '\n'
+    '        # Display full token values (NOT recommended outside local debugging)\n'
+    '        harpocrates scan config.env --show-secrets\n'
+    '\n'
+    '        # Scan every commit in git history (finds secrets deleted from disk)\n'
+    '        harpocrates scan . --history\n'
+    '\n'
+    '        # Only fail CI on high or critical findings\n'
+    '        harpocrates scan ./my_project --fail-on high\n'
+    '\n'
+    '        # Report findings but never return a non-zero exit code\n'
+    '        harpocrates scan ./my_project --fail-on none\n'
+    '\n'
+    '        # XAI: emit JSON with per-feature SHAP contributions\n'
+    '        harpocrates scan ./my_project --explain | jq '
+    "'.findings[0].explanation.top_positive'\n"
+    '    '
+))
 def scan(
     paths: Optional[List[Path]] = typer.Argument(default=None, help="Files or directories to scan"),
     recursive: bool = typer.Option(
@@ -153,45 +238,47 @@ def scan(
     ),
 ) -> None:
     """
-    Scan a file or directory for secrets.
-
-    By default, detected secret tokens are redacted in both table and JSON
-    output. Pass --show-secrets to display full tokens (use with caution).
-
-    Examples:
-
-        # Scan a single file
-        harpocrates scan config.env
-
-        # Scan a directory recursively
-        harpocrates scan ./my_project
-
-        # Output as JSON
-        harpocrates scan ./my_project --json
-
-        # Ignore specific patterns
-        harpocrates scan ./my_project --ignore "*.test.js,test_*"
-
-        # Fewer, higher-confidence findings
-        harpocrates scan ./my_project --ml-threshold 0.7
-
-        # Require the native regex/entropy scanner; ML still runs in Python
-        harpocrates scan ./my_project --engine rust
-
-        # Display full token values (NOT recommended outside local debugging)
-        harpocrates scan config.env --show-secrets
-
-        # Scan every commit in git history (finds secrets deleted from disk)
-        harpocrates scan . --history
-
-        # Only fail CI on high or critical findings
-        harpocrates scan ./my_project --fail-on high
-
-        # Report findings but never return a non-zero exit code
-        harpocrates scan ./my_project --fail-on none
-
-        # XAI: emit JSON with per-feature SHAP contributions
-        harpocrates scan ./my_project --explain | jq '.findings[0].explanation.top_positive'
+    Description: Scan supplied files, directories, or Git history and report findings with a
+        configurable severity exit gate.
+    Parameters:
+        paths: Paths to scan; no paths exits successfully without scanning.
+        recursive: Whether directory scans include subdirectories.
+        json_output: Whether to print structured JSON instead of a table.
+        max_file_size: Maximum file size in MiB, converted to bytes for scans.
+        engine: Selected auto, python, or rust scan engine.
+        ignore: Optional comma-separated ignore patterns.
+        ml_threshold: Additional ML confidence floor between zero and one.
+        show_secrets: Whether to include full token values; use with caution.
+        fail_on: Minimum failing severity or none to disable finding-based failure.
+        history: Whether to scan added lines across Git history instead of disk files.
+        explain: Whether to output JSON with per-feature TreeSHAP contributions.
+    Output: No return on handled paths; prints reports and diagnostics and raises typer.Exit with 0
+        for success, 1 for threshold findings, or 2 for handled configuration, model, or scan
+        errors. Loads the shipped model eagerly and fails closed if loading fails; scans input paths
+        and may load explanation dependencies. Unhandled scanner or explanation errors propagate.
+    Notes: Scan a file or directory for secrets.
+    Notes: By default, detected secret tokens are redacted in both table and JSON output. Pass
+        --show-secrets to display full tokens (use with caution).
+    Notes: Examples:
+    Notes:     # Scan a single file     harpocrates scan config.env
+    Notes:     # Scan a directory recursively     harpocrates scan ./my_project
+    Notes:     # Output as JSON     harpocrates scan ./my_project --json
+    Notes:     # Ignore specific patterns     harpocrates scan ./my_project --ignore
+        "*.test.js,test_*"
+    Notes:     # Fewer, higher-confidence findings     harpocrates scan ./my_project --ml-threshold
+        0.7
+    Notes:     # Require the native regex/entropy scanner; ML still runs in Python     harpocrates
+        scan ./my_project --engine rust
+    Notes:     # Display full token values (NOT recommended outside local debugging)     harpocrates
+        scan config.env --show-secrets
+    Notes:     # Scan every commit in git history (finds secrets deleted from disk)     harpocrates
+        scan . --history
+    Notes:     # Only fail CI on high or critical findings     harpocrates scan ./my_project
+        --fail-on high
+    Notes:     # Report findings but never return a non-zero exit code     harpocrates scan
+        ./my_project --fail-on none
+    Notes:     # XAI: emit JSON with per-feature SHAP contributions     harpocrates scan
+        ./my_project --explain | jq '.findings[0].explanation.top_positive'
     """
     # Zero-file early return — pre-commit passes no files when nothing is staged.
     if not paths:
@@ -393,20 +480,36 @@ def scan(
     raise typer.Exit(code=exit_on_findings)
 
 
-@app.command()
+@app.command(help=(
+    'Display version information.'
+))
 def version() -> None:
-    """Display version information."""
+    """
+    Description: Display the installed Harpocrates distribution version.
+    Parameters: None
+    Output: None; prints version information and propagates metadata lookup or output errors.
+    Notes: Display version information.
+    """
     from importlib.metadata import version as _version
     console.print(f"Harpocrates version {_version('harpocrates')}")
 
 
-@app.command()
+@app.command(help=(
+    "Show each detected agent harness's support tier, or print one harness's setup."
+))
 def setup(
     harness: Optional[str] = typer.Argument(
         None, help="claude-code or codex: print its read-tool setup. Omit to list detected harnesses."
     ),
 ) -> None:
-    """Show each detected agent harness's support tier, or print one harness's setup."""
+    """
+    Description: Display detected harness support tiers or a selected harness setup guide.
+    Parameters:
+        harness: Optional claude-code or codex guide identifier; None lists detected harnesses.
+    Output: None after printing the report or guide; prints unsupported-guide errors and raises
+        typer.Exit with code 2. Detection or output errors may propagate.
+    Notes: Show each detected agent harness's support tier, or print one harness's setup.
+    """
     from Harpocrates.harness import detect, setup_instructions, tier_report
 
     if harness is None:
@@ -420,6 +523,18 @@ def setup(
 
 
 def _install_run(remove: bool, claude_code: bool, codex: bool, dry_run: bool) -> None:
+    """
+    Description: Choose explicit or detected harness targets and run installation or removal with a
+        rendered report.
+    Parameters:
+        remove: Whether to uninstall instead of install.
+        claude_code: Whether Claude Code was explicitly selected.
+        codex: Whether Codex CLI was explicitly selected.
+        dry_run: Whether to preview changes.
+    Output: None on success; prints reports and raises typer.Exit with code 1 for no detected target
+        or failed reports. May write configuration, backups, and ownership state or invoke Claude
+        through installation helpers; unhandled helper errors propagate.
+    """
     from Harpocrates import install as _install
 
     targets = [t for t, wanted in (("claude-code", claude_code), ("codex", codex)) if wanted]
@@ -434,31 +549,72 @@ def _install_run(remove: bool, claude_code: bool, codex: bool, dry_run: bool) ->
         raise typer.Exit(code=1)
 
 
-@app.command("install")
+@app.command("install", help=(
+    "Write the read-tool setup into each harness's own config "
+    '(FR-INSTALL-01). No flag: every detected harness.'
+))
 def install_cmd(
     claude_code: bool = typer.Option(False, "--claude-code", help="Install for Claude Code."),
     codex: bool = typer.Option(False, "--codex", help="Install for Codex CLI."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write and run nothing."),
 ) -> None:
-    """Write the read-tool setup into each harness's own config (FR-INSTALL-01). No flag: every detected harness."""
+    """
+    Description: Install read-tool setup into selected or detected harness configuration under
+        FR-INSTALL-01.
+    Parameters:
+        claude_code: Whether to explicitly select Claude Code.
+        codex: Whether to explicitly select Codex CLI.
+        dry_run: Whether to show proposed changes without applying them.
+    Output: None on success; prints reports, may update harness files and MCP registration, and
+        raises typer.Exit with code 1 for missing targets or failed reports. Installation errors may
+        propagate.
+    Notes: Write the read-tool setup into each harness's own config (FR-INSTALL-01). No flag: every
+        detected harness.
+    """
     _install_run(False, claude_code, codex, dry_run)
 
 
-@app.command("uninstall")
+@app.command("uninstall", help=(
+    'Remove exactly what `harpocrates install` added; everything else and '
+    'the backups stay.'
+))
 def uninstall_cmd(
     claude_code: bool = typer.Option(False, "--claude-code", help="Uninstall from Claude Code."),
     codex: bool = typer.Option(False, "--codex", help="Uninstall from Codex CLI."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write and run nothing."),
 ) -> None:
-    """Remove exactly what `harpocrates install` added; everything else and the backups stay."""
+    """
+    Description: Remove configuration owned by Harpocrates installation while retaining other
+        settings and backups.
+    Parameters:
+        claude_code: Whether to explicitly select Claude Code.
+        codex: Whether to explicitly select Codex CLI.
+        dry_run: Whether to show proposed removal without applying it.
+    Output: None on success; prints reports, may remove owned configuration and MCP registration,
+        and raises typer.Exit with code 1 for missing targets or failed reports. Removal errors may
+        propagate.
+    Notes: Remove exactly what `harpocrates install` added; everything else and the backups stay.
+    """
     _install_run(True, claude_code, codex, dry_run)
 
 
 def _interactive() -> bool:
+    """
+    Description: Check whether standard input can support an interactive confirmation prompt.
+    Parameters: None
+    Output: True if stdin is a terminal, otherwise False; stream errors propagate.
+    """
     return sys.stdin.isatty()
 
 
-@app.command()
+@app.command(help=(
+    'Let agents read a path that Harpocrates would otherwise flag '
+    '(FR-READ-05). Every use is logged.\n'
+    '\n'
+    '    Exit code 0 ok, 1 refused or error, 3 a broad name needs '
+    'confirmation (--yes).\n'
+    '    '
+))
 def allow(
     path: Optional[Path] = typer.Argument(None, help="File or folder the agent may read even if it holds secrets."),
     name: Optional[str] = typer.Option(
@@ -468,17 +624,50 @@ def allow(
     yes: bool = typer.Option(False, "--yes", help="Confirm a broad name (src, lib, home, ...) without asking."),
     as_json: bool = typer.Option(False, "--json", help="Machine-readable result on stdout, for plugins."),
 ) -> None:
-    """Let agents read a path that Harpocrates would otherwise flag (FR-READ-05). Every use is logged.
-
-    Exit code 0 ok, 1 refused or error, 3 a broad name needs confirmation (--yes).
+    """
+    Description: Manage explicit path or name overrides for reads otherwise flagged under
+        FR-READ-05.
+    Parameters:
+        path: File or folder path to add or remove.
+        name: Exact file or folder name to allow across projects, instead of a path.
+        remove: Whether to remove the specified rule.
+        list_: Whether to display existing rules.
+        yes: Whether to confirm a broad name without prompting.
+        as_json: Whether to emit machine-readable JSON and never prompt.
+    Output: No return on handled paths; prints results and raises typer.Exit with 0 for success, 1
+        for refusal or handled error, or 3 when a broad name requires confirmation. May update the
+        allowlist or prompt interactively; uses are logged by the hook. Unhandled filesystem or
+        confirmation errors propagate.
+    Notes: Let agents read a path that Harpocrates would otherwise flag (FR-READ-05). Every use is
+        logged.
+    Notes: Exit code 0 ok, 1 refused or error, 3 a broad name needs confirmation (--yes).
     """
     from Harpocrates import allowlist
 
     def done(payload: dict, text: str, code: int = 0) -> NoReturn:
+        """
+        Description: Emit an allow-command result in the selected format and exit with its status.
+        Parameters:
+            payload: Dictionary serialized in JSON mode.
+            text: Human-readable result used outside JSON mode.
+            code: Exit status, defaulting to zero.
+        Output: No return; writes stdout or, for non-JSON failures, stderr, then raises typer.Exit
+            with code. Serialization and output errors propagate.
+        """
         typer.echo(json.dumps(payload) if as_json else text, err=code != 0 and not as_json)
         raise typer.Exit(code=code)
 
     def fail(message: str, code: int = 1, needs_confirmation: bool = False) -> NoReturn:
+        """
+        Description: Build a structured allow-command failure and terminate with the selected
+            status.
+        Parameters:
+            message: Failure explanation.
+            code: Exit status, defaulting to one.
+            needs_confirmation: Whether the client must request confirmation for a broad name.
+        Output: No return; emits an error payload or text through done and raises typer.Exit with
+            code. Output errors propagate.
+        """
         done({"ok": False, "error": message, "needs_confirmation": needs_confirmation}, f"✗ {message}", code)
 
     logged = f"Uses are logged to {allowlist.log_file()}."
@@ -533,7 +722,13 @@ def allow(
 
 
 def main() -> None:
-    """Main entry point for CLI."""
+    """
+    Description: Run the Typer application as the CLI entry point.
+    Parameters: None
+    Output: None if the application returns; dispatches commands, prints CLI output, and may raise
+        SystemExit or command errors.
+    Notes: Main entry point for CLI.
+    """
     app()
 
 
