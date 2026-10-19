@@ -157,3 +157,5 @@ docs/assets/divider-license.png
 docs/assets/divider-usage.png
 bench/build_model_improvement_nb.py
 bench/model_improvement.ipynb
+scripts/r2_audit.py
+scripts/r2_eval.py
