@@ -102,4 +102,6 @@ disallow_untyped_defs = false
 
 [tool.harpo.docstrings]
 # Modules converted to the Description/Parameters/Output format (DOC-DOCSTRING-01). Grows one module per commit.
-enforce = []
+enforce = [
+    "cli/Harpocrates/ml/context.py",
+]
