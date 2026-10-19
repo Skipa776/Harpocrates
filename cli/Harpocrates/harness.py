@@ -131,7 +131,7 @@ def tier_report(found: dict[str, bool]) -> str:
         lines.append(f"  {h.name}: {h.tier}")
         lines.append(f"    Not protected: {h.gap}")
         if h.setup:
-            lines.append(f"    Setup: harpocrates setup {h.setup}")
+            lines.append(f"    Setup: harpo setup {h.setup}")
         else:
             lines.append("    Protected today: nothing. There is no setup for this harness yet.")
     if not GATE_AVAILABLE:
@@ -305,7 +305,7 @@ command such as `cat` touches it. If the file holds a secret, a read is refused 
 safe_read / safe_grep, in every mode. Only an EDIT of such a file prompts you ("Harpocrates:" naming the
 file), once per file and session, even in accept-edits mode; Yes lets Claude change it (and read it
 as-is, so its values reach the provider), No leaves it untouched. A folder of known false alarms (hashes,
-build output) can be allowed for good with `harpocrates allow <path>`; each pass is logged in
+build output) can be allowed for good with `harpo allow <path>`; each pass is logged in
 ~/.harpo/allow.log. The deny rules above still win over the allowlist.
 Limit: a script that opens files itself gets through; the egress
 gate covers that. For OS-level blocking of the secret paths, see the sandbox step in docs/setup.md."""

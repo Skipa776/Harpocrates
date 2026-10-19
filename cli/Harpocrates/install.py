@@ -697,7 +697,7 @@ def _config_edit(path: Path, remove: bool) -> _Edit:
              else "a [permissions.harpocrates] table" if MCP_NAME in (data.get("permissions") or {}) else None)
     if clash:
         raise RefusalError(f"{_tilde(path)} already defines {clash} outside the Harpocrates block. Merge by hand "
-                      "(`harpocrates setup codex` prints the lines) or remove yours, then re-run; nothing was written.")
+                      "(`harpo setup codex` prints the lines) or remove yours, then re-run; nothing was written.")
     root, tables = harness.codex_config_parts()
     top = "# default_permissions must stay above the first [table]; the rest of this block is at the end.\n" + root
     new = _upsert(text, TOML_MARKS, [(top, "start"), (tables, "end")])

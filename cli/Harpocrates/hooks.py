@@ -133,7 +133,7 @@ BUDGET = 25.0  # seconds for the whole decision; Codex's documented example hook
 _deadline = float("inf")
 _EDIT_TOOLS = {"Edit", "MultiEdit", "Write", "NotebookEdit"}
 STATE_REFUSAL = ("Only the user can change the Harpocrates allowlist. Ask them to run "
-                 "`harpocrates allow <path>` in their own terminal.")
+                 "`harpo allow <path>` in their own terminal.")
 _PROMPTING_MODES = {"default", "acceptEdits", "plan", "auto"}  # auto: a hook's ask forces a real prompt
 _can_ask = False
 
