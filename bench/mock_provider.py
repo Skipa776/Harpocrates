@@ -169,16 +169,21 @@ def anthropic_message(turn: dict, model: str, serial: int, input_tokens: int) ->
     """
     Description: Build an Anthropic Messages API reply (the non-streaming message object) for one scripted turn.
     Parameters:
-        turn: {"text": str, "tool_calls": [{"name": str, "input": dict}]}, every key optional; an empty turn is a
-            short text reply.
+        turn: {"text": str, "thinking": str, "redacted_thinking": str, "tool_calls": [{"name": str, "input": dict}]},
+            every key optional; an empty turn is a short text reply.
         model: the model name to echo, taken from the request.
         serial: a counter that makes the ids unique per reply and identical when replayed.
         input_tokens: the figure to report as the request's input tokens.
-    Output: A message dict: text block first, then a tool_use block per call, stop_reason tool_use when there are
-        calls and end_turn otherwise. No side effects.
+    Output: A message dict: a thinking block (with a signature) and a redacted_thinking block when the turn has them, then
+        the text block, then a tool_use block per call; stop_reason tool_use when there are calls and end_turn otherwise.
+        No side effects.
     """
     calls = turn.get("tool_calls", [])
     content: list[dict] = []
+    if turn.get("thinking"):
+        content.append({"type": "thinking", "thinking": turn["thinking"], "signature": f"mocksig{serial:08d}"})
+    if turn.get("redacted_thinking"):
+        content.append({"type": "redacted_thinking", "data": turn["redacted_thinking"]})
     if turn.get("text") or not calls:
         content.append({"type": "text", "text": turn.get("text") or DEFAULT_TEXT})
     for index, call in enumerate(calls):
@@ -196,8 +201,9 @@ def anthropic_events(message: dict) -> list[tuple[str, dict]]:
     Parameters:
         message: a message dict from anthropic_message.
     Output: (event name, data) pairs: message_start, then for each content block content_block_start, content_block_delta
-        (text_delta, or input_json_delta in two pieces for a tool call) and content_block_stop, with one ping after the
-        first block starts, then message_delta and message_stop. A tool_use block starts with an empty input.
+        (text_delta; thinking_delta then signature_delta for thinking; input_json_delta in two pieces for a tool call;
+        none for redacted_thinking, which starts complete) and content_block_stop, with one ping after the first block
+        starts, then message_delta and message_stop. A tool_use block starts with an empty input.
     """
     usage = message["usage"]
     start = dict(message, content=[], stop_reason=None, usage=dict(usage, output_tokens=1))
@@ -207,6 +213,14 @@ def anthropic_events(message: dict) -> list[tuple[str, dict]]:
             events.append(("content_block_start", {"type": "content_block_start", "index": index,
                                                    "content_block": {"type": "text", "text": ""}}))
             deltas = [{"type": "text_delta", "text": block["text"]}]
+        elif block["type"] == "thinking":
+            events.append(("content_block_start", {"type": "content_block_start", "index": index,
+                                                   "content_block": {"type": "thinking", "thinking": "", "signature": ""}}))
+            deltas = [{"type": "thinking_delta", "thinking": block["thinking"]},
+                      {"type": "signature_delta", "signature": block["signature"]}]
+        elif block["type"] == "redacted_thinking":
+            events.append(("content_block_start", {"type": "content_block_start", "index": index, "content_block": block}))
+            deltas = []
         else:
             events.append(("content_block_start", {"type": "content_block_start", "index": index,
                                                    "content_block": dict(block, input={})}))
@@ -235,11 +249,18 @@ def responses_object(turn: dict, model: str, serial: int, input_tokens: int) -> 
         model: the model name to echo, taken from the request.
         serial: a counter that makes the ids unique per reply and identical when replayed.
         input_tokens: the figure to report as the request's input tokens.
-    Output: A response dict with status completed: a message item (output_text) first when there is text or no call,
-        then a function_call item per call, whose arguments are a JSON string. No side effects.
+    Output: A response dict with status completed: a reasoning item for thinking (a summary and encrypted_content) and one
+        for redacted_thinking (no summary), then a message item (output_text) when there is text or no call, then a
+        function_call item per call, whose arguments are a JSON string. No side effects.
     """
     calls = turn.get("tool_calls", [])
     output: list[dict] = []
+    if turn.get("thinking"):
+        output.append({"type": "reasoning", "id": f"rs_mock{serial:08d}", "encrypted_content": f"mockcipher{serial:08d}",
+                       "summary": [{"type": "summary_text", "text": turn["thinking"]}]})
+    if turn.get("redacted_thinking"):
+        output.append({"type": "reasoning", "id": f"rs_mock{serial:08d}x", "summary": [],
+                       "encrypted_content": turn["redacted_thinking"]})
     if turn.get("text") or not calls:
         output.append({"type": "message", "id": f"msg_mock{serial:08d}", "status": "completed", "role": "assistant",
                        "content": [{"type": "output_text", "text": turn.get("text") or DEFAULT_TEXT,
@@ -267,8 +288,10 @@ def responses_events(response: dict) -> list[tuple[str, dict]]:
         response: a response dict from responses_object.
     Output: (event name, data) pairs with a running sequence_number: response.created and response.in_progress (status
         in_progress, no output), then per output item output_item.added, its content events (content_part.added,
-        output_text.delta, output_text.done, content_part.done for a message; function_call_arguments.delta and .done for
-        a call) and output_item.done, then response.completed carrying the full response.
+        output_text.delta, output_text.done, content_part.done for a message; reasoning_summary_part.added,
+        reasoning_summary_text.delta and .done, reasoning_summary_part.done for a reasoning item with a summary;
+        function_call_arguments.delta and .done for a call) and output_item.done, then response.completed carrying the
+        full response.
     """
     events: list[tuple[str, dict]] = []
 
@@ -286,7 +309,18 @@ def responses_events(response: dict) -> list[tuple[str, dict]]:
     emit("response.created", response=skeleton)
     emit("response.in_progress", response=skeleton)
     for index, item in enumerate(response["output"]):
-        if item["type"] == "message":
+        if item["type"] == "reasoning":
+            emit("response.output_item.added", output_index=index, item=dict(item, summary=[]))
+            for part_index, part in enumerate(item["summary"]):
+                emit("response.reasoning_summary_part.added", item_id=item["id"], output_index=index,
+                     summary_index=part_index, part=dict(part, text=""))
+                emit("response.reasoning_summary_text.delta", item_id=item["id"], output_index=index,
+                     summary_index=part_index, delta=part["text"])
+                emit("response.reasoning_summary_text.done", item_id=item["id"], output_index=index,
+                     summary_index=part_index, text=part["text"])
+                emit("response.reasoning_summary_part.done", item_id=item["id"], output_index=index,
+                     summary_index=part_index, part=part)
+        elif item["type"] == "message":
             part = item["content"][0]
             emit("response.output_item.added", output_index=index, item=dict(item, status="in_progress", content=[]))
             emit("response.content_part.added", item_id=item["id"], output_index=index, content_index=0,
@@ -317,7 +351,7 @@ def sse_bytes(events: Iterable[tuple[str, dict]]) -> bytes:
     return b"".join(f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode() for name, data in events)
 
 
-_TURN_KEYS = {"text", "tool_calls", "error"}
+_TURN_KEYS = {"text", "thinking", "redacted_thinking", "tool_calls", "error"}
 
 
 def _check_turn(index: int, turn: object) -> None:
@@ -326,14 +360,15 @@ def _check_turn(index: int, turn: object) -> None:
     Parameters:
         index: the turn's position in the script, for the error message.
         turn: the parsed JSON value.
-    Output: None. Raises ValueError naming the turn when it is not an object with only text (str), tool_calls (a list of
+    Output: None. Raises ValueError naming the turn when it is not an object with only text, thinking and redacted_thinking (str), tool_calls (a list of
         {"name": str, "input": object}) and error ({"status": 400 to 599, "message": str}).
     """
     where = f"turn {index}"
     if not isinstance(turn, dict) or not set(turn) <= _TURN_KEYS:
         raise ValueError(f"{where}: must be an object with only {sorted(_TURN_KEYS)}")
-    if "text" in turn and not isinstance(turn["text"], str):
-        raise ValueError(f"{where}: text must be a string")
+    for key in ("text", "thinking", "redacted_thinking"):
+        if key in turn and not isinstance(turn[key], str):
+            raise ValueError(f"{where}: {key} must be a string")
     calls = turn.get("tool_calls", [])
     if not isinstance(calls, list):
         raise ValueError(f"{where}: tool_calls must be a list")
