@@ -106,3 +106,24 @@ def test_doc_docstring_01_nested_private_exempt(tmp_path):
     assert "_async_private:" not in result.stdout
     for name in ["public", "_top_level", "_method"]:
         assert f"{name}: missing Description:" in result.stdout
+
+
+def test_doc_docstring_01_every_package_module_enforced():
+    """Every tracked package module that defines a function or class is on the enforce list."""
+    import ast
+
+    import tomllib
+
+    root = Path(__file__).resolve().parents[2]
+    tracked = subprocess.run(
+        ["git", "ls-files", "cli/Harpocrates"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.split()
+    defines = {
+        p for p in tracked
+        if p.endswith(".py")
+        and any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                for n in ast.walk(ast.parse((root / p).read_text(encoding="utf-8"))))
+    }
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    enforced = set(config["tool"]["harpo"]["docstrings"]["enforce"])
+    assert defines <= enforced, f"not enforced: {sorted(defines - enforced)}"
