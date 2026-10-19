@@ -218,18 +218,6 @@ def is_test_file(file_path: Optional[str]) -> bool:
     return any(pattern.search(file_path) for pattern in TEST_PATH_PATTERNS)
 
 
-def has_safe_context(context: CodeContext) -> bool:
-    """Check if context suggests non-secret (safe) content."""
-    full_text = context.full_context
-    return any(pattern.search(full_text) for pattern in SAFE_CONTEXT_PATTERNS)
-
-
-def has_risky_context(context: CodeContext) -> bool:
-    """Check if context suggests secret content."""
-    full_text = context.full_context
-    return any(pattern.search(full_text) for pattern in RISKY_CONTEXT_PATTERNS)
-
-
 def extract_context(
     content: str,
     line_number: int,
@@ -352,8 +340,6 @@ __all__ = [
     "extract_var_name",
     "is_comment_line",
     "is_test_file",
-    "has_safe_context",
-    "has_risky_context",
     "detect_file_type",
     "SAFE_CONTEXT_PATTERNS",
     "RISKY_CONTEXT_PATTERNS",
