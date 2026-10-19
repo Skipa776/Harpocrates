@@ -1,6 +1,23 @@
 # R0 cleanup report (FR-CLEAN-01)
 
-Oct 18, 2026 · branch `r0/cleanup` · status: **awaiting Josh's approval. Nothing is deleted.**
+Oct 18, 2026 · branch `r0/cleanup` · status: **§1 and §2 approved and executed. §3 and §4 still await decisions.**
+
+Executed:
+- **§1, items 1–14:** commits `23434e1`..`0edec5a`.
+- **§2, items 15–22:** commits `ee24aa2`..`de0f5cf`.
+
+Verification:
+- **Findings:** `run_all.sh` output is byte-identical to `bench/results/r0-before/` after items 15, 19 and 21, and after the last commit.
+- **Clean-checkout tests:** 1,029 passed, 2 skipped, 1 known environmental failure (`test_packaging.py::test_wheel_installs_with_ml_pipeline`, which failed before the cuts too). The 64 removed tests covered only untracked training code.
+- **Mixed test file:** `test_ml_pipeline.py` kept its feature and verifier tests. Only its two training classes were removed.
+
+Stale references left on purpose. Each still works, or will be fixed by a later requirement:
+- `model_config.json` lines 14 and 45: shipped and hashed, so not edited.
+- Comments citing the notebook in `detector.py:108` and `test_candidate_extractors.py:61`.
+- `onnx_verifier.py:175`, which says "Re-convert with onnxmltools".
+- `AGENTS.md`, `CLAUDE.md` and `docs/samples/samples/06_explain_demo.java` say `[train]`. They keep working through the deprecated alias, and FR-NAME-01 rewrites them anyway.
+- `.gitleaksignore:16` names `generate_data.py`, which is now untracked.
+- `bench/compare_scanners.py:154` lazily imports scikit-learn, which is no longer in any extra.
 
 Method: `/ponytail-audit` over the whole repo. Then a read-only evidence pass per candidate: Python imports (AST, including lazy imports), references in docs, CI, `pyproject.toml`, `.gitignore` and pre-commit, and tests that exercise each item. Behavior before cleanup is snapshotted in `bench/results/r0-before/` (FR-CLEAN-02). Every cut is diffed against that snapshot.
 
