@@ -10,7 +10,7 @@ Every dataset used to train, validate, or benchmark the Harpocrates detector. Al
 
 `xgboost_model.json` is the same model (used by `--explain`). There is no native fallback: if the ONNX model cannot load, `harpocrates scan` exits 2. The previous shipped model (v1.1, model v16) is archived locally as `data/models/v16.json`.
 
-**How it was trained:** `scripts/train_v11.py --pipeline-features` on **scanner candidates**. The scanner's own extraction runs over each record, and each candidate is labeled by overlap with the true secret. The training data is:
+**How it was trained:** `scripts/train_v11.py --pipeline-features` (training pipeline at tag v1.3.0) on **scanner candidates**. The scanner's own extraction runs over each record, and each candidate is labeled by overlap with the true secret. The training data is:
 - 94,183 candidate rows from the three training files below;
 - 62,883 real-code negative rows: every ML candidate in 30,000 files sampled from the 142 train-split OSS repos, excluding the 363 that a model trained without them scored ≥ 0.9, which were mostly credential-shaped test fixtures (`--reliable-below 0.9`).
 

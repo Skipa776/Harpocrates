@@ -64,7 +64,7 @@ An ML-verified finding's `confidence` is the model's probability that the candid
 
 The routing thresholds still apply to the raw score. Calibration changes the number reported with each finding, never which findings are reported.
 
-Reproduce: `python scripts/calibrate.py` (add `--write` to refit the shipped map).
+Reproduce: run `scripts/calibrate.py` from the training pipeline at tag v1.3.0 (add `--write` to refit the shipped map).
 
 | Set | Candidates | ECE, raw score | ECE, calibrated |
 | --- | --- | --- | --- |

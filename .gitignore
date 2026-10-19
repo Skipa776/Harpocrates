@@ -160,3 +160,9 @@ bench/model_improvement.ipynb
 scripts/r2_audit.py
 scripts/r2_eval.py
 scripts/generate_synthetic_data.py
+scripts/train_v11.py
+scripts/calibrate.py
+scripts/convert_to_onnx.py
+scripts/r2_common.py
+cli/tests/test_r2_metrics.py
+cli/tests/test_train_pipeline_features.py
