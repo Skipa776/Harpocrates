@@ -386,3 +386,26 @@ def test_fr_proof_04_mock_shuts_down_cleanly_on_sigint(tmp_path: Path) -> None:
     assert proc.returncode == 0 and "Traceback" not in err and err == ""
     rows = [json.loads(line) for line in (tmp_path / "rec" / "requests.jsonl").read_text().splitlines()]
     assert len(rows) == 1 and rows[0]["route"] == "anthropic.messages"
+
+
+# --- reply headers (G2 verify item T9: does the agent send back a header the server set?) ------------------------------
+
+def test_fr_proof_04_mock_sends_the_configured_reply_headers_on_json_and_sse(tmp_path: Path) -> None:
+    with mock.start_server(record_dir=tmp_path / "rec", reply_headers={"x-codex-turn-state": "opaque-state-1"}) as srv:
+        _, hdrs, _ = post_json(srv, "/v1/responses", RESPONSES_REQUEST)
+        assert hdrs["x-codex-turn-state"] == "opaque-state-1"
+        _, hdrs, _ = post_json(srv, "/v1/responses", {**RESPONSES_REQUEST, "stream": True})
+        assert hdrs["x-codex-turn-state"] == "opaque-state-1" and hdrs["content-type"].startswith("text/event-stream")
+        _, hdrs, _ = send(srv, "GET", "/nowhere")
+        assert hdrs["x-codex-turn-state"] == "opaque-state-1"
+
+
+@pytest.mark.parametrize("name, value", [("bad name", "v"), ("x-a", "line\r\nx-evil: 1"), ("", "v"), ("x-a", "v\n")])
+def test_fr_proof_04_mock_refuses_a_reply_header_that_could_split_the_response(name: str, value: str, tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        mock.start_server(record_dir=tmp_path / "rec", reply_headers={name: value})
+
+
+def test_fr_proof_04_mock_cli_takes_reply_headers(tmp_path: Path, capsys) -> None:
+    assert mock.main(["--reply-header", "no-equals-sign", "--record", str(tmp_path / "rec")]) == 2
+    assert "NAME=VALUE" in capsys.readouterr().err

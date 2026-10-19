@@ -27,6 +27,7 @@ import io
 import ipaddress
 import json
 import os
+import re
 import signal
 import socket
 import sys
@@ -481,6 +482,22 @@ def ensure_loopback(host: str) -> str:
     return host
 
 
+_HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
+
+
+def check_reply_headers(headers: dict[str, str]) -> tuple:
+    """
+    Description: Validate extra response headers, so a value can never split the response.
+    Parameters:
+        headers: {name: value} to add to every response.
+    Output: A tuple of (name, value) pairs. Raises ValueError for an empty or non-token name, or a value with CR, LF or NUL.
+    """
+    for name, value in headers.items():
+        if not _HEADER_NAME.match(name) or any(ch in value for ch in "\r\n\0"):
+            raise ValueError(f"reply header {name!r} is not a valid name and single-line value")
+    return tuple(headers.items())
+
+
 @dataclass(frozen=True)
 class Config:
     """
@@ -489,12 +506,14 @@ class Config:
         turns: the scripted replies, one per model call (see load_script); empty means a short text reply every time.
         max_body: the largest request body accepted, raw or decompressed, in bytes.
         count_tokens_status: when set, /v1/messages/count_tokens answers this HTTP error status instead of a count.
+        reply_headers: (name, value) pairs added to every response, such as a sticky-routing header the agent should echo.
     Output: An immutable record read by every request handler.
     """
 
     turns: tuple = ()
     max_body: int = MAX_BODY_BYTES
     count_tokens_status: Optional[int] = None
+    reply_headers: tuple = ()
 
 
 class RawBody(NamedTuple):
@@ -868,7 +887,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
-            for name, value in (extra or {}).items():
+            for name, value in {**dict(self.server.config.reply_headers), **(extra or {})}.items():
                 self.send_header(name, value)
             self.end_headers()
             if self.command != "HEAD":
@@ -888,6 +907,8 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Transfer-Encoding", "chunked")
+            for name, value in self.server.config.reply_headers:
+                self.send_header(name, value)
             self.end_headers()
             for event in events:
                 data = sse_bytes([event])
@@ -1035,7 +1056,7 @@ class MockServer:
 
 def start_server(host: str = "127.0.0.1", port: int = 0, record_dir: Optional[Path] = None,
                  turns: Iterable[dict] = (), max_body: int = MAX_BODY_BYTES,
-                 count_tokens_status: Optional[int] = None) -> MockServer:
+                 count_tokens_status: Optional[int] = None, reply_headers: Optional[dict] = None) -> MockServer:
     """
     Description: Start the mock provider on a loopback address in a background thread.
     Parameters:
@@ -1045,11 +1066,12 @@ def start_server(host: str = "127.0.0.1", port: int = 0, record_dir: Optional[Pa
         turns: the scripted replies (see load_script).
         max_body: the largest request body accepted, in bytes.
         count_tokens_status: an HTTP error status for count_tokens, or None for a fixed count.
-    Output: The running MockServer. Raises ValueError for a non-loopback host before anything is created, OSError when
-        the port is taken.
+        reply_headers: {name: value} added to every response (see check_reply_headers).
+    Output: The running MockServer. Raises ValueError for a non-loopback host or a bad reply header before anything is
+        created, OSError when the port is taken.
     """
     bind = ensure_loopback(host)
-    config = Config(tuple(turns), max_body, count_tokens_status)
+    config = Config(tuple(turns), max_body, count_tokens_status, check_reply_headers(reply_headers or {}))
     httpd = _Httpd((bind, port), config, record_dir)
     if not ipaddress.ip_address(httpd.server_address[0]).is_loopback:  # belt and braces after the bind
         httpd.server_close()
@@ -1075,11 +1097,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--script", type=Path, default=None, help="JSON list of scripted turns")
     parser.add_argument("--max-body", type=int, default=MAX_BODY_BYTES, help="largest accepted body in bytes")
     parser.add_argument("--count-tokens-status", type=int, default=None, help="answer count_tokens with this HTTP error")
+    parser.add_argument("--reply-header", action="append", default=[], metavar="NAME=VALUE",
+                        help="add this header to every response (repeatable)")
     args = parser.parse_args(argv)
     try:
         ensure_loopback(args.host)
+        extra = dict(pair.split("=", 1) if "=" in pair else (pair, None) for pair in args.reply_header)
+        if None in extra.values():
+            raise ValueError("--reply-header needs NAME=VALUE")
         turns = load_script(args.script) if args.script else []
-        server = start_server(args.host, args.port, args.record, turns, args.max_body, args.count_tokens_status)
+        server = start_server(args.host, args.port, args.record, turns, args.max_body, args.count_tokens_status, extra)
     except ValueError as exc:
         print(f"mock_provider: {exc}", file=sys.stderr)
         return 2
