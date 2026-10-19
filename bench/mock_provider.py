@@ -787,6 +787,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
     server_version = "mock-provider"
+    disable_nagle_algorithm = True  # headers and body are two writes; Nagle plus delayed ACK would add 40 ms to each reply
 
     def log_message(self, format: str, *args: object) -> None:
         """
