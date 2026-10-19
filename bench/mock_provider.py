@@ -19,10 +19,14 @@ Bad input never crashes it. A malformed, oversized (over 64 MiB) or wrongly enco
 """
 from __future__ import annotations
 
+import importlib
+import io
 import urllib.parse
-from typing import Iterable
+import zlib
+from typing import Callable, Iterable, NamedTuple, Optional
 
 PRESENT = "<present>"
+MAX_BODY_BYTES = 64 * 1024 * 1024
 CREDENTIAL_WORDS = ("auth", "key", "token", "cookie", "secret", "session")
 CREDENTIAL_NAMES = ("chatgpt-account-id",)
 
@@ -64,3 +68,72 @@ def redact_target(target: str) -> str:
     pairs = urllib.parse.parse_qsl(query, keep_blank_values=True)
     kept = [(k, PRESENT if v and is_credential_header(k) else v) for k, v in pairs]
     return path + "?" + urllib.parse.urlencode(kept, quote_via=urllib.parse.quote)
+
+
+class Decoded(NamedTuple):
+    """
+    Description: The outcome of decoding one request body for the recording.
+    Parameters:
+        body: the decompressed bytes, or None when they could not or should not be produced.
+        status: ok, too-large, bad-encoding, unsupported-encoding or zstd-unavailable.
+    Output: An immutable pair; body is None for every status except ok.
+    """
+
+    body: Optional[bytes]
+    status: str
+
+
+def _load_zstd() -> Optional[Callable[[bytes, int], bytes]]:
+    """
+    Description: Find a zstd decompressor in the standard library (Python 3.14) or the optional zstandard package.
+    Parameters: None
+    Output: A function (data, cap) -> bytes that returns at most cap + 1 bytes of output and raises on a corrupt frame,
+        or None when no zstd module can be imported. Imports a module; no other side effects.
+    """
+    try:
+        stdlib = importlib.import_module("compression.zstd")
+        return lambda data, cap: stdlib.ZstdDecompressor().decompress(data, max_length=cap + 1)
+    except ImportError:
+        pass
+    try:
+        third = importlib.import_module("zstandard")
+        return lambda data, cap: third.ZstdDecompressor().stream_reader(io.BytesIO(data)).read(cap + 1)
+    except ImportError:
+        return None
+
+
+def decode_body(raw: bytes, content_encoding: Optional[str], cap: int = MAX_BODY_BYTES) -> Decoded:
+    """
+    Description: Decompress a request body so the recording holds the text the agent sent, never expanding past the cap.
+    Parameters:
+        raw: the body bytes exactly as received.
+        content_encoding: the Content-Encoding header value, or None.
+        cap: the largest decompressed size accepted, in bytes.
+    Output: Decoded(body, "ok") for an identity or gzip body (and zstd when a module is importable) within the cap;
+        Decoded(None, "too-large") over the cap (a compression bomb is never fully expanded);
+        Decoded(None, "bad-encoding") for a corrupt or truncated stream; Decoded(None, "unsupported-encoding") for
+        any other value, a list included; Decoded(None, "zstd-unavailable") for zstd with no module. No side effects.
+    """
+    encoding = (content_encoding or "").strip().lower()
+    if encoding in ("", "identity"):
+        return Decoded(raw, "ok") if len(raw) <= cap else Decoded(None, "too-large")
+    if encoding in ("gzip", "x-gzip"):
+        try:
+            stream = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            out = stream.decompress(raw, cap + 1)
+            complete = stream.eof
+        except zlib.error:
+            return Decoded(None, "bad-encoding")
+        if len(out) > cap:
+            return Decoded(None, "too-large")
+        return Decoded(out, "ok") if complete else Decoded(None, "bad-encoding")
+    if encoding == "zstd":
+        decompress = _load_zstd()
+        if decompress is None:
+            return Decoded(None, "zstd-unavailable")
+        try:
+            out = decompress(raw, cap)
+        except Exception:  # noqa: BLE001 - any decoder failure is a bad stream, never a crash
+            return Decoded(None, "bad-encoding")
+        return Decoded(out, "ok") if len(out) <= cap else Decoded(None, "too-large")
+    return Decoded(None, "unsupported-encoding")
