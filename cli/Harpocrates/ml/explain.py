@@ -14,10 +14,14 @@ Architectural contracts:
 - The XGBoost Booster is cached per resolved path with double-checked locking
   (thread-safe for future async/multi-threaded MCP transports).
 - model_path overrides must reside within _MODELS_DIR (cache-poisoning guard).
+- The model file is SHA-256-checked against onnx_model_hashes.json before use
+  (SEC-07), and the verified bytes are the bytes that get loaded. A missing
+  manifest, a missing entry, or a mismatch is refused, never loaded.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import threading
 from dataclasses import asdict, dataclass
@@ -215,6 +219,8 @@ def _load_booster(model_path: Optional[Path]) -> "xgb.Booster":
 
     Security: model_path, if provided, must reside within _MODELS_DIR to
     prevent untrusted callers from poisoning the cache with a malicious model.
+    The file must also match its SHA-256 entry in the manifest (SEC-07); on a
+    missing manifest, missing entry, or mismatch this raises and loads nothing.
     """
     import xgboost as xgb
 
@@ -245,10 +251,31 @@ def _load_booster(model_path: Optional[Path]) -> "xgb.Booster":
                 "`pip install harpocrates` (explain extra: `harpocrates[explain]`) to restore it."
             )
 
+        # SEC-07: load the exact bytes that passed the hash check, not a re-read of the path.
         booster = xgb.Booster()
-        booster.load_model(str(path))
+        booster.load_model(bytearray(_read_verified_model(path)))
         _BOOSTER_CACHE[resolved] = booster
         return booster
+
+
+def _read_verified_model(path: Path) -> bytes:
+    """
+    Description: Read a model artifact and check its SHA-256 against the manifest, failing closed.
+    Parameters:
+        path: model file to verify; its file name is the manifest key.
+    Output: the verified file bytes. Raises FileNotFoundError when the manifest is
+        absent, and ValueError when the manifest has no entry for the file or the hash
+        does not match. No side effects.
+    """
+    from Harpocrates.ml.onnx_verifier import _verify_file_hash  # lazy: keeps module import light
+
+    if not _DEFAULT_HASHES_PATH.exists():
+        raise FileNotFoundError(
+            f"Model hash manifest not found: {_DEFAULT_HASHES_PATH}. "
+            "Refusing to load an unverified model."
+        )
+    expected: Dict[str, str] = json.loads(_DEFAULT_HASHES_PATH.read_text())
+    return _verify_file_hash(path, expected)
 
 
 def _reset_booster_cache() -> None:
