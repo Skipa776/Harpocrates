@@ -84,7 +84,7 @@ markers = [
 [tool.setuptools.packages.find]
 where = ["cli"]
 include = ["Harpocrates*"]
-exclude = ["tests*", "examples*", "scripts*", "comparison*"]
+exclude = ["tests*", "scripts*"]
 
 [tool.setuptools.package-data]
 "Harpocrates.ml.models" = [
