@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+from Harpocrates import envvars
 from Harpocrates.core.classification import infer_category
 from Harpocrates.core.detector import (
     _apply_ml_verification,
@@ -29,9 +30,9 @@ if TYPE_CHECKING:
     from Harpocrates.ml.context import CodeContext
     from Harpocrates.ml.verifier import Verifier
 
-_BINARY_ENV = "HARPOCRATES_RUST_SCANNER"
+_BINARY_ENV = "RUST_SCANNER"  # read as HARPO_RUST_SCANNER, then HARPOCRATES_RUST_SCANNER (envvars.getenv)
 _BINARY_NAME = "harpocrates-rust-scanner"
-_DIRECTORY_TIMEOUT_ENV = "HARPOCRATES_RUST_TIMEOUT_SECONDS"
+_DIRECTORY_TIMEOUT_ENV = "RUST_TIMEOUT_SECONDS"  # likewise
 _DEFAULT_DIRECTORY_TIMEOUT_SECONDS = 300.0
 PROTOCOL_VERSION = 1
 _ML_BATCH_SIZE = 1024
@@ -88,7 +89,7 @@ class RustScannerBackend:
     def discover(cls, *, required: bool = False) -> Optional["RustScannerBackend"]:
         """Find an installed binary or a binary built in this source checkout."""
         candidates: list[Path] = []
-        configured = os.environ.get(_BINARY_ENV)
+        configured = envvars.getenv(_BINARY_ENV)
         if configured:
             candidates.append(Path(configured).expanduser())
 
@@ -280,18 +281,18 @@ class RustScannerBackend:
 
     @staticmethod
     def _directory_timeout() -> float:
-        raw_timeout = os.environ.get(_DIRECTORY_TIMEOUT_ENV)
+        raw_timeout = envvars.getenv(_DIRECTORY_TIMEOUT_ENV)
         if raw_timeout is None:
             return _DEFAULT_DIRECTORY_TIMEOUT_SECONDS
         try:
             timeout = float(raw_timeout)
         except ValueError as exc:
             raise RustScannerError(
-                f"{_DIRECTORY_TIMEOUT_ENV} must be a positive number"
+                f"HARPO_{_DIRECTORY_TIMEOUT_ENV} (or HARPOCRATES_{_DIRECTORY_TIMEOUT_ENV}) must be a positive number"
             ) from exc
         if not timeout > 0:
             raise RustScannerError(
-                f"{_DIRECTORY_TIMEOUT_ENV} must be a positive number"
+                f"HARPO_{_DIRECTORY_TIMEOUT_ENV} (or HARPOCRATES_{_DIRECTORY_TIMEOUT_ENV}) must be a positive number"
             )
         return timeout
 

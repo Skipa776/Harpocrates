@@ -1,14 +1,14 @@
 """FR-CORE-01: the Rust core gives the same regex + entropy findings as the Python engine.
 
-Skips when the binary isn't built. CI sets HARPOCRATES_REQUIRE_RUST=1 so a
+Skips when the binary isn't built. CI sets HARPOCRATES_REQUIRE_RUST=1 (HARPO_REQUIRE_RUST works too) so a
 missing binary fails instead of silently testing Python twice.
 """
 
-import os
 from pathlib import Path
 
 import pytest
 
+from Harpocrates import envvars
 from Harpocrates.core.rust_backend import RustScannerBackend
 from Harpocrates.core.scanner import scan_directory
 
@@ -18,8 +18,8 @@ SAMPLES = Path(__file__).resolve().parents[2] / "docs" / "samples" / "samples"
 @pytest.fixture(scope="module")
 def rust_available():
     if RustScannerBackend.discover() is None:
-        if os.environ.get("HARPOCRATES_REQUIRE_RUST") == "1":
-            pytest.fail("HARPOCRATES_REQUIRE_RUST=1 but the Rust scanner binary was not found")
+        if envvars.getenv("REQUIRE_RUST") == "1":
+            pytest.fail("HARPO_REQUIRE_RUST=1 (or HARPOCRATES_REQUIRE_RUST=1) but the Rust scanner binary was not found")
         pytest.skip("Rust scanner binary not built")
 
 

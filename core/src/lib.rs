@@ -391,7 +391,9 @@ fn configured_worker_count(task_count: usize) -> usize {
         return 1;
     }
     let available = thread::available_parallelism().map_or(1, usize::from);
-    let configured = std::env::var("HARPOCRATES_RUST_WORKERS")
+    // HARPO_RUST_WORKERS first, then the old HARPOCRATES_RUST_WORKERS (FR-NAME-04).
+    let configured = std::env::var("HARPO_RUST_WORKERS")
+        .or_else(|_| std::env::var("HARPOCRATES_RUST_WORKERS"))
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from Harpocrates import allowlist, grants, install, paths
+from Harpocrates import allowlist, envvars, grants, install, paths
 
 SID = "sess-1"
 CANARY_PATH = "/proj/canary-0123456789/app.py"  # in the fixture files, so a leak into a message is visible
@@ -282,5 +282,48 @@ def test_fr_name_04_install_migrates_an_existing_record_and_leaves_the_old_one(h
     install.install_harnesses(["codex"])
     new_record = json.loads((home / ".harpo" / "install.json").read_text())
     assert "codex" in new_record and (old / "install.json").read_bytes() == before
+
+
+# ---- part 2: HARPO_* first, then HARPOCRATES_* --------------------------------------------------------------------
+
+@pytest.mark.parametrize("suffix", ["REQUIRE_RUST", "RUST_SCANNER", "RUST_TIMEOUT_SECONDS", "RUST_WORKERS"])
+def test_fr_name_04_env_precedence(monkeypatch, suffix: str) -> None:
+    new, old = f"HARPO_{suffix}", f"HARPOCRATES_{suffix}"
+    monkeypatch.delenv(new, raising=False)
+    monkeypatch.delenv(old, raising=False)
+    assert envvars.getenv(suffix) is None
+    monkeypatch.setenv(old, "old")
+    assert envvars.getenv(suffix) == "old"  # the old name still works alone
+    monkeypatch.setenv(new, "new")
+    assert envvars.getenv(suffix) == "new"  # the new name wins when both are set
+    monkeypatch.delenv(old)
+    assert envvars.getenv(suffix) == "new"
+    monkeypatch.setenv(old, "old")
+    monkeypatch.setenv(new, "")
+    assert envvars.getenv(suffix) == ""  # set means set: an empty HARPO_ value is not skipped
+
+
+def test_fr_name_04_env_precedence_in_the_rust_backend(monkeypatch, tmp_path: Path) -> None:
+    from Harpocrates.core.rust_backend import RustScannerBackend, RustScannerError
+
+    a, b = tmp_path / "scanner-new", tmp_path / "scanner-old"
+    for exe in (a, b):
+        exe.write_text("#!/bin/sh\n")
+        exe.chmod(0o755)
+    monkeypatch.setattr("Harpocrates.core.rust_backend.shutil.which", lambda name: None)
+    monkeypatch.delenv("HARPO_RUST_SCANNER", raising=False)
+    monkeypatch.setenv("HARPOCRATES_RUST_SCANNER", str(b))
+    assert RustScannerBackend.discover(required=True).executable == b
+    monkeypatch.setenv("HARPO_RUST_SCANNER", str(a))
+    assert RustScannerBackend.discover(required=True).executable == a
+
+    monkeypatch.delenv("HARPO_RUST_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setenv("HARPOCRATES_RUST_TIMEOUT_SECONDS", "42.5")
+    assert RustScannerBackend._directory_timeout() == 42.5
+    monkeypatch.setenv("HARPO_RUST_TIMEOUT_SECONDS", "7")
+    assert RustScannerBackend._directory_timeout() == 7.0
+    monkeypatch.setenv("HARPO_RUST_TIMEOUT_SECONDS", "soon")
+    with pytest.raises(RustScannerError, match="HARPO_RUST_TIMEOUT_SECONDS"):
+        RustScannerBackend._directory_timeout()
 
 
