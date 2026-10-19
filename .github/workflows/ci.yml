@@ -47,6 +47,9 @@ jobs:
       - name: Run ruff
         run: ruff check .
 
+      - name: Check docstrings
+        run: python scripts/check_docstrings.py --enforce
+
       - name: Run pytest (unit + smoke, no integration)
         run: pytest -q -m "not integration"
 
