@@ -91,6 +91,7 @@ exclude = ["tests*", "scripts*"]
     "model.onnx",
     "model_config.json",
     "onnx_model_hashes.json",
+    "xgboost_model.json",
 ]
 
 [tool.mypy]
