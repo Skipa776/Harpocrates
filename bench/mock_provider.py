@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import json
 import urllib.parse
 import zlib
 from typing import Callable, Iterable, NamedTuple, Optional
@@ -29,6 +30,8 @@ PRESENT = "<present>"
 MAX_BODY_BYTES = 64 * 1024 * 1024
 CREDENTIAL_WORDS = ("auth", "key", "token", "cookie", "secret", "session")
 CREDENTIAL_NAMES = ("chatgpt-account-id",)
+DEFAULT_TEXT = "Mock reply."
+CREATED_AT = 1760000000  # a fixed timestamp keeps replies reproducible
 
 
 def is_credential_header(name: str) -> bool:
@@ -137,3 +140,84 @@ def decode_body(raw: bytes, content_encoding: Optional[str], cap: int = MAX_BODY
             return Decoded(None, "bad-encoding")
         return Decoded(out, "ok") if len(out) <= cap else Decoded(None, "too-large")
     return Decoded(None, "unsupported-encoding")
+
+
+def _output_tokens(turn: dict) -> int:
+    """
+    Description: Estimate the output token count of a scripted turn, so usage fields hold plausible numbers.
+    Parameters:
+        turn: the scripted turn (text and tool_calls).
+    Output: A positive integer: a quarter of the text length plus a fixed amount per tool call.
+    """
+    return max(1, len(turn.get("text") or DEFAULT_TEXT) // 4 + 12 * len(turn.get("tool_calls", [])))
+
+
+def anthropic_message(turn: dict, model: str, serial: int, input_tokens: int) -> dict:
+    """
+    Description: Build an Anthropic Messages API reply (the non-streaming message object) for one scripted turn.
+    Parameters:
+        turn: {"text": str, "tool_calls": [{"name": str, "input": dict}]}, every key optional; an empty turn is a
+            short text reply.
+        model: the model name to echo, taken from the request.
+        serial: a counter that makes the ids unique per reply and identical when replayed.
+        input_tokens: the figure to report as the request's input tokens.
+    Output: A message dict: text block first, then a tool_use block per call, stop_reason tool_use when there are
+        calls and end_turn otherwise. No side effects.
+    """
+    calls = turn.get("tool_calls", [])
+    content: list[dict] = []
+    if turn.get("text") or not calls:
+        content.append({"type": "text", "text": turn.get("text") or DEFAULT_TEXT})
+    for index, call in enumerate(calls):
+        content.append({"type": "tool_use", "id": f"toolu_mock{serial:08d}{index:02d}", "name": call["name"],
+                        "input": call.get("input", {})})
+    return {"id": f"msg_mock{serial:08d}", "type": "message", "role": "assistant", "model": model, "content": content,
+            "stop_reason": "tool_use" if calls else "end_turn", "stop_sequence": None,
+            "usage": {"input_tokens": input_tokens, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                      "output_tokens": _output_tokens(turn)}}
+
+
+def anthropic_events(message: dict) -> list[tuple[str, dict]]:
+    """
+    Description: Expand an Anthropic message into its streaming events, in the documented order.
+    Parameters:
+        message: a message dict from anthropic_message.
+    Output: (event name, data) pairs: message_start, then for each content block content_block_start, content_block_delta
+        (text_delta, or input_json_delta in two pieces for a tool call) and content_block_stop, with one ping after the
+        first block starts, then message_delta and message_stop. A tool_use block starts with an empty input.
+    """
+    usage = message["usage"]
+    start = dict(message, content=[], stop_reason=None, usage=dict(usage, output_tokens=1))
+    events: list[tuple[str, dict]] = [("message_start", {"type": "message_start", "message": start})]
+    for index, block in enumerate(message["content"]):
+        if block["type"] == "text":
+            events.append(("content_block_start", {"type": "content_block_start", "index": index,
+                                                   "content_block": {"type": "text", "text": ""}}))
+            deltas = [{"type": "text_delta", "text": block["text"]}]
+        else:
+            events.append(("content_block_start", {"type": "content_block_start", "index": index,
+                                                   "content_block": dict(block, input={})}))
+            raw = json.dumps(block["input"], separators=(",", ":"))
+            cut = max(1, len(raw) // 2)
+            deltas = [{"type": "input_json_delta", "partial_json": raw[:cut]},
+                      {"type": "input_json_delta", "partial_json": raw[cut:]}]
+        if index == 0:
+            events.append(("ping", {"type": "ping"}))
+        events += [("content_block_delta", {"type": "content_block_delta", "index": index, "delta": d}) for d in deltas]
+        events.append(("content_block_stop", {"type": "content_block_stop", "index": index}))
+    events.append(("message_delta", {"type": "message_delta",
+                                     "delta": {"stop_reason": message["stop_reason"], "stop_sequence": None},
+                                     "usage": {"input_tokens": usage["input_tokens"],
+                                               "output_tokens": usage["output_tokens"]}}))
+    events.append(("message_stop", {"type": "message_stop"}))
+    return events
+
+
+def sse_bytes(events: Iterable[tuple[str, dict]]) -> bytes:
+    """
+    Description: Encode streaming events in the SSE wire format both providers use.
+    Parameters:
+        events: (event name, data) pairs.
+    Output: Bytes holding "event: NAME" and "data: JSON" lines, each event ended by a blank line. No side effects.
+    """
+    return b"".join(f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode() for name, data in events)
