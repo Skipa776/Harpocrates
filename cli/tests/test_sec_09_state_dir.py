@@ -340,3 +340,69 @@ def test_sec_09_f5_the_temp_folder_of_a_running_migration_is_guarded(home: Path,
     monkeypatch.setattr(paths, "_assert_plain_tree", spy)
     paths.state_dir()
     assert seen == [True]
+
+
+# ---- F6: a hard link elsewhere to a state file is state ------------------------------------------------------------
+
+def _state_with_files(home: Path) -> dict[str, Path]:
+    """Both state folders (and a migration temp folder) with files in them; returns name -> path."""
+    files: dict[str, Path] = {}
+    for folder in (".harpo", ".harpocrates", ".harpo.migrating.abc"):
+        (home / folder / "grants").mkdir(parents=True)
+        for rel in ("allow", "grants/s1.json", "install.json"):
+            (home / folder / rel).write_text("# mine\n")
+            files[f"{folder}/{rel}"] = home / folder / rel
+    (home / "work").mkdir()
+    return files
+
+
+@pytest.mark.parametrize("tool", ["Edit", "MultiEdit", "Write", "NotebookEdit"])
+def test_sec_09_f6_a_hard_link_to_a_state_file_is_refused(home: Path, capsys, tool: str) -> None:
+    files = _state_with_files(home)
+    for i, (name, source) in enumerate(files.items()):
+        alias = home / "work" / f"alias{i}"
+        os.link(source, alias)
+        assert not allowlist.inside_state_dir(alias), name  # by name it is an ordinary file
+        assert allowlist.links_to_state_file(alias), name
+        assert _edit(str(alias), home, capsys, tool) == (0, "deny"), name
+    link = home / "work" / "sym"
+    os.symlink(home / "work" / "alias0", link)  # a symlink to the hard link resolves to the same file
+    assert _edit(str(link), home, capsys, tool) == (0, "deny")
+
+
+def test_sec_09_f6_ordinary_hard_links_and_new_files_are_not_over_blocked(home: Path, capsys) -> None:
+    _state_with_files(home)
+    work = home / "work"
+    (work / "a.txt").write_text("x = 1\n")
+    os.link(work / "a.txt", work / "b.txt")  # two names of one ordinary file: nothing to do with the state folders
+    assert (work / "a.txt").stat().st_nlink == 2
+    for target in (work / "a.txt", work / "b.txt", work / "does-not-exist-yet", work / "sub" / "new.py"):
+        assert not allowlist.links_to_state_file(target), target
+        assert _edit(str(target), home, capsys) == (0, ""), target
+    assert not allowlist.links_to_state_file(None)
+
+
+def test_sec_09_f6_a_directory_or_unreadable_target_does_not_pass_as_a_link(home: Path, capsys, monkeypatch) -> None:
+    _state_with_files(home)
+    assert not allowlist.links_to_state_file(home / "work")  # a directory has no file identity to compare
+
+    def boom(*args, **kwargs):
+        raise PermissionError(13, "denied")
+
+    real_stat = os.stat
+    target = home / "work" / "locked"
+    target.write_text("x")
+    monkeypatch.setattr(os, "stat", lambda p, *a, **k: boom() if str(p) == str(target) else real_stat(p, *a, **k))
+    assert _edit(str(target), home, capsys) == (0, "deny")  # the target cannot be examined: fail closed
+
+
+def test_sec_09_f6_a_state_folder_with_too_many_files_is_refused(home: Path, monkeypatch) -> None:
+    files = _state_with_files(home)
+    alias = home / "work" / "alias"
+    os.link(files[".harpo.migrating.abc/install.json"], alias)  # a match the capped walk would reach late
+    monkeypatch.setattr(allowlist, "_MAX_STATE_FILES", 2)
+    assert allowlist.links_to_state_file(alias)  # fail closed: it cannot be compared in full, so it is refused
+    other = home / "work" / "ordinary"
+    other.write_text("x")
+    os.link(other, home / "work" / "ordinary2")
+    assert allowlist.links_to_state_file(other)  # also for an unrelated link: the walk is over budget, so refuse

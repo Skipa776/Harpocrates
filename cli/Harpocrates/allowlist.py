@@ -25,6 +25,7 @@ import functools
 import os
 import re
 import shlex
+import stat
 import tempfile
 import time
 import unicodedata
@@ -638,6 +639,66 @@ def inside_state_dir(path: Optional[Path]) -> bool:
             continue
         if (st.st_dev, st.st_ino) in ids:
             return True
+    return False
+
+
+_MAX_STATE_FILES = 50_000  # more files than this under the state folders is not a state folder: refuse, don't walk on
+
+
+def _state_roots() -> list[Path]:
+    """
+    Description: The folders that count as state: in each home folder (SEC-08), every entry whose folded name starts with
+        .harpo (the two state folders, the migration's temp folder, a backup; SEC-09).
+    Parameters: None
+    Output: Resolved folder paths, links followed once so a ~/.harpo that is a symlink is walked where it leads. Entries
+        that cannot be listed or resolved are skipped. Raises RuntimeError when no home folder can be determined.
+    """
+    guarded = _fold(paths.NEW_DIR)
+    roots: list[Path] = []
+    for home in _homes():
+        try:
+            with os.scandir(home) as scan:
+                found = [entry.path for entry in scan if _fold(entry.name).startswith(guarded)]
+        except OSError:
+            continue
+        roots.extend(Path(os.path.realpath(path)) for path in found)
+    return roots
+
+
+def links_to_state_file(path: Optional[Path]) -> bool:
+    """
+    Description: Whether an existing file is another name (a hard link) of a file in a state folder, so editing it edits
+        the allowlist or a grant although its path is elsewhere (SEC-09). Only a file with more than one link is
+        compared, and only a match refuses: an ordinary hard link is not blocked.
+    Parameters:
+        path: the Edit or Write target, possibly nonexistent; None means no path. Symlinks are followed (the tool writes
+            to what they lead to).
+    Output: True when path is a regular file with st_nlink > 1 whose (device, inode) equals that of a regular file under a
+        state folder (see _state_roots); False for None, a missing target, a directory, a single-link file or no match.
+        Also True when a state folder holds more than _MAX_STATE_FILES files (fail closed). Raises OSError (other than
+        a missing path) when the target cannot be examined; callers treat that as a refusal.
+    """
+    if path is None:
+        return False
+    try:
+        st = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False  # nothing there yet: the tool will create it
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink <= 1:
+        return False
+    wanted, seen = (st.st_dev, st.st_ino), 0
+    for root in _state_roots():
+        for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+            for name in filenames:
+                seen += 1
+                if seen > _MAX_STATE_FILES:
+                    return True
+                try:
+                    other = os.lstat(os.path.join(dirpath, name))
+                except OSError:
+                    continue
+                if stat.S_ISREG(other.st_mode) and (other.st_dev, other.st_ino) == wanted:
+                    return True
     return False
 
 

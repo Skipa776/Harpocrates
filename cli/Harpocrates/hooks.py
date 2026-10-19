@@ -559,7 +559,8 @@ def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
     Notes: Edit, MultiEdit, Write or NotebookEdit (the tool result echoes the edited file back to
         the model). First of all, deny a target inside ~/.harpo or ~/.harpocrates
         (allowlist.inside_state_dir; any mode, with or without --ask, granted or not; a target that
-        cannot be placed is refused too): only the user changes the allowlist, and a ~/.harpo the
+        cannot be placed is refused too), or a hard link to a file in them
+        (allowlist.links_to_state_file, SEC-09): only the user changes the allowlist, and a ~/.harpo the
         agent made would replace the migrated one. Then deny an edit that would add a placeholder
         (_adds_placeholder; any mode, granted or not). Then a secret-bearing file asks the user when
         a human can answer, after recording the call as pending so `--post` can turn Yes into a
@@ -574,7 +575,8 @@ def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
     if raw == "~" or raw.startswith("~/"):  # the tool may expand ~ from the password database, not from $HOME (SEC-08)
         spellings.append(paths.home().joinpath(raw[2:]))
     try:
-        in_state_dir = any(allowlist.inside_state_dir(target) for target in spellings)
+        in_state_dir = any(allowlist.inside_state_dir(target) or allowlist.links_to_state_file(target)
+                           for target in spellings)
     except (OSError, RuntimeError, ValueError):  # the target cannot be placed: fail closed
         in_state_dir = True
     if in_state_dir:
