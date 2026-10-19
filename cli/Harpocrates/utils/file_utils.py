@@ -15,12 +15,12 @@ from typing import Iterator
 
 def _looks_binary(sample: bytes) -> bool:
     """
-    Heuristic check for binary files.
-    Args:
-        sample (bytes): A sample of the file content.
-
-    Returns:
-        bool: True if the file is binary, False otherwise.
+    Description: Inspect a byte sample for binary content before attempting text scanning.
+    Parameters:
+        sample: A sample of the file content.
+    Output: True for NUL bytes or over 30% nontext bytes after failed UTF-8 decoding; False for
+    empty, valid UTF-8, or a truncated final UTF-8 character.
+    Heuristic check for binary files. bool: True if the file is binary, False otherwise.
     """
     if not sample:
         return False
@@ -52,17 +52,16 @@ def iter_text_lines(
     max_bytes: int | None = None,
 ) -> Iterator[tuple[int, str]]:
     """
+    Description: Read text lines lazily while skipping binary files and limiting scan size.
+    Parameters:
+        path: The path to the text file.
+        max_bytes: The maximum number of bytes to read. Defaults to None.
+    Output: Iterator of one-based line numbers and text without trailing newlines; opens and reads
+    the file on iteration. Raises OSError for file access failures; decoding errors are ignored and
+    lines crossing max_bytes are not yielded.
     Safely iterate over the lines of a text file.
-
-    - Skips binary files (based on initial 1024-byte probe)
-    - Uses UTF-8 encoding (errors ignored)
-    - Respects max_bytes to avoid huge scans
-    Args:
-        path (str | Path): The path to the text file.
-        max_bytes (int | None, optional): The maximum number of bytes to read. Defaults to None.
-
-    Yields:
-        (line_number, line_content)
+    - Skips binary files (based on initial 1024-byte probe) - Uses UTF-8 encoding (errors ignored) -
+    Respects max_bytes to avoid huge scans (line_number, line_content)
     """
     path = Path(path)
 
