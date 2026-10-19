@@ -122,8 +122,10 @@ def test_fr_proof_04_isolation_env_is_built_from_scratch(tw, monkeypatch: pytest
     assert env["HOME"] == str(tw.home) and env["TMPDIR"].startswith(str(tw.root))
     assert env["ANTHROPIC_API_KEY"] == iso.FAKE_API_KEY and iso.FAKE_API_KEY.startswith("sk-ant-api03-FAKE")
     assert "from-the-parent-process" not in " ".join(env.values())
-    assert not {"OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "HTTP_PROXY", "https_proxy", "GITHUB_TOKEN",
+    assert not {"OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "GITHUB_TOKEN",
                 "CODEX_HOME", "CLAUDE_CONFIG_DIR", "ANTHROPIC_AUTH_TOKEN"} & set(env)
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        assert env[name] == "http://127.0.0.1:9"  # nothing listens there: the parent's proxy is replaced by a dead end
     assert env["NO_PROXY"] == "127.0.0.1,localhost" and env["GIT_CONFIG_GLOBAL"] == os.devnull
     with pytest.raises(iso.IsolationError):
         iso.clean_env(tw, "http://example.com:80", {})

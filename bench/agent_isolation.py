@@ -34,6 +34,9 @@ FAKE_API_KEY = "sk-ant-api03-FAKE-NOT-A-REAL-KEY-000000000000000000000000"
 FAKE_OPENAI_KEY = "sk-FAKE-NOT-A-REAL-KEY-0000000000000000"
 PREFIX = "harpo-canary-"
 REFUSED_EXIT = 70
+# A proxy that nothing listens on (the discard port): a client that honors proxy variables and tries to reach anything but
+# the loopback mock (NO_PROXY) fails to connect instead of reaching the internet. Defense in depth, not the only guard.
+DEAD_PROXY = "http://127.0.0.1:9"
 INSTALL_TIMEOUT = 180
 
 # Runs in the child interpreter (python -I -c BOOT HOME RECORD_PYTHON MODULE ARGS...). No single quote may appear in it:
@@ -238,13 +241,14 @@ def clean_env(tw: Throwaway, mock_url: str, extra: dict, path: Optional[str] = N
         mock_url: the mock provider's URL; must be loopback.
         extra: variables to add, such as the fake API key and the base URL.
         path: PATH to use instead of the caller's.
-    Output: A dict with PATH, HOME, TMPDIR, USER/LOGNAME/SHELL when set, locale, loopback-only proxy exceptions and git
-        isolation, plus extra. No other variable of the calling process is included. Raises IsolationError for a
+    Output: A dict with PATH, HOME, TMPDIR, USER/LOGNAME/SHELL when set, locale, a dead proxy for everything but loopback,
+        and git isolation, plus extra. No other variable of the calling process is included. Raises IsolationError for a
         non-loopback mock URL.
     """
     assert_loopback_url(mock_url)
     env = {"PATH": path or os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tw.home), "TMPDIR": str(tw.tmp),
            "TERM": "dumb", "LANG": "en_US.UTF-8", "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
+           **{name: DEAD_PROXY for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")},
            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_TERMINAL_PROMPT": "0"}
     for name in ("USER", "LOGNAME", "SHELL"):
         if os.environ.get(name):

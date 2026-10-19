@@ -40,6 +40,10 @@ SCRIPTED_CALLS = 3
 PROMPT = "Review this repository's configuration: read .env, show config/settings.py, and search for TOKEN."
 AGENT_TIMEOUT = 240
 MODEL_ROUTES = ("anthropic.messages", "openai.responses")
+# Codex background features that would call out from a throwaway home (a plugin catalog sync runs `git ls-remote` against
+# github.com, an app-server daemon may start, analytics may post): switched off, so the only traffic is to the mock.
+CODEX_QUIET = ("\n[features]\nplugins = false\nremote_plugin = false\nplugin_sharing = false\napps = false\n"
+               "daemon_auto_start = false\nin_app_updates = false\n\n[analytics]\nenabled = false\n")
 GIT_ENV = {"GIT_AUTHOR_NAME": "canary", "GIT_AUTHOR_EMAIL": "canary@example.test", "GIT_COMMITTER_NAME": "canary",
            "GIT_COMMITTER_EMAIL": "canary@example.test"}
 
@@ -130,11 +134,12 @@ def write_codex_config(tw: iso.Throwaway, url: str, extra_provider: str = "") ->
         extra_provider: extra lines for the provider table.
     Output: The config.toml path. The provider is named mockprov, never "openai", with wire_api responses and
         requires_openai_auth true (docs/gate-transport.md route A); supports_websockets is left off, so Codex uses HTTP.
+        CODEX_QUIET switches off the background features that would call out.
     """
     path = tw.home / ".codex" / "config.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f'model = "gpt-5"\nmodel_provider = "mockprov"\n\n[model_providers.mockprov]\nname = "MockProv"\n'
-                    f'base_url = "{url}/v1"\nwire_api = "responses"\nrequires_openai_auth = true\n{extra_provider}',
+                    f'base_url = "{url}/v1"\nwire_api = "responses"\nrequires_openai_auth = true\n{extra_provider}{CODEX_QUIET}',
                     encoding="utf-8")
     tomllib.loads(path.read_text(encoding="utf-8"))
     return path
@@ -228,10 +233,35 @@ class AgentRun:
     extra: dict = field(default_factory=dict)
 
 
+def run_process_captured(argv: list[str], env: dict, cwd: Path, timeout: int,
+                         stdin_data: Optional[bytes] = None) -> tuple[Optional[int], bool, float, str, str]:
+    """
+    Description: Run a command to completion in its own process group, killing the group on timeout, and keep its output.
+    Parameters:
+        argv: the command.
+        env: its whole environment.
+        cwd: its working directory.
+        timeout: seconds before it is killed.
+        stdin_data: bytes to send on stdin (a very long prompt), or None for /dev/null.
+    Output: (exit code or None, timed out, seconds, stdout, stderr), the output decoded with replacement characters. Use it
+        only where the output cannot hold a planted canary (a session that reads no canary file).
+    """
+    start = time.monotonic()
+    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL if stdin_data is None else subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        out, err = proc.communicate(input=stdin_data, timeout=timeout)
+        return proc.returncode, False, time.monotonic() - start, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        out, err = proc.communicate()
+        return None, True, time.monotonic() - start, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+
+
 def run_process(argv: list[str], env: dict, cwd: Path, timeout: int,
                 stdin_data: Optional[bytes] = None) -> tuple[Optional[int], bool, float]:
     """
-    Description: Run a command to completion in its own process group, killing the group on timeout.
+    Description: Run a command to completion in its own process group, killing the group on timeout; its output is dropped.
     Parameters:
         argv: the command.
         env: its whole environment.
@@ -241,16 +271,7 @@ def run_process(argv: list[str], env: dict, cwd: Path, timeout: int,
     Output: (exit code or None, timed out, seconds). stdin is /dev/null unless stdin_data is given (codex exec waits for end
         of input otherwise); stdout and stderr are captured and dropped, since they hold the model's view of the files.
     """
-    start = time.monotonic()
-    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL if stdin_data is None else subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
-    try:
-        proc.communicate(input=stdin_data, timeout=timeout)
-        return proc.returncode, False, time.monotonic() - start
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
-        proc.communicate()
-        return None, True, time.monotonic() - start
+    return run_process_captured(argv, env, cwd, timeout, stdin_data)[:3]
 
 
 def _version(binary: str) -> Optional[str]:
@@ -326,10 +347,23 @@ class Session:
         """
         return run_process(argv or self.argv(), env or self.env(), self.tw.repo, timeout, stdin_data)
 
+    def run_captured(self, argv: Optional[list[str]] = None, env: Optional[dict] = None, timeout: int = AGENT_TIMEOUT,
+                     stdin_data: Optional[bytes] = None) -> tuple[Optional[int], bool, float, str, str]:
+        """
+        Description: Run the agent and keep its output, for sessions that read no canary file.
+        Parameters:
+            argv: a command line instead of the default.
+            env: an environment instead of the default.
+            timeout: seconds before the process group is killed.
+            stdin_data: bytes for stdin, or None.
+        Output: (exit code or None, timed out, seconds, stdout, stderr), as run_process_captured.
+        """
+        return run_process_captured(argv or self.argv(), env or self.env(), self.tw.repo, timeout, stdin_data)
+
 
 @contextlib.contextmanager
 def agent_session(agent: str, seed: int, out_root: Path, run_id: str, label: Optional[str] = None,
-                  script: Optional[list[dict]] = None, control: bool = False, keep_work: bool = False,
+                  script: Optional[object] = None, control: bool = False, keep_work: bool = False,
                   mock_kwargs: Optional[dict] = None, codex_config: Optional[Callable[..., Path]] = None,
                   before_install: Optional[Callable[[iso.Throwaway, mock_provider.MockServer], None]] = None):
     """
@@ -340,7 +374,7 @@ def agent_session(agent: str, seed: int, out_root: Path, run_id: str, label: Opt
         out_root: the results folder; the recording goes to mock/<run_id>/<label>/.
         run_id: the run's id.
         label: the recording sub-folder, defaulting to the agent name.
-        script: scripted turns instead of the agent's default three reads.
+        script: scripted turns (or a function repo -> turns) instead of the agent's default three reads.
         control: install nothing into the throwaway home.
         keep_work: keep the throwaway folder instead of deleting it.
         mock_kwargs: extra start_server arguments (reply_headers, count_tokens_status).
@@ -353,7 +387,7 @@ def agent_session(agent: str, seed: int, out_root: Path, run_id: str, label: Opt
     tw = iso.make_throwaway()
     try:
         canaries = canaries_from_manifest(seed_repo(tw, seed, agent), agent)
-        turns = script if script is not None else spec["script"](tw.repo)
+        turns = script(tw.repo) if callable(script) else script if script is not None else spec["script"](tw.repo)
         script_path = tw.root / "script.json"
         script_path.write_text(json.dumps(turns), encoding="utf-8")
         record_dir = Path(out_root) / "mock" / run_id / (label or agent)

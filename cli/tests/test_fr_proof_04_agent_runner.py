@@ -75,6 +75,8 @@ def test_fr_proof_04_agent_runner_codex_config_is_route_a_with_http_only(tw) -> 
     assert provider["requires_openai_auth"] is True and not provider.get("supports_websockets", False)
     assert config["model_provider"].lower() != "openai"
     assert "openai_base_url" not in config
+    assert config["features"]["plugins"] is False and config["features"]["remote_plugin"] is False  # no plugin catalog sync
+    assert config["features"]["daemon_auto_start"] is False and config["analytics"]["enabled"] is False
 
 
 def test_fr_proof_04_agent_runner_counts_the_tool_results_the_agent_sent_back() -> None:
