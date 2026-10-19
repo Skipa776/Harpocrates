@@ -91,35 +91,6 @@ def test_rust_backend_keeps_python_ml_verifier(monkeypatch, tmp_path: Path) -> N
     assert findings[0].category == "password"
 
 
-def test_rust_backend_propagates_python_ml_failure(monkeypatch) -> None:
-    """Native candidate generation must not disguise a broken ML verifier."""
-    candidate = {
-        "type": "ML_CANDIDATE",
-        "line": 1,
-        "snippet": 'password="hunter2"',
-        "token": "hunter2",
-        "token_start": 10,
-        "token_end": 17,
-        "evidence": "ml",
-        "severity": "info",
-        "confidence": 0.5,
-        "entropy": 2.8,
-        "in_comment": None,
-        "var_name": "password",
-    }
-    monkeypatch.setattr(
-        "Harpocrates.core.rust_backend.subprocess.run",
-        Mock(return_value=_completed([candidate])),
-    )
-    verifier = Mock()
-    verifier.verify_batch.side_effect = RuntimeError("broken model")
-
-    backend = RustScannerBackend(Path("/tmp/harpocrates-rust-scanner"))
-
-    with pytest.raises(RuntimeError, match="broken model"):
-        backend.scan_text_with_ml('password="hunter2"', verifier=verifier)
-
-
 def test_scan_file_with_ml_propagates_context_read_failure(monkeypatch, tmp_path: Path) -> None:
     missing = tmp_path / "missing.py"
     candidate = Finding(

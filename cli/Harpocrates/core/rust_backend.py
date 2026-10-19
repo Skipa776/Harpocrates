@@ -119,18 +119,6 @@ class RustScannerBackend:
         findings = self._collect_text(text, file=file)
         return [finding for finding in findings if finding.evidence != EvidenceType.ML]
 
-    def scan_text_with_ml(
-        self,
-        text: str,
-        verifier: "Verifier",
-        *,
-        file: Optional[str] = None,
-        ml_threshold: float = 0.5,
-    ) -> list[Finding]:
-        """Generate candidates in Rust and verify non-regex candidates in Python."""
-        findings = self._collect_text(text, file=file)
-        return self._verify_candidates(findings, text, verifier, ml_threshold)
-
     def scan_file(
         self,
         path: str | Path,
