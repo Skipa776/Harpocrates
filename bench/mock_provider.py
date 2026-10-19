@@ -19,6 +19,7 @@ Bad input never crashes it. A malformed, oversized (over 64 MiB) or wrongly enco
 """
 from __future__ import annotations
 
+import argparse
 import base64
 import hashlib
 import importlib
@@ -26,7 +27,9 @@ import io
 import ipaddress
 import json
 import os
+import signal
 import socket
+import sys
 import threading
 import urllib.parse
 import zlib
@@ -1018,3 +1021,44 @@ def start_server(host: str = "127.0.0.1", port: int = 0, record_dir: Optional[Pa
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True)
     thread.start()
     return MockServer(httpd, thread)
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    """
+    Description: Run the mock provider until it is interrupted, printing one JSON line with its address.
+    Parameters:
+        argv: command-line arguments, or None to use sys.argv.
+    Output: Exit status: 0 after a clean shutdown on SIGINT or SIGTERM; 2 for a non-loopback host or a bad script (a
+        message on stderr, nothing created); 1 when the port cannot be bound. Prints {"listening": URL, "record": PATH}
+        to stdout once it serves. Never prints a request.
+    """
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--host", default="127.0.0.1", help="loopback address to bind (default 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=0, help="port; 0 lets the system choose")
+    parser.add_argument("--record", type=Path, default=None, help="folder for requests.jsonl (default: memory only)")
+    parser.add_argument("--script", type=Path, default=None, help="JSON list of scripted turns")
+    parser.add_argument("--max-body", type=int, default=MAX_BODY_BYTES, help="largest accepted body in bytes")
+    parser.add_argument("--count-tokens-status", type=int, default=None, help="answer count_tokens with this HTTP error")
+    args = parser.parse_args(argv)
+    try:
+        ensure_loopback(args.host)
+        turns = load_script(args.script) if args.script else []
+        server = start_server(args.host, args.port, args.record, turns, args.max_body, args.count_tokens_status)
+    except ValueError as exc:
+        print(f"mock_provider: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"mock_provider: cannot bind {args.host}:{args.port}: {exc}", file=sys.stderr)
+        return 1
+    stop = threading.Event()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(signum, lambda *_: stop.set())
+    record = str(Path(args.record) / "requests.jsonl") if args.record else None
+    print(json.dumps({"listening": server.url, "record": record}), flush=True)
+    stop.wait()
+    server.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

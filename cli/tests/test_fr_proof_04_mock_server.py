@@ -341,3 +341,48 @@ def test_fr_proof_04_mock_decodes_a_zstd_body_when_a_module_is_importable(server
     status, _, _ = send(server, "POST", "/v1/responses", raw, {**JSON, "Content-Encoding": "zstd"})
     row = recorded(server)[-1]
     assert status == 200 and row["body_status"] == "ok" and json.loads(row["body"]) == RESPONSES_REQUEST
+
+
+# --- the command line ------------------------------------------------------------------------------------------
+
+import signal  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+
+MOCK_PY = str(Path(mock.__file__).resolve())
+
+
+def test_fr_proof_04_mock_cli_refuses_a_non_loopback_address(tmp_path: Path, capsys) -> None:
+    assert mock.main(["--host", "0.0.0.0", "--record", str(tmp_path / "rec")]) == 2
+    err = capsys.readouterr().err
+    assert "loopback" in err and not (tmp_path / "rec").exists()
+
+
+def test_fr_proof_04_mock_cli_rejects_a_bad_script(tmp_path: Path, capsys) -> None:
+    (tmp_path / "s.json").write_text('[{"surprise": 1}]')
+    assert mock.main(["--script", str(tmp_path / "s.json"), "--record", str(tmp_path / "rec")]) == 2
+    assert "turn 0" in capsys.readouterr().err
+
+
+def test_fr_proof_04_mock_shuts_down_cleanly_on_sigint(tmp_path: Path) -> None:
+    script = tmp_path / "script.json"
+    script.write_text(json.dumps([{"text": "scripted hello"}]))
+    proc = subprocess.Popen([sys.executable, MOCK_PY, "--port", "0", "--record", str(tmp_path / "rec"),
+                             "--script", str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        info = json.loads(proc.stdout.readline())
+        host, port = info["listening"].removeprefix("http://").split(":")
+        assert host == "127.0.0.1"
+        conn = http.client.HTTPConnection(host, int(port), timeout=10)
+        conn.request("POST", "/v1/messages", json.dumps({**ANTHROPIC_REQUEST, "tools": READ_TOOL}), JSON)
+        reply = json.loads(conn.getresponse().read())
+        conn.close()
+        assert reply["content"][0]["text"] == "scripted hello"
+        proc.send_signal(signal.SIGINT)
+        out, err = proc.communicate(timeout=15)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert proc.returncode == 0 and "Traceback" not in err and err == ""
+    rows = [json.loads(line) for line in (tmp_path / "rec" / "requests.jsonl").read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["route"] == "anthropic.messages"
