@@ -128,7 +128,7 @@ Two views, because the counter used for "before" (`bench/results/r0-before/tools
 
 | Group | Files before | Code lines before | Files after | Code lines after |
 | --- | ---: | ---: | ---: | ---: |
-| `cli/Harpocrates` (all) | 46 | 11,309 | 39 | 11,152 |
+| `cli/Harpocrates` (all) | 44 | 11,687 | 39 | 11,152 |
 | `cli/tests` | 53 | 8,086 | 66 | 10,261 |
 | `core` (Rust) | 9 | 1,593 | 9 | 1,594 |
 | `bench` | 9 | 3,177 | 30 | 4,663 (includes the R0 snapshot tools, the moved canary generator and demo measurement) |
