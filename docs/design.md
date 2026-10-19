@@ -124,7 +124,7 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | FR-CORE-04 | Decode base64, hex, and URL-encoded strings, then rescan the decoded content | Evasion suite cases for each encoding pass | M3 |
 | FR-CORE-05 | Scan streamed input in chunks with a configurable size cap | 100 MB input scanned without exceeding memory cap | M2 |
 | FR-CORE-06 | Separate thresholds per layer: recall-favoring for the gate, precision-favoring for commits | Thresholds set in config; both documented with their precision and recall | M1 |
-| FR-CORE-07 | Candidate and feature extraction run in time linear in line length, so a 100k+ character line (minified JS, inline base64) cannot stall a scan or a hook call | `test_fr_core_07_*`: a long minified line scans within a fixed time bound; findings snapshot unchanged | R0 |
+| FR-CORE-07 | Candidate and feature extraction run in time linear in line length, so a 100k+ character line (minified JS, inline base64) cannot stall a scan or a hook call | `test_fr_core_07_*`: a long minified line scans within a fixed time bound, including runs of whitespace, `#` and `/`, on every path including `--explain` and MCP `include_contributions`; findings snapshot unchanged | R0 |
 
 **Read tool (harpo-read)**
 
@@ -175,6 +175,8 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | SEC-05 | Pinned dependencies, config checksum at startup, and a `SECURITY.md` | Files present; tampered config refused | M3 |
 | SEC-06 | Document residual risks: other exfiltration channels, agent transcripts saved to local disk with raw tool output, and agent traffic that bypasses the API base URL (such as feature flags and token refresh) | Threat model doc lists all three | M1 |
 | SEC-07 | Every model artifact the package loads ships in the wheel and is hash-checked against the manifest before use; a missing or mismatched artifact is refused, never loaded | `test_sec_07_*`: tampered `xgboost_model.json` refused; wheel install contains every artifact in the manifest | R0 |
+| SEC-08 | The hook trusts no environment variable for anything security-relevant: the state directory comes from the password database (`pwd.getpwuid(os.getuid()).pw_dir`), not `$HOME`, and the hook interpreter runs with `-I`, so `PYTHONPATH`, `PYTHONSTARTUP` and user site-packages cannot load code into it | `test_sec_08_*`: a planted `HOME` neither moves the state directory nor disarms the guard; a planted `PYTHONPATH` package never runs in the hook | R0 |
+| SEC-09 | The state-directory guard has no known bypass that does not build the path at run time. After migration there is no fallback to `~/.harpocrates`, and an unusable `~/.harpo` means an empty allowlist. Any home component starting with `.harpo` is guarded. `cd`/`pushd` into either directory is refused. Hard links to state files are refused. Every path key of a tool call is checked. The migration opens the source with `O_NOFOLLOW` | `test_sec_09_*`: one test per bypass found in the Oct 18 security review (F3 to F8), each failing before its fix | R0 |
 
 **Documentation and data**
 
