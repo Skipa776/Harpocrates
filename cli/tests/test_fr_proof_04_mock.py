@@ -104,3 +104,84 @@ def test_fr_proof_04_mock_zstd_is_decoded_when_a_module_is_importable(monkeypatc
     assert mock.decode_body(b"x", "zstd", 1024) == mock.Decoded(None, "bad-encoding")
     monkeypatch.setattr(mock, "_load_zstd", lambda: lambda data, cap: b"x" * (cap + 1))
     assert mock.decode_body(b"x", "zstd", 8) == mock.Decoded(None, "too-large")
+
+
+# --- the scripted replies ------------------------------------------------------------------------------------------
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+
+def write_script(tmp_path: Path, payload: object) -> Path:
+    path = tmp_path / "script.json"
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def test_fr_proof_04_mock_script_loads_a_list_of_turns(tmp_path: Path) -> None:
+    turns = [{"tool_calls": [{"name": "Read", "input": {"file_path": ".env"}}]},
+             {"text": "done"}, {"error": {"status": 400, "message": "blocked"}}]
+    assert mock.load_script(write_script(tmp_path, turns)) == turns
+
+
+@pytest.mark.parametrize("payload", [
+    {"turns": []}, "text", [1], [{"surprise": 1}], [{"text": 5}], [{"tool_calls": "Read"}], [{"tool_calls": [{}]}],
+    [{"tool_calls": [{"name": "Read", "input": []}]}], [{"error": {"status": 200, "message": "x"}}],
+    [{"error": {"status": "400", "message": "x"}}], [{"error": {"status": 400}}],
+])
+def test_fr_proof_04_mock_script_rejects_a_bad_shape(tmp_path: Path, payload: object) -> None:
+    with pytest.raises(ValueError):
+        mock.load_script(write_script(tmp_path, payload))
+
+
+def test_fr_proof_04_mock_script_rejects_unreadable_or_non_json_files(tmp_path: Path) -> None:
+    (tmp_path / "bad.json").write_text("{not json")
+    with pytest.raises(ValueError):
+        mock.load_script(tmp_path / "bad.json")
+    with pytest.raises(ValueError):
+        mock.load_script(tmp_path / "missing.json")
+
+
+def test_fr_proof_04_mock_counts_tool_results_in_an_anthropic_body() -> None:
+    body = {"messages": [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": [{"type": "text", "text": "x"}, {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "a"}, {"type": "text", "text": "y"}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t2", "content": [{"type": "text", "text": "b"}]}]},
+    ]}
+    assert mock.count_tool_results(body, "anthropic") == 2
+    assert mock.count_tool_results({"messages": [{"role": "user", "content": "hi"}]}, "anthropic") == 0
+    assert mock.count_tool_results({}, "anthropic") == 0 and mock.count_tool_results([1], "anthropic") == 0
+
+
+def test_fr_proof_04_mock_counts_tool_outputs_in_a_responses_body() -> None:
+    body = {"input": [
+        {"type": "message", "role": "user", "content": "go"},
+        {"type": "function_call", "call_id": "c1", "name": "shell", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "c1", "output": "a"},
+        {"type": "custom_tool_call_output", "call_id": "c2", "output": "b"},
+        {"type": "local_shell_call_output", "id": "c3", "output": "c"},
+    ]}
+    assert mock.count_tool_results(body, "responses") == 3
+    assert mock.count_tool_results({"input": "just text"}, "responses") == 0
+    assert mock.count_tool_results({}, "responses") == 0
+
+
+def test_fr_proof_04_mock_picks_the_turn_by_tool_results_already_in_the_request() -> None:
+    turns = [{"tool_calls": [{"name": "Read"}]}, {"tool_calls": [{"name": "Bash"}, {"name": "Grep"}]}, {"text": "done"}]
+    assert mock.select_turn(turns, 0) is turns[0]
+    assert mock.select_turn(turns, 1) is turns[1]  # the first call has an answer
+    assert mock.select_turn(turns, 3) is turns[2]  # both calls of turn 2 have answers
+    assert mock.select_turn(turns, 2) is turns[2]  # between turns: the next one that starts at or after 2
+    assert mock.select_turn(turns, 99) is turns[2]  # past the end: the last turn, again and again
+    assert mock.select_turn([], 5) == {}
+
+
+def test_fr_proof_04_mock_a_request_without_tools_gets_a_plain_text_turn() -> None:
+    turns = [{"tool_calls": [{"name": "Read"}]}]
+    assert mock.turn_for({"messages": [], "tools": [{"name": "Read"}]}, "anthropic", turns) is turns[0]
+    assert mock.turn_for({"messages": []}, "anthropic", turns) == {}
+    assert mock.turn_for({"messages": [], "tools": []}, "anthropic", turns) == {}
+    assert mock.turn_for({"input": "x", "tools": [{"type": "function"}]}, "responses", turns) is turns[0]
+    assert mock.turn_for({"input": "x"}, "responses", turns) == {}
+    assert mock.turn_for("not an object", "responses", turns) == {}

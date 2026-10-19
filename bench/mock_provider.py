@@ -24,6 +24,7 @@ import io
 import json
 import urllib.parse
 import zlib
+from pathlib import Path
 from typing import Callable, Iterable, NamedTuple, Optional
 
 PRESENT = "<present>"
@@ -302,3 +303,106 @@ def sse_bytes(events: Iterable[tuple[str, dict]]) -> bytes:
     Output: Bytes holding "event: NAME" and "data: JSON" lines, each event ended by a blank line. No side effects.
     """
     return b"".join(f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode() for name, data in events)
+
+
+_TURN_KEYS = {"text", "tool_calls", "error"}
+
+
+def _check_turn(index: int, turn: object) -> None:
+    """
+    Description: Validate one scripted turn.
+    Parameters:
+        index: the turn's position in the script, for the error message.
+        turn: the parsed JSON value.
+    Output: None. Raises ValueError naming the turn when it is not an object with only text (str), tool_calls (a list of
+        {"name": str, "input": object}) and error ({"status": 400 to 599, "message": str}).
+    """
+    where = f"turn {index}"
+    if not isinstance(turn, dict) or not set(turn) <= _TURN_KEYS:
+        raise ValueError(f"{where}: must be an object with only {sorted(_TURN_KEYS)}")
+    if "text" in turn and not isinstance(turn["text"], str):
+        raise ValueError(f"{where}: text must be a string")
+    calls = turn.get("tool_calls", [])
+    if not isinstance(calls, list):
+        raise ValueError(f"{where}: tool_calls must be a list")
+    for call in calls:
+        if not isinstance(call, dict) or not isinstance(call.get("name"), str) or not isinstance(call.get("input", {}), dict):
+            raise ValueError(f"{where}: each tool call needs a name and an optional input object")
+    if "error" in turn:
+        err = turn["error"]
+        ok = (isinstance(err, dict) and isinstance(err.get("status"), int) and not isinstance(err.get("status"), bool)
+              and 400 <= err["status"] <= 599 and isinstance(err.get("message"), str))
+        if not ok:
+            raise ValueError(f"{where}: error needs a status from 400 to 599 and a message")
+
+
+def load_script(path: Path) -> list[dict]:
+    """
+    Description: Read a scripted-replies file: a JSON list of turns, answered one per model call.
+    Parameters:
+        path: the file to read.
+    Output: The list of turns. Raises ValueError when the file cannot be read, is not JSON, is not a list, or a turn is
+        malformed (see _check_turn).
+    """
+    try:
+        turns = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"cannot read the script {path}: {exc}") from exc
+    if not isinstance(turns, list):
+        raise ValueError("the script must be a JSON list of turns")
+    for index, turn in enumerate(turns):
+        _check_turn(index, turn)
+    return turns
+
+
+def count_tool_results(body: object, fmt: str) -> int:
+    """
+    Description: Count the tool results already in a request, which says how far through the script the agent is (the
+        history is re-sent on every call, so the count survives retries and side requests).
+    Parameters:
+        body: the parsed request body.
+        fmt: "anthropic" (tool_result blocks in messages) or "responses" (input items whose type ends in _call_output).
+    Output: The number of tool results; 0 for anything that is not the expected shape.
+    """
+    if not isinstance(body, dict):
+        return 0
+    if fmt == "anthropic":
+        messages = body.get("messages")
+        blocks = [b for m in messages if isinstance(m, dict) and isinstance(m.get("content"), list)
+                  for b in m["content"]] if isinstance(messages, list) else []
+        return sum(1 for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result")
+    items = body.get("input")
+    return sum(1 for i in items if isinstance(i, dict) and str(i.get("type", "")).endswith("_call_output")) \
+        if isinstance(items, list) else 0
+
+
+def select_turn(turns: list[dict], results: int) -> dict:
+    """
+    Description: Pick the scripted turn to answer with, given how many tool results the request already holds.
+    Parameters:
+        turns: the script.
+        results: count_tool_results of the request.
+    Output: The first turn whose tool calls start at or after `results` calls (a turn with two calls takes two results);
+        the last turn when the request is past the end; {} (a short text reply) for an empty script. No side effects.
+    """
+    start = 0
+    for turn in turns:
+        if start >= results:
+            return turn
+        start += len(turn.get("tool_calls", []))
+    return turns[-1] if turns else {}
+
+
+def turn_for(body: object, fmt: str, turns: list[dict]) -> dict:
+    """
+    Description: Choose the reply for one model request: the scripted turn, or a plain text turn when the request offers no
+        tools (a title or summary side request that could not use a tool call).
+    Parameters:
+        body: the parsed request body.
+        fmt: "anthropic" or "responses".
+        turns: the script.
+    Output: A turn dict; {} when body is not an object or its tools list is missing or empty.
+    """
+    if not isinstance(body, dict) or not body.get("tools"):
+        return {}
+    return select_turn(turns, count_tool_results(body, fmt))
