@@ -185,6 +185,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--agent", choices=("claude", "codex", "all"), default="all", help="agent mode only")
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--run-id", default=None)
+    parser.add_argument("--control", action="store_true", help="agent mode: install nothing, to show the counter sees leaks")
+    parser.add_argument("--keep-work", action="store_true", help="agent mode: keep the throwaway folders for inspection")
+    parser.add_argument("--timeout", type=int, default=240, help="agent mode: seconds allowed per agent")
     args = parser.parse_args(argv)
     run_id = args.run_id or new_run_id(args.mode, args.seed)
     if args.mode == "direct":
@@ -194,7 +197,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             agent_runner,  # noqa: PLC0415 - agent mode pulls in the throwaway-home machinery
         )
 
-        result = agent_runner.run_agents(args.seed, args.out_dir, run_id, args.agent)
+        result = agent_runner.run_agents(args.seed, args.out_dir, run_id, args.agent, args.keep_work, args.timeout,
+                                         control=args.control)
     print(_summary(result))
     return result.verdict.exit_code
 
