@@ -5,15 +5,19 @@ reach the real home folder. The autouse fixture below makes paths.home() follow 
 existing test inside the fixture home it sets. The SEC-08 tests opt out (pytest.mark.passwd_home) and fake the
 password database instead. A child process cannot be patched from here: child_python() builds a command that
 makes the same patch before it runs a module.
+
+Two more nets keep the suite off the real home folder: every test starts with a made-up $HOME, and a session fixture
+fails the run if the real ~/.harpo, ~/.harpocrates, ~/.claude/settings.json or ~/.codex/config.toml changed
+(_real_home.py; test_sec_08_real_home_guard.py).
 """
 from __future__ import annotations
 
-import os
 import pwd
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import _real_home
 import pytest
 
 from Harpocrates import paths
@@ -26,28 +30,24 @@ _RUN_MODULE = (
 )
 
 
-def _state_dirs() -> list[Path]:
-    """The real home's two state folders, as the password database names them (looked up outside any patch)."""
-    base = Path(pwd.getpwuid(os.getuid()).pw_dir)
-    return [base / ".harpo", base / ".harpocrates"]
-
-
 @pytest.fixture(scope="session", autouse=True)
-def _real_state_dirs_untouched():
-    """Fail the run if any test created, changed or removed ~/.harpo or ~/.harpocrates in the real home."""
-    def snapshot() -> list:
-        out = []
-        for folder in _state_dirs():
-            try:
-                st = os.lstat(folder)
-                out.append((st.st_ino, st.st_mtime_ns, sorted(os.listdir(folder))))
-            except OSError:
-                out.append(None)
-        return out
-
-    before = snapshot()
+def _real_home_untouched():
+    """Fail the run if any test changed the real home's ~/.harpo, ~/.harpocrates, ~/.claude/settings.json or
+    ~/.codex/config.toml (a read-only snapshot, mtime, mode, size and SHA-256, before the first test and after the last)."""
+    before = _real_home.snapshot()
     yield
-    assert snapshot() == before, "a test touched the real ~/.harpo or ~/.harpocrates"
+    moved = _real_home.changed(before, _real_home.snapshot())
+    assert not moved, f"a test touched the real home folder: {moved}"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+                   tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Start every test with a made-up $HOME, so code that follows it (the agent config files that `harpo install`
+    edits, a bare Path.home()) cannot reach the real one. A test that needs another sets it itself. The integration
+    tests (they build and install a wheel) keep the real $HOME for pip and its caches."""
+    if request.node.get_closest_marker("integration") is None:
+        monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
 
 
 @pytest.fixture(autouse=True)
