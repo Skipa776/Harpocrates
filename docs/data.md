@@ -1,6 +1,6 @@
 # Data provenance (DOC-02)
 
-Every dataset used to train, validate, or benchmark the Harpocrates detector. All secrets are fake, generated values; none are live credentials. Raw data files are git-ignored (`*.jsonl`) and not published; the scripts that build them are. The exception is `docs/samples/readme_examples.jsonl` (7 fake examples behind the README comparison).
+Every dataset used to train, validate, or benchmark the Harpocrates detector. All secrets are fake, generated values; none are live credentials. Raw data files are git-ignored (`*.jsonl`) and not published; the scripts that build them are in the training pipeline at tag v1.3.0. The exception is `docs/samples/readme_examples.jsonl` (7 fake examples behind the README comparison).
 
 ## Shipped model (v1.2, model v17)
 
@@ -24,9 +24,9 @@ Each is set so the model raises v1.1's ML alarm rate on the val-split OSS repos 
 
 | File | Rows | Secrets / non-secrets | Origin | Built by | License |
 | --- | --- | --- | --- | --- | --- |
-| `data/synthetic_v4_clean.jsonl` | 34,652 | 11,186 / 23,466 | The original 40k set, cleaned: 4,835 duplicates removed, 7,659 non-secret "secrets" (identifiers, dotted/kebab names, URLs, paths) relabeled, 498 conflicting records dropped | `scripts/clean_v4.py` on `data/synthetic_v4.jsonl` (see below) | Project |
-| `data/eval/train_v5.jsonl` | 30,000 | 15,000 / 15,000 | Fake secrets inserted into real files from 142 train-split repos; lookalike negatives; real scanner candidates from the same code as negatives | `scripts/fetch_oss_corpus.py`, `scripts/build_eval_set.py --split train` | Project (generators); inserted into code from the OSS corpus below |
-| `data/eval/llm_train_v5.jsonl` | 23,937 | 11,655 / 12,282 | Code written by LLMs with typed `{{SECRET:kind}}` / `{{NONSECRET:kind}}` slots, filled with generated fake values | `scripts/generate_llm_slots.py`, `scripts/build_slot_set.py` | Project (values); LLM-written code, see below |
+| `data/synthetic_v4_clean.jsonl` | 34,652 | 11,186 / 23,466 | The original 40k set, cleaned: 4,835 duplicates removed, 7,659 non-secret "secrets" (identifiers, dotted/kebab names, URLs, paths) relabeled, 498 conflicting records dropped | reproduce at tag v1.3.0 (`clean_v4.py` on `data/synthetic_v4.jsonl`, see below) | Project |
+| `data/eval/train_v5.jsonl` | 30,000 | 15,000 / 15,000 | Fake secrets inserted into real files from 142 train-split repos; lookalike negatives; real scanner candidates from the same code as negatives | reproduce at tag v1.3.0 (`fetch_oss_corpus.py`, `build_eval_set.py --split train`) | Project (generators); inserted into code from the OSS corpus below |
+| `data/eval/llm_train_v5.jsonl` | 23,937 | 11,655 / 12,282 | Code written by LLMs with typed `{{SECRET:kind}}` / `{{NONSECRET:kind}}` slots, filled with generated fake values | reproduce at tag v1.3.0 (`generate_llm_slots.py`, `build_slot_set.py`) | Project (values); LLM-written code, see below |
 
 **Round 2 (model v17, shipped as v1.2; round 2 of the improvement log at tag v1.3.0):**
 - `synthetic_v4_clean.jsonl` is rebuilt with three more `clean_v4.py` rules:
@@ -55,7 +55,7 @@ The earlier `positive_holdout_v4.jsonl` (300 records, about 37% mislabeled) is r
 
 ## Open-source corpus
 
-200 repos, 20 per language across Python, JavaScript, TypeScript, Go, Java, Ruby, PHP, Rust, C# and shell. Licenses: Apache-2.0 80, BSD-3-Clause 64, MIT 56. Each is pinned to a commit in `scripts/oss_repos.tsv` and shallow-fetched into git-ignored `data/oss/`. No third-party code is committed. Repos are split train / val / test by a hash of their name (142 / 16 / 42), so no repo spans two splits (DATA-07). Real strings that gitleaks or Harpocrates' provider regexes flag are queued for review, never labeled as negatives.
+200 repos, 20 per language across Python, JavaScript, TypeScript, Go, Java, Ruby, PHP, Rust, C# and shell. Licenses: Apache-2.0 80, BSD-3-Clause 64, MIT 56. Each is pinned to a commit in `oss_repos.tsv` (at tag v1.3.0) and shallow-fetched into git-ignored `data/oss/`. No third-party code is committed. Repos are split train / val / test by a hash of their name (142 / 16 / 42), so no repo spans two splits (DATA-07). Real strings that gitleaks or Harpocrates' provider regexes flag are queued for review, never labeled as negatives.
 
 ## Rules (DATA-01..10) and known gaps
 

@@ -130,7 +130,7 @@ comparison/
 # graphify code graph (regenerate with `graphify update .`)
 graphify-out/
 
-# OSS corpus for data generation (DATA-04); only scripts/oss_repos.tsv is committed
+# OSS corpus for data generation (DATA-04); the pinned list (oss_repos.tsv) is at tag v1.3.0
 data/oss/
 data/models/
 data/llm_slots/
@@ -166,3 +166,14 @@ scripts/convert_to_onnx.py
 scripts/r2_common.py
 cli/tests/test_r2_metrics.py
 cli/tests/test_train_pipeline_features.py
+scripts/build_eval_set.py
+scripts/build_slot_set.py
+scripts/generate_llm_slots.py
+scripts/clean_v4.py
+scripts/eda_datasets.py
+scripts/fetch_oss_corpus.py
+scripts/oss_repos.tsv
+cli/tests/test_data_07_eval_set.py
+cli/tests/test_slot_set.py
+cli/tests/test_clean_v4.py
+cli/tests/test_generate_llm_slots.py

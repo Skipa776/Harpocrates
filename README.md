@@ -245,9 +245,9 @@ How these numbers were produced, and their known biases, is in [Methods](#method
 
 Two held-out sets. Neither was used for training, and neither was used to choose the model or set thresholds.
 
-**Open-source code (3,000 records).** No one hand-labeled real secrets, and no repository with known real secrets was used. The set is built by planting generated fake secrets into real code (`scripts/fetch_oss_corpus.py`, `scripts/build_eval_set.py`):
+**Open-source code (3,000 records).** No one hand-labeled real secrets, and no repository with known real secrets was used. The set is built by planting generated fake secrets into real code (reproduce at tag v1.3.0: `fetch_oss_corpus.py`, `build_eval_set.py`):
 
-1. **Corpus.** 200 permissively licensed GitHub repositories (MIT, Apache-2.0, BSD-3-Clause), 20 per language, 500 to 20,000 stars, each pinned to a commit in `scripts/oss_repos.tsv`. Repositories are split into train, validation and test by a hash of their name, so the 42 test repositories never appear in training.
+1. **Corpus.** 200 permissively licensed GitHub repositories (MIT, Apache-2.0, BSD-3-Clause), 20 per language, 500 to 20,000 stars, each pinned to a commit in `oss_repos.tsv` (at tag v1.3.0). Repositories are split into train, validation and test by a hash of their name, so the 42 test repositories never appear in training.
 2. **Positives (1,500).** Fake values from the project's generators, in 24 provider formats plus passwords and connection strings. Each is inserted as a new line at a random position in a real file from a test repository. The variable name is randomly secret-sounding (`api_key`), neutral (`value`), or absent (`client.connect("…")`). The label is known because the value was generated.
 3. **Generated negatives (750).** Look-alikes that are not secrets (git SHAs, UUIDs, checksums, documentation examples, public keys), inserted the same way.
 4. **Real-code negatives (750).** Strings sampled from those that Harpocrates' own regex and entropy stages extract from the unmodified test repositories. They are labeled not-a-secret by assumption. A string that gitleaks flags, or that matches a Harpocrates provider regex, is excluded and sent to a review queue instead.
