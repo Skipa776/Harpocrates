@@ -51,11 +51,27 @@ NO_RECORD_NOTE = (
 
 
 class RefusalError(Exception):
-    """The install can't proceed safely; the message says why and what to do. Nothing was written."""
+    """
+    Description: Represent an installation that cannot proceed safely, with a reason and corrective
+        action.
+    Parameters:
+        *args: Exception arguments forwarded to Exception.
+    Output: Exception instances reporting a refusal before planned files are written.
+    Notes: The install can't proceed safely; the message says why and what to do. Nothing was
+        written.
+    """
 
 
 @dataclass(frozen=True)
 class Step:
+    """
+    Description: Represent one immutable installation or removal result.
+    Parameters:
+        label: Display label for the affected component.
+        state: Result: added, updated, removed, unchanged, manual, or failed.
+        detail: Additional explanatory text, empty by default.
+    Output: Instances providing a component label, status, and detail for reports.
+    """
     label: str
     state: str  # added | updated | removed | unchanged | manual | failed
     detail: str = ""
@@ -63,6 +79,15 @@ class Step:
 
 @dataclass
 class Report:
+    """
+    Description: Collect the steps, notes, and refusal for a harness operation.
+    Parameters:
+        target: Harness setup identifier.
+        steps: Operation results, defaulting to a new empty list.
+        notes: User-facing notes, defaulting to a new empty list.
+        refused: Refusal explanation, or None.
+    Output: Mutable instances used to accumulate installation or removal outcomes.
+    """
     target: str
     steps: list[Step] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -71,6 +96,13 @@ class Report:
 
 @dataclass(frozen=True)
 class _Marks:
+    """
+    Description: Represent the paired delimiters surrounding an owned configuration block.
+    Parameters:
+        start: Opening marker text.
+        end: Closing marker text.
+    Output: Immutable instances providing start and end markers.
+    """
     start: str
     end: str
 
@@ -81,6 +113,17 @@ TOML_MARKS = _Marks("# >>> harpocrates >>>", "# <<< harpocrates <<<")
 
 @dataclass(frozen=True)
 class _Edit:
+    """
+    Description: Represent a planned file change before it is applied.
+    Parameters:
+        label: Display name of the edited component.
+        path: File to edit.
+        old: Original text, or None for a nonexistent file.
+        new: Replacement text, or None to delete the file.
+        remove: Whether the operation is removal.
+        private: Whether this is private state requiring a private new directory and no backup.
+    Output: Immutable instances providing change, state, backup-path, and backup-needed properties.
+    """
     label: str
     path: Path
     old: Optional[str]  # None: the file doesn't exist
@@ -90,26 +133,55 @@ class _Edit:
 
     @property
     def changed(self) -> bool:
+        """
+        Description: Compare the planned and original text to identify a needed change.
+        Parameters: None
+        Output: True if new and old differ, otherwise False.
+        """
         return self.new != self.old
 
     @property
     def state(self) -> str:
+        """
+        Description: Classify a planned edit for reporting.
+        Parameters: None
+        Output: One of unchanged, removed, added, or updated, based on content and operation type.
+        """
         if not self.changed:
             return "unchanged"
         return "removed" if self.remove else ("added" if self.old is None else "updated")
 
     @property
     def backup(self) -> Path:
+        """
+        Description: Derive the adjacent backup path for the original file.
+        Parameters: None
+        Output: Path with BACKUP_SUFFIX appended to its name; creates nothing.
+        """
         return self.path.with_name(self.path.name + BACKUP_SUFFIX)
 
     @property
     def needs_backup(self) -> bool:
+        """
+        Description: Check whether a changed nonprivate existing file needs its first backup.
+        Parameters: None
+        Output: True when no backup exists and the edit qualifies, otherwise False; filesystem
+            lookup errors may propagate.
+        """
         return self.changed and self.old is not None and not self.private and not self.backup.exists()
 
 
 # --- reading and writing files -------------------------------------------------------------------------------------
 
 def _read(path: Path) -> Optional[str]:
+    """
+    Description: Read UTF-8 file bytes while preserving line endings for safe configuration
+        planning.
+    Parameters:
+        path: File to read.
+    Output: Text preserving CRLF and missing final newline, or None for a missing file; raises
+        RefusalError for other read or decoding failures.
+    """
     try:
         return path.read_bytes().decode("utf-8")  # bytes: keeps CRLF and a missing final newline as they are
     except FileNotFoundError:
@@ -119,6 +191,15 @@ def _read(path: Path) -> Optional[str]:
 
 
 def _write(edit: _Edit) -> None:
+    """
+    Description: Apply a planned edit with a first-original backup and atomic replacement of the
+        resolved target.
+    Parameters:
+        edit: Planned file change to apply.
+    Output: None; may back up, delete, create directories, fsync, chmod, and replace files. Keeps
+        existing modes, uses 0o600 for new files, and removes an empty private directory on
+        deletion. Cleans temporary files on failure and propagates errors.
+    """
     if edit.needs_backup:
         shutil.copy2(edit.path, edit.backup)
     if edit.new is None:
@@ -147,6 +228,12 @@ def _write(edit: _Edit) -> None:
 
 
 def _tilde(path: Path) -> str:
+    """
+    Description: Abbreviate paths under the current home directory for display.
+    Parameters:
+        path: Path to display.
+    Output: String using ~ for home or its descendants; home lookup errors may propagate.
+    """
     text, home = str(path), str(Path.home())
     return "~" + text[len(home):] if text == home or text.startswith(home + os.sep) else text
 
@@ -154,11 +241,27 @@ def _tilde(path: Path) -> str:
 # --- marked blocks in text files -----------------------------------------------------------------------------------
 
 def _block(marks: _Marks, body: str) -> str:
+    """
+    Description: Wrap text in ownership markers with consistent trailing newlines.
+    Parameters:
+        marks: Opening and closing marker pair.
+        body: Block content whose trailing newlines are stripped.
+    Output: Marked block string ending in a newline.
+    """
     return f"{marks.start}\n{body.rstrip(chr(10))}\n{marks.end}\n"
 
 
 def _regions(text: str, marks: _Marks) -> list[tuple[int, int]]:
-    """Spans of the marked blocks, each through its end marker's newline. A lone marker is a refusal."""
+    """
+    Description: Find complete marked blocks so malformed ownership markers cause a refusal.
+    Parameters:
+        text: Text to inspect.
+        marks: Opening and closing markers to pair.
+    Output: List of (start, end) offsets including each end marker newline when present; raises
+        RefusalError for lone or unpaired markers.
+    Notes: Spans of the marked blocks, each through its end marker's newline. A lone marker is a
+        refusal.
+    """
     spans, pos = [], 0
     while (s := text.find(marks.start, pos)) >= 0:
         e = text.find(marks.end, s + len(marks.start))
@@ -174,7 +277,14 @@ def _regions(text: str, marks: _Marks) -> list[tuple[int, int]]:
 
 
 def _drop(text: str, spans: list[tuple[int, int]]) -> str:
-    """Cut the blocks and the one blank line _put added next to each."""
+    """
+    Description: Remove marked spans and the adjacent blank line inserted by _put.
+    Parameters:
+        text: Text containing the spans.
+        spans: Ordered start/end offsets to remove.
+    Output: Text with spans removed; performs no file writes.
+    Notes: Cut the blocks and the one blank line _put added next to each.
+    """
     for s, e in reversed(spans):
         before, after = text[:s], text[e:]
         if before == "" and after.startswith("\n"):
@@ -186,6 +296,14 @@ def _drop(text: str, spans: list[tuple[int, int]]) -> str:
 
 
 def _put(text: str, block: str, where: str) -> str:
+    """
+    Description: Place a block at the start or end with separating newlines.
+    Parameters:
+        text: Existing file text.
+        block: Marked block to insert.
+        where: start for a leading block, otherwise append.
+    Output: Combined text; placing root TOML keys at the start keeps them before tables.
+    """
     if where == "start":  # a TOML root key must come before the first [table]
         return block + ("\n" + text if text else "")
     if not text:
@@ -194,7 +312,16 @@ def _put(text: str, block: str, where: str) -> str:
 
 
 def _upsert(text: str, marks: _Marks, blocks: Sequence[tuple[str, str]]) -> str:
-    """Replace our blocks in place, or add them: (body, "start" | "end") each."""
+    """
+    Description: Replace matching owned blocks in place or rebuild their placements when counts
+        differ.
+    Parameters:
+        text: Existing file text.
+        marks: Ownership markers to locate.
+        blocks: Sequence of (body, start or end) pairs.
+    Output: Updated text; raises RefusalError for unpaired markers and writes nothing.
+    Notes: Replace our blocks in place, or add them: (body, "start" | "end") each.
+    """
     spans = _regions(text, marks)
     if spans and len(spans) == len(blocks):
         for (s, e), (body, _) in reversed(list(zip(spans, blocks))):
@@ -207,6 +334,16 @@ def _upsert(text: str, marks: _Marks, blocks: Sequence[tuple[str, str]]) -> str:
 
 
 def _note_edit(label: str, path: Path, note: str, remove: bool) -> _Edit:
+    """
+    Description: Plan adding or removing an owned Markdown note.
+    Parameters:
+        label: Display label for the note file.
+        path: Markdown file path.
+        note: Note text to insert when installing.
+        remove: Whether to remove marked notes instead.
+    Output: _Edit describing the change, including deletion if removal empties the file; raises
+        RefusalError for unreadable files or malformed markers.
+    """
     old = _read(path)
     text = old or ""
     if remove:
@@ -220,6 +357,17 @@ def _note_edit(label: str, path: Path, note: str, remove: bool) -> _Edit:
 # --- Claude Code: settings.json ------------------------------------------------------------------------------------
 
 def _child(parent: dict, key: str, kind: type, where: str) -> object:
+    """
+    Description: Get or initialize a typed configuration child while refusing incompatible user
+        data.
+    Parameters:
+        parent: Dictionary whose child is inspected or created.
+        key: Child key.
+        kind: Expected type and empty-value constructor.
+        where: Display location used in refusal messages.
+    Output: Existing or newly inserted child; mutates parent for missing keys and raises
+        RefusalError for a wrong type.
+    """
     value = parent.setdefault(key, kind())
     if not isinstance(value, kind):
         raise RefusalError(f"{where}: '{key}' isn't a {'list' if kind is list else 'JSON object'}; "
@@ -228,15 +376,37 @@ def _child(parent: dict, key: str, kind: type, where: str) -> object:
 
 
 def _is_ours(hook: object) -> bool:
+    """
+    Description: Identify hook objects containing the Harpocrates module command marker.
+    Parameters:
+        hook: Potential hook object.
+    Output: True for a dictionary with a string command containing HOOK_MARK, otherwise False.
+    """
     return isinstance(hook, dict) and isinstance(hook.get("command"), str) and HOOK_MARK in hook["command"]
 
 
 def _has_hooks(entry: object) -> bool:
+    """
+    Description: Check that an event entry has a hook list before inspecting it.
+    Parameters:
+        entry: Potential event entry.
+    Output: True for a dictionary with a list-valued hooks field, otherwise False.
+    """
     return isinstance(entry, dict) and isinstance(entry.get("hooks"), list)
 
 
 def _strip_event(entries: list, pred: Callable[[object], bool] = _is_ours) -> tuple[list, Optional[int]]:
-    """The event's entries without the hooks `pred` picks (an entry left empty goes), and where the first sat."""
+    """
+    Description: Remove selected hooks and drop entries left empty while remembering the first
+        removal position.
+    Parameters:
+        entries: Event entries to filter.
+        pred: Predicate selecting hooks to remove, defaulting to Harpocrates hooks.
+    Output: Tuple of retained entries and the first affected insertion position, or None if
+        unchanged; predicate errors propagate.
+    Notes: The event's entries without the hooks `pred` picks (an entry left empty goes), and where
+        the first sat.
+    """
     kept: list = []
     pos: Optional[int] = None
     for entry in entries:
@@ -251,8 +421,19 @@ def _strip_event(entries: list, pred: Callable[[object], bool] = _is_ours) -> tu
 
 
 def _upsert_event(entries: list, want: dict, prior: list[str]) -> tuple[list, list[str], list[str]]:
-    """(entries, hook commands install added, Harpocrates commands it replaced). Our entry stays once: a
-    Harpocrates hook with another python path (or matcher) is replaced. `prior` is what an earlier install added."""
+    """
+    Description: Keep exactly one desired Harpocrates hook entry and track ownership across
+        replacements.
+    Parameters:
+        entries: Existing event entries.
+        want: Desired entry containing one hook.
+        prior: Commands owned by an earlier install.
+    Output: Tuple of updated entries, owned installed commands, and replaced commands not previously
+        owned; malformed desired entries can raise lookup errors.
+    Notes: (entries, hook commands install added, Harpocrates commands it replaced). Our entry stays
+        once: a Harpocrates hook with another python path (or matcher) is replaced. `prior` is what
+        an earlier install added.
+    """
     cmd = want["hooks"][0]["command"]
     ours = [(i, j) for i, e in enumerate(entries) if _has_hooks(e) for j, h in enumerate(e["hooks"]) if _is_ours(h)]
     if len(ours) == 1:
@@ -266,12 +447,30 @@ def _upsert_event(entries: list, want: dict, prior: list[str]) -> tuple[list, li
 
 
 def _strs(value: object) -> list[str]:
+    """
+    Description: Filter optional record data to string list entries.
+    Parameters:
+        value: Potential list of recorded values.
+    Output: List containing only strings, or an empty list for nonlists.
+    """
     return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
 def _merge_settings(cur: dict, want: dict, where: str, prior: dict) -> tuple[dict, dict]:
-    """(merged settings, what this install added). The record is what lets uninstall leave the user's own
-    identical rules and hooks alone; entries an earlier install added stay in it while they are still there."""
+    """
+    Description: Merge desired permissions and hooks while recording ownership for conservative
+        uninstall.
+    Parameters:
+        cur: Current settings object.
+        want: Desired Harpocrates settings.
+        where: Display location for validation errors.
+        prior: Earlier installation ownership record.
+    Output: Tuple of copied merged settings and ownership record; retains earlier owned entries
+        still present and raises RefusalError for incompatible settings structures.
+    Notes: (merged settings, what this install added). The record is what lets uninstall leave the
+        user's own identical rules and hooks alone; entries an earlier install added stay in it
+        while they are still there.
+    """
     out, added = copy.deepcopy(cur), {"permissions": {}, "hooks": {}}
     replaced = _strs(prior.get("replaced"))
     perms = _child(out, "permissions", dict, where)
@@ -292,9 +491,17 @@ def _merge_settings(cur: dict, want: dict, where: str, prior: dict) -> tuple[dic
 
 
 def _strip_settings(cur: dict, prior: Optional[dict]) -> dict:
-    """Undo _merge_settings. With the install record (`prior`) only what it lists goes; without one only
-    Harpocrates hook commands go, never permission rules (they may be the user's own). A list or table that
-    ends up empty goes with them."""
+    """
+    Description: Remove owned settings while preserving identical user-owned rules and hooks.
+    Parameters:
+        cur: Current settings to copy and filter.
+        prior: Earlier ownership record, or None for marker-only hook removal.
+    Output: Copied settings without selected entries or newly empty affected tables; without a
+        record, permission rules remain.
+    Notes: Undo _merge_settings. With the install record (`prior`) only what it lists goes; without
+        one only Harpocrates hook commands go, never permission rules (they may be the user's own).
+        A list or table that ends up empty goes with them.
+    """
     out = copy.deepcopy(cur)
     perms = out.get("permissions")
     if isinstance(perms, dict) and prior is not None:
@@ -326,7 +533,18 @@ def _strip_settings(cur: dict, prior: Optional[dict]) -> dict:
 
 
 def _settings_edit(path: Path, remove: bool, prior: Optional[dict]) -> tuple[_Edit, dict]:
-    """(the edit, this install's record for the file). `prior` is the earlier record, None if there is none."""
+    """
+    Description: Plan a validated Claude Code settings update while preserving existing indentation
+        and final newline.
+    Parameters:
+        path: settings.json path.
+        remove: Whether to uninstall owned settings.
+        prior: Earlier ownership record, or None if absent.
+    Output: Tuple of planned _Edit and new ownership record; raises RefusalError for unreadable,
+        invalid, or incompatible JSON and writes nothing.
+    Notes: (the edit, this install's record for the file). `prior` is the earlier record, None if
+        there is none.
+    """
     old = _read(path)
     cur: dict = {}
     if old is not None:
@@ -354,11 +572,26 @@ def _settings_edit(path: Path, remove: bool, prior: Optional[dict]) -> tuple[_Ed
 # --- Claude Code: MCP registration ---------------------------------------------------------------------------------
 
 def _mcp_add_argv(claude: str) -> list[str]:
+    """
+    Description: Build the user-scoped Claude MCP registration invocation for the current
+        interpreter.
+    Parameters:
+        claude: Claude executable path or display name.
+    Output: Argument list for claude mcp add; launches nothing.
+    """
     command, args = harness.mcp_server()
     return [claude, "mcp", "add", "--scope", "user", MCP_NAME, "--", command, *args]
 
 
 def _claude(argv: list[str], cwd: Path) -> Optional[subprocess.CompletedProcess]:
+    """
+    Description: Run a local Claude command with captured output and a bounded wait.
+    Parameters:
+        argv: Command argument list to run.
+        cwd: Working directory for the subprocess.
+    Output: CompletedProcess regardless of exit status, or None on OSError or a 60-second timeout;
+        launches a subprocess with stdin disconnected.
+    """
     try:
         return subprocess.run(argv, capture_output=True, text=True, timeout=60, cwd=cwd,
                               stdin=subprocess.DEVNULL, check=False)
@@ -367,7 +600,17 @@ def _claude(argv: list[str], cwd: Path) -> Optional[subprocess.CompletedProcess]
 
 
 def _mcp_step(remove: bool, dry_run: bool, owned: bool) -> Step:
-    """`owned`: the install record says install registered the server (only used on removal)."""
+    """
+    Description: Register or remove the Claude MCP server while respecting ownership and dry-run
+        mode.
+    Parameters:
+        remove: Whether to remove the registration.
+        dry_run: Whether to report intended changes without invoking Claude.
+        owned: Whether the install record owns the server, used only on removal.
+    Output: Step reporting unchanged, manual, added, updated, removed, or failed status; may query
+        and change user MCP registration unless dry-run or ownership rules prevent it.
+    Notes: `owned`: the install record says install registered the server (only used on removal).
+    """
     label = "MCP server"
     claude = shutil.which("claude")
     shown_add = shlex.join(_mcp_add_argv("claude"))
@@ -401,6 +644,13 @@ def _mcp_step(remove: bool, dry_run: bool, owned: bool) -> Step:
 
 
 def _why(done: Optional[subprocess.CompletedProcess]) -> str:
+    """
+    Description: Summarize a failed Claude invocation for a report.
+    Parameters:
+        done: Subprocess result, or None when it did not run.
+    Output: First diagnostic line truncated to 200 characters, an exit-status fallback, or a
+        did-not-run message; whitespace-only diagnostic output can raise IndexError.
+    """
     if done is None:
         return "`claude` didn't run"
     return (done.stderr or done.stdout or f"exit {done.returncode}").strip().splitlines()[0][:200]
@@ -409,6 +659,15 @@ def _why(done: Optional[subprocess.CompletedProcess]) -> str:
 # --- Codex: config.toml --------------------------------------------------------------------------------------------
 
 def _parse_toml(text: str, path: Path, what: str) -> dict:
+    """
+    Description: Validate TOML before installation writes any planned configuration.
+    Parameters:
+        text: TOML text to parse.
+        path: Configuration path for diagnostics.
+        what: Problem description used on parse failure.
+    Output: Parsed dictionary; raises RefusalError when no TOML parser is available or parsing
+        fails.
+    """
     if tomllib is None:  # pragma: no cover
         raise RefusalError("Python 3.11+ (or the tomli package) is needed to check config.toml before writing it.")
     try:
@@ -418,6 +677,14 @@ def _parse_toml(text: str, path: Path, what: str) -> dict:
 
 
 def _config_edit(path: Path, remove: bool) -> _Edit:
+    """
+    Description: Plan Codex marked-block changes and refuse conflicts with user-owned settings.
+    Parameters:
+        path: Codex config.toml path.
+        remove: Whether to remove owned blocks instead of installing.
+    Output: _Edit with the planned text; raises RefusalError for read failures, malformed markers,
+        conflicting settings, invalid TOML, or ineffective generated settings. Writes nothing.
+    """
     old = _read(path)
     text = old or ""
     spans = _regions(text, TOML_MARKS)
@@ -443,7 +710,19 @@ def _config_edit(path: Path, remove: bool) -> _Edit:
 # --- orchestration -------------------------------------------------------------------------------------------------
 
 def _plan(target: str, remove: bool, home: Path, prior: Optional[dict]) -> tuple[list[_Edit], dict]:
-    """(edits, this install's record for the target). Marked blocks need no record: the markers are theirs."""
+    """
+    Description: Plan all harness file edits before any write to avoid writing after a configuration
+        refusal.
+    Parameters:
+        target: Harness identifier selecting Claude Code or Codex configuration.
+        remove: Whether to plan removal.
+        home: Home directory containing harness files.
+        prior: Earlier ownership record, or None.
+    Output: Tuple of edits and target ownership record; marked blocks require no ownership record.
+        RefusalError propagates from unsafe plans.
+    Notes: (edits, this install's record for the target). Marked blocks need no record: the markers
+        are theirs.
+    """
     if target == "claude-code":
         base = home / ".claude"
         settings, added = _settings_edit(base / "settings.json", remove, prior)
@@ -456,7 +735,16 @@ def _plan(target: str, remove: bool, home: Path, prior: Optional[dict]) -> tuple
 
 
 def _load_record(path: Path) -> tuple[Optional[str], dict, Optional[str]]:
-    """(file text, record, problem). A record that can't be read is a problem, not an empty record."""
+    """
+    Description: Read the installation record without treating an unreadable record as an empty
+        valid one.
+    Parameters:
+        path: Installation record path.
+    Output: Tuple of file text or None, record dictionary, and problem string or None; missing files
+        have no problem, while read and JSON failures are reported.
+    Notes: (file text, record, problem). A record that can't be read is a problem, not an empty
+        record.
+    """
     try:
         text = _read(path)
     except RefusalError as exc:
@@ -473,11 +761,25 @@ def _load_record(path: Path) -> tuple[Optional[str], dict, Optional[str]]:
 
 
 def detected_targets() -> list[str]:
+    """
+    Description: Select supported install targets that appear installed.
+    Parameters: None
+    Output: List of detected target identifiers in TARGETS order; detection errors may propagate.
+    """
     found = harness.detect()
     return [t for t in TARGETS if found.get(NAMES[t])]
 
 
 def _apply(edit: _Edit, dry_run: bool, report: Report) -> None:
+    """
+    Description: Apply or preview one edit and append its outcome to a report.
+    Parameters:
+        edit: Planned file edit.
+        dry_run: Whether to skip actual writes.
+        report: Report to receive the resulting step.
+    Output: None; appends a step and may write the edit. Records OSError failures as failed steps;
+        other exceptions propagate.
+    """
     try:
         if edit.changed and not dry_run:
             _write(edit)
@@ -488,8 +790,20 @@ def _apply(edit: _Edit, dry_run: bool, report: Report) -> None:
 
 
 def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
-    """The install record (RECORD) says what install added, so uninstall removes only that and leaves the
-    user's own identical rules, hooks and MCP registration. It is written last, after the files it describes."""
+    """
+    Description: Coordinate planned harness edits and record ownership last so removal can preserve
+        user-owned configuration.
+    Parameters:
+        targets: Harness identifiers to process in order.
+        dry_run: Whether to preview edits without applying them or invoking Claude.
+        remove: Whether to remove installed configuration.
+    Output: List of reports containing outcomes and refusals; may write harness files, backups, MCP
+        registration, and private install state. State lookup may migrate legacy state; unhandled
+        filesystem or data-shape errors propagate.
+    Notes: The install record (RECORD) says what install added, so uninstall removes only that and
+        leaves the user's own identical rules, hooks and MCP registration. It is written last, after
+        the files it describes.
+    """
     home = Path.home()
     rpath = state_dir() / "install.json"
     rtext, record, problem = _load_record(rpath)
@@ -552,14 +866,37 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
 
 
 def install_harnesses(targets: Sequence[str], dry_run: bool = False) -> list[Report]:
+    """
+    Description: Install read-tool configuration for selected harnesses and track what was added.
+    Parameters:
+        targets: Harness setup identifiers to install.
+        dry_run: Whether to preview rather than apply changes.
+    Output: List of reports; may write config, backups, and ownership state or run Claude MCP
+        registration unless dry-run. Unhandled orchestration errors propagate.
+    """
     return _run(targets, dry_run, remove=False)
 
 
 def uninstall_harnesses(targets: Sequence[str], dry_run: bool = False) -> list[Report]:
+    """
+    Description: Remove owned read-tool configuration while retaining user-owned settings and
+        backups.
+    Parameters:
+        targets: Harness setup identifiers to uninstall.
+        dry_run: Whether to preview rather than apply changes.
+    Output: List of reports; may change config, ownership state, and owned MCP registration unless
+        dry-run. Unhandled orchestration errors propagate.
+    """
     return _run(targets, dry_run, remove=True)
 
 
 def failed(reports: Sequence[Report]) -> bool:
+    """
+    Description: Check reports for any refused operation or failed step.
+    Parameters:
+        reports: Operation reports to inspect.
+    Output: True if any report is refused or contains a failed step, otherwise False.
+    """
     return any(r.refused or any(s.state == "failed" for s in r.steps) for r in reports)
 
 
@@ -567,6 +904,15 @@ _WOULD = {"added": "would add", "updated": "would update", "removed": "would rem
 
 
 def render(reports: Sequence[Report], dry_run: bool, remove: bool) -> str:
+    """
+    Description: Format operation reports with dry-run wording and removal notes.
+    Parameters:
+        reports: Reports to display.
+        dry_run: Whether to describe proposed changes.
+        remove: Whether to include the retained-backups note.
+    Output: Human-readable report string; raises KeyError for unknown report targets and performs no
+        writes.
+    """
     lines = ["Dry run: nothing is written and `claude` is not run."] if dry_run else []
     for report in reports:
         lines.append(f"{NAMES[report.target]}")
