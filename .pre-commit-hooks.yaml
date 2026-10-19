@@ -1,6 +1,13 @@
+- id: harpo
+  name: Harpo secrets scan
+  entry: harpo scan
+  language: python
+  types_or: [text]
+  pass_filenames: true
+# Deprecated id, kept so a repo that still names it keeps working (FR-NAME-05). Same command as `harpo`.
 - id: harpocrates
-  name: Harpocrates secrets scan
-  entry: harpocrates scan
+  name: Harpo secrets scan (deprecated id, use harpo)
+  entry: harpo scan
   language: python
   types_or: [text]
   pass_filenames: true
