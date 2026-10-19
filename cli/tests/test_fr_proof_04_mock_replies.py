@@ -42,7 +42,7 @@ def check_anthropic_message(msg: dict, turn: dict) -> None:
     blocks = msg["content"]
     texts = [b for b in blocks if b["type"] == "text"]
     uses = [b for b in blocks if b["type"] == "tool_use"]
-    assert len(texts) == (1 if turn.get("text") else 0) and len(uses) == len(calls)
+    assert len(texts) == (1 if turn.get("text") or not calls else 0) and len(uses) == len(calls)
     for block, call in zip(uses, calls):
         assert block["id"].startswith("toolu_") and block["name"] == call["name"] and block["input"] == call["input"]
     assert len({b["id"] for b in uses}) == len(uses)

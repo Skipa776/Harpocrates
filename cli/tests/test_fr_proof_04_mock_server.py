@@ -195,3 +195,149 @@ def test_fr_proof_04_mock_answers_a_websocket_upgrade_with_426_and_records_it(se
     names = {n.lower(): v for n, v in row["headers"]}
     assert names["upgrade"] == "websocket" and names["sec-websocket-extensions"] == "permessage-deflate"
     assert names["sec-websocket-key"] == "<present>" and FAKE not in json.dumps(row)
+
+
+# --- the provider routes -----------------------------------------------------------------------------------------
+
+from test_fr_proof_04_mock_replies import (  # noqa: E402
+    check_anthropic_message,
+    check_response,
+    parse_sse,
+)
+
+JSON = {"Content-Type": "application/json"}
+ANTHROPIC_REQUEST = {"model": "claude-x", "max_tokens": 16, "messages": [{"role": "user", "content": "hi"}]}
+RESPONSES_REQUEST = {"model": "gpt-x", "input": "hi", "store": False}
+READ_TOOL = [{"name": "Read", "description": "d", "input_schema": {"type": "object"}}]
+SHELL_TOOL = [{"type": "function", "name": "shell", "parameters": {"type": "object"}}]
+
+
+def post_json(srv, path: str, payload: object, headers: Optional[dict] = None) -> tuple[int, dict, bytes]:
+    return send(srv, "POST", path, json.dumps(payload).encode(), {**JSON, **(headers or {})})
+
+
+def test_fr_proof_04_mock_answers_both_formats(server) -> None:
+    status, hdrs, body = post_json(server, "/v1/messages?beta=true", ANTHROPIC_REQUEST)
+    assert status == 200 and hdrs["content-type"].startswith("application/json")
+    message = json.loads(body)
+    check_anthropic_message(message, {})
+    assert message["model"] == "claude-x"
+
+    status, hdrs, body = post_json(server, "/v1/messages", {**ANTHROPIC_REQUEST, "stream": True})
+    assert status == 200 and hdrs["content-type"].startswith("text/event-stream") and "content-length" not in hdrs
+    events = parse_sse(body)
+    names = [name for name, _ in events]
+    assert names[0] == "message_start" and names[-2:] == ["message_delta", "message_stop"]
+    assert events[0][1]["message"]["model"] == "claude-x"
+
+    status, hdrs, body = post_json(server, "/v1/responses", RESPONSES_REQUEST)
+    assert status == 200 and hdrs["content-type"].startswith("application/json")
+    response = json.loads(body)
+    check_response(response, {})
+    assert response["model"] == "gpt-x"
+
+    status, hdrs, body = post_json(server, "/v1/responses", {**RESPONSES_REQUEST, "stream": True})
+    assert status == 200 and hdrs["content-type"].startswith("text/event-stream")
+    events = parse_sse(body)
+    assert events[0][0] == "response.created" and events[-1][0] == "response.completed"
+    check_response(events[-1][1]["response"], {})
+    rows = recorded(server)
+    assert [(r["route"], r["stream"], r["response_status"]) for r in rows] == [
+        ("anthropic.messages", False, 200), ("anthropic.messages", True, 200),
+        ("openai.responses", False, 200), ("openai.responses", True, 200)]
+    assert json.loads(rows[0]["body"]) == ANTHROPIC_REQUEST  # the body is stored decoded
+
+
+def test_fr_proof_04_mock_follows_the_script_one_turn_per_model_call(tmp_path: Path) -> None:
+    turns = [{"tool_calls": [{"name": "Read", "input": {"file_path": ".env"}}]},
+             {"tool_calls": [{"name": "Bash", "input": {"command": "cat config/settings.py"}}]}, {"text": "done"}]
+    with mock.start_server(record_dir=tmp_path / "rec", turns=turns) as srv:
+        convo = [{"role": "user", "content": "go"}]
+        seen = []
+        for _ in range(3):
+            status, _, body = post_json(srv, "/v1/messages", {**ANTHROPIC_REQUEST, "messages": convo, "tools": READ_TOOL})
+            assert status == 200
+            msg = json.loads(body)
+            seen.append(msg["stop_reason"])
+            uses = [b for b in msg["content"] if b["type"] == "tool_use"]
+            convo = convo + [{"role": "assistant", "content": msg["content"]}]
+            if uses:
+                convo.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": uses[0]["id"], "content": "ok"}]})
+        assert seen == ["tool_use", "tool_use", "end_turn"] and msg["content"][0]["text"] == "done"
+        assert [r["reply_turn"] for r in recorded(srv)] == [0, 1, 2]
+        # The same for Responses, with function_call items and their outputs.
+        items = [{"type": "message", "role": "user", "content": "go"}]
+        seen = []
+        for _ in range(3):
+            status, _, body = post_json(srv, "/v1/responses", {**RESPONSES_REQUEST, "input": items, "tools": SHELL_TOOL})
+            out = json.loads(body)["output"]
+            calls = [i for i in out if i["type"] == "function_call"]
+            seen.append(calls[0]["name"] if calls else "text")
+            items = items + out
+            if calls:
+                items.append({"type": "function_call_output", "call_id": calls[0]["call_id"], "output": "ok"})
+        assert seen == ["Read", "Bash", "text"]  # the same script, now spoken as function_call items
+        # A streamed tool call carries the same input.
+        _, _, body = post_json(srv, "/v1/messages", {**ANTHROPIC_REQUEST, "tools": READ_TOOL, "stream": True})
+        events = parse_sse(body)
+        assert "".join(d["delta"]["partial_json"] for n, d in events if n == "content_block_delta") == '{"file_path":".env"}'
+
+
+def test_fr_proof_04_mock_a_scripted_error_turn_is_a_provider_shaped_http_error(tmp_path: Path) -> None:
+    turns = [{"error": {"status": 400, "message": "blocked by policy"}}]
+    with mock.start_server(record_dir=tmp_path / "rec", turns=turns) as srv:
+        status, _, body = post_json(srv, "/v1/messages", {**ANTHROPIC_REQUEST, "tools": READ_TOOL})
+        assert status == 400 and json.loads(body)["type"] == "error"
+        assert json.loads(body)["error"] == {"type": "invalid_request_error", "message": "blocked by policy"}
+        status, _, body = post_json(srv, "/v1/responses", {**RESPONSES_REQUEST, "tools": SHELL_TOOL})
+        assert status == 400 and json.loads(body)["error"]["message"] == "blocked by policy"
+        assert [r["response_status"] for r in recorded(srv)] == [400, 400]
+
+
+def test_fr_proof_04_mock_counts_tokens_and_lists_models(tmp_path: Path) -> None:
+    with mock.start_server(record_dir=tmp_path / "rec") as srv:
+        status, _, body = post_json(srv, "/v1/messages/count_tokens", ANTHROPIC_REQUEST)
+        assert status == 200 and json.loads(body) == {"input_tokens": 42}
+        status, _, body = send(srv, "GET", "/v1/models?limit=1000", headers={"anthropic-version": "2023-06-01"})
+        listing = json.loads(body)
+        assert status == 200 and listing["data"][0]["type"] == "model" and listing["has_more"] is False
+        status, _, body = send(srv, "GET", "/v1/models")
+        listing = json.loads(body)
+        assert listing["object"] == "list" and listing["data"][0]["object"] == "model"
+    with mock.start_server(record_dir=tmp_path / "rec2", count_tokens_status=400) as srv:
+        status, _, body = post_json(srv, "/v1/messages/count_tokens", ANTHROPIC_REQUEST)
+        assert status == 400 and json.loads(body)["type"] == "error"
+        assert post_json(srv, "/v1/messages", ANTHROPIC_REQUEST)[0] == 200  # only count_tokens is affected
+
+
+@pytest.mark.parametrize("path, family", [("/v1/messages", "anthropic"), ("/v1/responses", "openai")])
+def test_fr_proof_04_mock_malformed_json_is_recorded_without_its_text_and_answered_400(server, path: str, family: str) -> None:
+    for raw in (b'{"model": "x", ', b"[1, 2]", b'"just a string"', b"\xff\xfe not json", b"null"):
+        status, _, body = send(server, "POST", path, raw, JSON)
+        assert status == 400
+        payload = json.loads(body)
+        assert ("type" in payload and payload["type"] == "error") if family == "anthropic" else "message" in payload["error"]
+    rows = recorded(server)
+    assert [r["body_status"] for r in rows] == ["malformed-json"] * 5 and all(r["body"] is None for r in rows)
+    assert rows[0]["body_size"] == 15 and rows[0]["body_sha256"] == hashlib.sha256(b'{"model": "x", ').hexdigest()
+    assert send(server, "POST", path, json.dumps(RESPONSES_REQUEST if family == "openai" else ANTHROPIC_REQUEST).encode(), JSON)[0] == 200
+
+
+def test_fr_proof_04_mock_still_answers_when_it_cannot_decode_the_body(server, monkeypatch) -> None:
+    monkeypatch.setattr(mock, "_load_zstd", lambda: None)  # as on a Python without a zstd module
+    status, _, body = send(server, "POST", "/v1/responses", b"opaque-frame", {**JSON, "Content-Encoding": "zstd"})
+    assert status == 200 and json.loads(body)["object"] == "response"  # the session goes on
+    row = recorded(server)[-1]
+    assert row["body"] is None and row["body_status"] == "zstd-unavailable" and row["content_encoding"] == "zstd"
+    assert row["body_raw_b64"] == "b3BhcXVlLWZyYW1l"
+    status, _, body = send(server, "POST", "/v1/messages", gzip.compress(json.dumps(ANTHROPIC_REQUEST).encode()),
+                           {**JSON, "Content-Encoding": "gzip"})
+    assert status == 200 and json.loads(recorded(server)[-1]["body"]) == ANTHROPIC_REQUEST
+
+
+def test_fr_proof_04_mock_decodes_a_zstd_body_when_a_module_is_importable(server) -> None:
+    zstandard = pytest.importorskip("zstandard")
+    raw = zstandard.ZstdCompressor().compress(json.dumps(RESPONSES_REQUEST).encode())
+    status, _, _ = send(server, "POST", "/v1/responses", raw, {**JSON, "Content-Encoding": "zstd"})
+    row = recorded(server)[-1]
+    assert status == 200 and row["body_status"] == "ok" and json.loads(row["body"]) == RESPONSES_REQUEST

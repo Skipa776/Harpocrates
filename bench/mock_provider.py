@@ -607,7 +607,15 @@ def error_body(family: str, kind: str, message: str) -> dict:
     return {"error": {"message": message, "type": kind, "param": None, "code": None}}
 
 
-ROUTES: dict[tuple[str, str], str] = {}  # (method, path) -> route name
+ROUTES: dict[tuple[str, str], str] = {
+    ("POST", "/v1/messages"): "anthropic.messages",
+    ("POST", "/v1/messages/count_tokens"): "anthropic.count_tokens",
+    ("POST", "/v1/responses"): "openai.responses",
+    ("GET", "/v1/models"): "models",
+}  # (method, path) -> route name
+JSON_ROUTES = ("anthropic.messages", "anthropic.count_tokens", "openai.responses")  # routes whose body must be a JSON object
+ERROR_KINDS = {400: "invalid_request_error", 401: "authentication_error", 403: "permission_error", 404: "not_found_error",
+               413: "request_too_large", 429: "rate_limit_error", 529: "overloaded_error"}
 
 
 def classify(method: str, target: str, headers: dict[str, str]) -> str:
@@ -624,6 +632,86 @@ def classify(method: str, target: str, headers: dict[str, str]) -> str:
         return "websocket-upgrade"
     return ROUTES.get((method, target.partition("?")[0]), "unknown")
 
+
+class Plan(NamedTuple):
+    """
+    Description: How the mock will answer one request.
+    Parameters:
+        status: the HTTP status.
+        payload: the JSON body, or None when events carry the answer.
+        events: the SSE events for a streamed reply, or None.
+        stream: whether the request asked for a stream (None on routes that do not stream).
+        reply_turn: the index of the scripted turn used, or None.
+    Output: An immutable record built by plan_reply and carried out by the handler.
+    """
+
+    status: int
+    payload: Optional[dict]
+    events: Optional[list]
+    stream: Optional[bool]
+    reply_turn: Optional[int]
+
+
+def _models_payload(headers: dict[str, str]) -> dict:
+    """
+    Description: Build the fixed model list in the shape of whichever provider asked.
+    Parameters:
+        headers: the request headers, keys lower-cased; an anthropic-version header selects the Anthropic shape.
+    Output: The JSON-serializable model list.
+    """
+    if "anthropic-version" in headers:
+        return {"data": [{"type": "model", "id": "claude-mock", "display_name": "Claude Mock",
+                          "created_at": "2025-01-01T00:00:00Z"}],
+                "has_more": False, "first_id": "claude-mock", "last_id": "claude-mock"}
+    return {"object": "list", "data": [{"id": "gpt-mock", "object": "model", "created": CREATED_AT, "owned_by": "mock"}]}
+
+
+def plan_reply(route: str, body_status: str, parsed: Optional[dict], headers: dict[str, str], config: Config,
+               serial: int, input_tokens: int) -> Plan:
+    """
+    Description: Decide the answer to a request from its route and what was read of its body.
+    Parameters:
+        route: the name from classify().
+        body_status: how reading the body went (a failed status is answered 400).
+        parsed: the request body as a JSON object, or None when it is not one.
+        headers: the request headers, keys lower-cased.
+        config: the settings the mock runs with.
+        serial: the counter that makes reply ids unique.
+        input_tokens: the figure to report as the request's input tokens.
+    Output: A Plan: 400 for a failed or malformed body; 426 for a WebSocket upgrade; the model list for /v1/models;
+        a fixed count (or the configured error) for count_tokens; for the two model routes, the scripted turn (or a text
+        reply) as JSON, or as SSE events when the request asked for a stream, or the scripted HTTP error; 404 otherwise.
+    """
+    family = "anthropic" if route.startswith("anthropic") else "openai"
+    if body_status in FAILED_BODY or body_status == "malformed-json":
+        return Plan(400, error_body(family, "invalid_request_error", f"request body rejected: {body_status}"), None, None, None)
+    if route == "websocket-upgrade":
+        return Plan(426, error_body("openai", "upgrade_required", "WebSocket is not supported; use HTTP"), None, None, None)
+    if route == "models":
+        return Plan(200, _models_payload(headers), None, None, None)
+    if route == "anthropic.count_tokens":
+        if config.count_tokens_status is not None:
+            status = config.count_tokens_status
+            return Plan(status, error_body("anthropic", ERROR_KINDS.get(status, "api_error"), "count_tokens refused"),
+                        None, None, None)
+        return Plan(200, {"input_tokens": 42}, None, None, None)
+    if route not in ("anthropic.messages", "openai.responses"):
+        return Plan(404, error_body("anthropic", "not_found_error", "no such route in the mock provider"), None, None, None)
+    fmt = "anthropic" if route == "anthropic.messages" else "responses"
+    turns = list(config.turns)
+    turn = turn_for(parsed, fmt, turns)
+    index = next((i for i, candidate in enumerate(turns) if candidate is turn), None)
+    stream = bool(parsed and parsed.get("stream") is True)
+    if "error" in turn:
+        err = turn["error"]
+        kind = err.get("type") or ERROR_KINDS.get(err["status"], "api_error")
+        return Plan(err["status"], error_body(family, kind, err["message"]), None, stream, index)
+    model = parsed.get("model") if parsed and isinstance(parsed.get("model"), str) else "mock-model"
+    if fmt == "anthropic":
+        message = anthropic_message(turn, model, serial, input_tokens)
+        return Plan(200, None if stream else message, anthropic_events(message) if stream else None, stream, index)
+    response = responses_object(turn, model, serial, input_tokens)
+    return Plan(200, None if stream else response, responses_events(response) if stream else None, stream, index)
 
 
 class _Httpd(ThreadingHTTPServer):
@@ -749,49 +837,88 @@ class _Handler(BaseHTTPRequestHandler):
         except OSError:
             self.close_connection = True
 
+    def _send_sse(self, events: list) -> None:
+        """
+        Description: Send a 200 response as an SSE stream in chunked transfer encoding, one chunk per event.
+        Parameters:
+            events: the (event name, data) pairs to send.
+        Output: None. Writes to the connection; ignores a client that has gone.
+        """
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            for event in events:
+                data = sse_bytes([event])
+                self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
+                self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n")
+        except OSError:
+            self.close_connection = True
+
+    def _decode(self, raw: RawBody, headers: dict[str, str], route: str) -> tuple[Optional[str], str, Optional[str], Optional[dict]]:
+        """
+        Description: Turn the bytes read into the text to record and, on a JSON route, the parsed request object.
+        Parameters:
+            raw: the body as read.
+            headers: the request headers, keys lower-cased.
+            route: the route name.
+        Output: (text to record or None, final body status, base64 of the raw body when it could not be decoded,
+            the parsed JSON object or None). A JSON route whose body is not a JSON object has status malformed-json and no
+            text recorded: size and hash only.
+        """
+        if raw.status == "empty":
+            return "", "empty", None, None
+        if raw.status != "ok":
+            return None, raw.status, None, None
+        decoded = decode_body(raw.data, headers.get("content-encoding"), self.server.config.max_body)
+        if decoded.status in ("unsupported-encoding", "zstd-unavailable"):
+            return None, decoded.status, base64.b64encode(raw.data).decode("ascii"), None
+        if decoded.status != "ok":
+            return None, decoded.status, None, None
+        if route in JSON_ROUTES:
+            try:
+                parsed = json.loads(decoded.body)
+            except (ValueError, RecursionError):
+                parsed = None
+            if not isinstance(parsed, dict):
+                return None, "malformed-json", None, None
+            return decoded.body.decode("utf-8"), "ok", None, parsed
+        try:
+            return decoded.body.decode("utf-8"), "ok", None, None
+        except UnicodeDecodeError:
+            return decoded.body.decode("utf-8", errors="replace"), "not-utf8", None, None
+
     def _serve(self) -> None:
         """
         Description: Answer any request: read it, record it, reply.
         Parameters: None
-        Output: None. A body that failed to read, decode or fit the cap is answered 400; a WebSocket upgrade 426; a route
-            the mock does not know 404.
+        Output: None. Records one line (see the module docstring), then sends the Plan from plan_reply. The line is written
+            before the reply goes out, so a client that hangs up still leaves its record.
         """
         headers = {k.lower(): v for k, v in self.headers.items()}
         route = classify(self.command, self.path, headers)
         raw = self._body()
-        body_text, body_status, raw_b64, decoded_ok = None, raw.status, None, False
-        if raw.status in ("ok", "empty"):
-            if raw.status == "empty":
-                body_text = ""
-            else:
-                decoded = decode_body(raw.data, headers.get("content-encoding"), self.server.config.max_body)
-                body_status = decoded.status
-                if decoded.status == "ok":
-                    decoded_ok = True
-                    try:
-                        body_text = decoded.body.decode("utf-8")
-                    except UnicodeDecodeError:
-                        body_text, body_status = decoded.body.decode("utf-8", errors="replace"), "not-utf8"
-                elif decoded.status in ("unsupported-encoding", "zstd-unavailable"):
-                    raw_b64 = base64.b64encode(raw.data).decode("ascii")
-        family = "anthropic" if self.path.startswith("/v1/messages") else "openai"
-        if body_status in FAILED_BODY:
-            status, reply = 400, error_body(family, "invalid_request_error", f"request body rejected: {body_status}")
-            self.close_connection = self.close_connection or raw.status in ("bad-length", "bad-chunking", "truncated")
-        elif route == "websocket-upgrade":
-            status, reply = 426, error_body(family, "upgrade_required", "WebSocket is not supported; use HTTP")
-        else:
-            status, reply = 404, error_body("anthropic", "not_found_error", "no such route in the mock provider")
+        text, body_status, raw_b64, parsed = self._decode(raw, headers, route)
+        plan = plan_reply(route, body_status, parsed, headers, self.server.config, self.server.next_serial(),
+                          max(1, raw.size // 4))
+        if raw.status in ("bad-length", "bad-chunking", "truncated"):
+            self.close_connection = True
         entry = {"method": self.command, "path": redact_target(self.path), "http_version": self.request_version,
                  "route": route, "headers": redact_headers(self.headers.items()),
                  "content_length_header": raw.content_length, "transfer_encoding": "chunked" if raw.chunked else None,
                  "chunked": raw.chunked, "content_encoding": headers.get("content-encoding"),
-                 "body_size": raw.size, "body_sha256": raw.sha256, "body_status": body_status, "body": body_text,
-                 "response_status": status}
+                 "body_size": raw.size, "body_sha256": raw.sha256, "body_status": body_status, "body": text,
+                 "stream": plan.stream, "reply_turn": plan.reply_turn, "response_status": plan.status}
         if raw_b64 is not None:
             entry["body_raw_b64"] = raw_b64
         self.server.record(entry)
-        self._send(status, reply)
+        if plan.events is not None:
+            self._send_sse(plan.events)
+        else:
+            self._send(plan.status, plan.payload)
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _serve  # noqa: N815 - http.server names
 
