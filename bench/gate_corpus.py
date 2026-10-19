@@ -6,8 +6,9 @@
 One request per block, item and tool type in docs/gate-parser-spec.md, in both provider formats, each carrying one
 generated canary in the field the spec says the gate scans. The canary harness sends the cases to the mock provider
 (direct mode); the future test_fr_gate_02_* parser tests (G4) use the same cases, so a case's test_name is the spec's
-name for it. Cases the spec lists have source "spec": their shapes are written from the spec tables and official docs,
-and become "captured" only where a recorded agent session confirmed them (bench/results/proof/corpus-observed.json).
+name for it. A case has source "spec" when its shape is written from the spec tables and official docs, and "captured"
+when a recorded agent session sent that block, item or tool type (CAPTURED, from the G2 probe run CAPTURED_RUN; see
+bench/results/proof/g2-probes-<run>.json). A captured case still carries a generated canary, not what the agent held.
 
 Every canary comes from bench/canary_repo.py's generators with a seed derived from (seed, case id). The same seed gives
 the same corpus. A Case holds the canary value, so print a Case with summary(), never repr-ing its body into a report.
@@ -24,6 +25,16 @@ from bench import canary_repo
 
 TEST_PREFIX = "test_fr_gate_02_"
 ROUTES = {"anthropic": "/v1/messages", "responses": "/v1/responses"}
+# Cases whose block, item or tool type Claude Code or Codex actually sent in the G2 probes (claude-corpus, codex-corpus).
+CAPTURED_RUN = "20261019T175710Z-g2"
+CAPTURED = frozenset({
+    "anthropic_text", "anthropic_thinking", "anthropic_redacted_thinking", "anthropic_tool_use", "anthropic_tool_result_string",
+    "anthropic_tool_result_blocks", "anthropic_system_role_text", "anthropic_system_role_string", "anthropic_tools_custom",
+    "anthropic_system_blocks", "anthropic_metadata_user_id",
+    "responses_input_text", "responses_output_text", "responses_function_call", "responses_function_call_output",
+    "responses_reasoning", "responses_tools_function", "responses_tools_namespace", "responses_tools_builtin",
+    "responses_client_metadata",
+})
 # Single-line kinds, alternating known-format and ML-only so both classes appear across the corpus.
 CYCLE = ("github_token", "db_password", "openai_key", "aws_secret_access_key", "stripe_key", "twilio_auth_token",
          "slack_token", "postgres_password", "sendgrid_key", "db_url", "gcp_api_key", "aws_access_key_id", "npm_token",
@@ -72,7 +83,7 @@ class Case:
         canary_value: the planted value; never put it in a report.
         field_path: where the canary sits in the body, as canary_match.locate names it, or None.
         body: the request body as a plain JSON-serializable dict.
-        source: spec (written from the spec tables) or captured (confirmed by a recorded agent session).
+        source: spec (written from the spec tables) or captured (the type was sent by an agent in a recorded session).
     Output: An immutable record; its repr and summary() hold no canary value.
     """
 
@@ -146,5 +157,6 @@ def build_corpus(seed: int = 0) -> list[Case]:
                 raise ValueError(f"corpus case {row.case_id} does not hold its canary")
             path = hits[0].path
         cases.append(Case(row.case_id, TEST_PREFIX + row.case_id if row.spec else None, fmt, ROUTES[fmt], row.section,
-                          row.block_type, row.expect, kind, match.kind_class(kind) if kind else None, value, path, body))
+                          row.block_type, row.expect, kind, match.kind_class(kind) if kind else None, value, path, body,
+                          "captured" if row.case_id in CAPTURED else "spec"))
     return cases

@@ -120,3 +120,15 @@ def test_fr_proof_04_corpus_json_in_string_cases_hold_the_canary_only_inside_the
     assert "{json}" in case.field_path
     key_case = next(c for c in CASES if c.case_id == "responses_function_call_arguments_key_blocked")
     assert key_case.expect == "block" and key_case.field_path.endswith("<key>")
+
+
+def test_fr_proof_04_corpus_marks_the_cases_a_recorded_agent_session_confirmed() -> None:
+    ids = {c.case_id for c in CASES}
+    assert corpus.CAPTURED <= ids and len(corpus.CAPTURED) >= 15
+    by_id = {c.case_id: c for c in CASES}
+    for case_id in corpus.CAPTURED:
+        assert by_id[case_id].source == "captured", case_id
+    assert {c.source for c in CASES} == {"spec", "captured"}
+    assert by_id["anthropic_system_role_string"].source == "captured"  # sent by Claude Code, absent from the spec table
+    assert by_id["anthropic_thinking"].source == "captured" and by_id["anthropic_compaction"].source == "spec"
+    assert corpus.CAPTURED_RUN.endswith("-g2")
