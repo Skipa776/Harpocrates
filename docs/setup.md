@@ -157,9 +157,22 @@ The copy is skipped, and `~/.harpocrates` stays in use, when `~/.harpocrates` or
 
 A `~/.harpo` that already exists as a plain folder is used as it is, with no copy. Once `~/.harpo` exists in any form, `~/.harpocrates` is never used again. If `~/.harpo` is a symlink or a file, Harpo treats it as unusable: the allowlist reads as empty, there are no grants and no install record, and `harpo allow`, the session grants and `harpo install` refuse to write there and say why. Move or remove the link to continue. This is deliberate: swapping `~/.harpo` for a link must not bring back an older allowlist with entries you removed.
 
-After upgrading, run `harpocrates install` again. It adds `Edit(~/.harpo/**)` to the Claude Code deny rules and denies both folders in the Codex profile. The hook already guards both folders before you do: it refuses an agent's Edit, MultiEdit, Write or NotebookEdit call on either folder (in every mode, even if you approved an edit earlier in the session) and a Bash command that names either folder or runs inside it, in any quoting. The deny rules are a second layer.
+After upgrading, run `harpo install` again. It adds `Edit(~/.harpo/**)` to the Claude Code deny rules, denies both folders in the Codex profile, and rewrites the hook and MCP commands with the interpreter flags this release uses (`-I`, or `-E -P` for an install in the user site), which ignore `PYTHONPATH` and the other `PYTHON*` variables. The hook code itself is the installed package, so the stronger checks below apply as soon as you upgrade; the config the installer writes does not change until you re-run it.
 
-The environment variables `HARPO_RUST_SCANNER`, `HARPO_RUST_TIMEOUT_SECONDS`, `HARPO_RUST_WORKERS` and `HARPO_REQUIRE_RUST` are read first. The `HARPOCRATES_` names still work. No variable moves the state folder.
+What the hook refuses, for both state folders (`~/.harpo` and `~/.harpocrates`), whatever the mode and even if you approved an edit earlier in the session:
+- an Edit, MultiEdit, Write or NotebookEdit call that names a path inside either folder under any path key of the call, in any spelling (relative, `~`, through a symlink), a hard link to a file in them, or anything directly under your home folder whose name starts with `.harpo` (the migration's temp folder, a backup; this also refuses `~/.harpoon`, on purpose);
+- a Bash command that names either folder, in any quoting or globbing, or runs inside it, unless it is a plain read; a `cd`, `pushd` or `popd` in a command that names either folder is refused even if the rest is read-only.
+
+The deny rules are a second layer.
+
+**Until you re-run `harpo install`:**
+- **Codex** relies on its sandbox profile. The profile that denies `~/.harpo` is written by `harpo install`, so a Codex set up before this release does not deny it, and the hook command it has still carries the old flags. The Codex hook matches only `Bash`: Codex's `apply_patch` and its other file tools are not hooked, so an edit to either folder made that way is stopped only by the sandbox profile. Run `harpo install --codex` and trust the hook again in `/hooks`.
+- **Claude Code** keeps working with the old hook command, but with `-P` instead of `-I`, so a `PYTHONPATH` set by a project's settings is still honoured by the hook's interpreter.
+- The Claude Code hook matches the built-in tools (`Read`, `Grep`, `Bash`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`). A write tool that a third-party MCP server adds is not matched, so it can write to either folder; the deny rules above do not cover MCP tools either. Do not give an agent an MCP server that can write files in your home folder.
+
+These three are listed as residual risks in [the threat model](threat-model.md).
+
+The environment variables `HARPO_RUST_SCANNER`, `HARPO_RUST_TIMEOUT_SECONDS`, `HARPO_RUST_WORKERS` and `HARPO_REQUIRE_RUST` are read first. The `HARPOCRATES_` names still work. No variable moves the state folder: it is found from the system's account database for your user, not from `HOME`.
 
 ## What was verified
 

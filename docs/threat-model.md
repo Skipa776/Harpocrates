@@ -98,7 +98,19 @@ None of these channels is meant to carry prompt content, but Guard can't verify 
 
 **Why Guard can't fully fix it.** An install into the user site-packages (`pip install --user`) needs that site, which `-I` drops. For that one case the commands use `-E -P` instead (3.11 and later): `-E` ignores the `PYTHON*` variables and `-P` drops the working directory, but Python still finds the user site from `$HOME`. If an agent can set `HOME` for the hook, it can point it at a folder with a planted user site and its own `Harpocrates`. On Python 3.10 there is no `-P`, so a user-site install gets `-I`, is not found, and the hook fails closed (exit 2).
 
-**What helps:** install into a virtual environment or the interpreter's own site-packages (the default for `pipx` and `python -m venv`), where the commands use `-I` and nothing in the environment can reach the hook.
+The Claude Code prompt plugin (`/harpo allow`) has the same exposure in a second place. It runs the interpreter named in `~/.harpo/install.json`, and the plugin runtime offers no password-database lookup, so it finds that file from `HOME`. It reads the record only from a plain folder and a plain file (never through a symlink), accepts only an absolute interpreter path with the flags above, and runs only on your own Enter in the chat box. But a `HOME` that a project's settings point at a folder of its own, holding its own `install.json`, would make the next `/harpo allow` you type run a program of the project's choosing.
+
+**What helps:** install into a virtual environment or the interpreter's own site-packages (the default for `pipx` and `python -m venv`), where the commands use `-I` and nothing in the environment can reach the hook. Do not accept project settings that set `HOME`; the Claude Code workspace-trust prompt is where that is decided.
+
+## Residual risk 6: what the state-folder guard does not cover
+
+**Risk.** The allowlist and the session grants live in `~/.harpo`, and only you may change them. The hook refuses an agent's attempt to write there through the built-in tools and Bash (SEC-08, SEC-09). Three gaps remain.
+
+- **Codex relies on its sandbox until `harpo install` is re-run.** The Codex profile that denies `~/.harpo` and `~/.harpocrates` is written by the installer, so a Codex set up before the upgrade does not have it. The Codex hook also matches only `Bash`: `apply_patch` and Codex's other file tools are unhooked, so an edit to the state folder made with them is stopped only by the sandbox profile, which is off with `sandbox_mode = "danger-full-access"` or `--dangerously-bypass-approvals-and-sandbox`.
+- **Third-party MCP write tools are not matched by the Claude Code hook.** The hook matches the built-in tools. A file-writing tool from an MCP server the agent can call is not inspected, and neither Claude Code's `Edit(...)` deny rules nor Codex's profile apply to MCP servers.
+- **A script that builds the path at run time.** As for the allowlist and grants above: the guard reads the command text, so a path assembled while the command runs gets past it.
+
+**What helps:** re-run `harpo install` after every upgrade; keep Codex sandboxed; give the agent only MCP servers you trust to write files; keep the allowlist short. The egress gate (M2) sees what reaches the provider whichever channel carried it.
 
 ## Also out of scope
 
