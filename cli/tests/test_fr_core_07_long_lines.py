@@ -149,3 +149,149 @@ def test_fr_core_07_java_func_pattern_same_results(text):
 def test_fr_core_07_java_func_pattern_newline_split_differs(text):
     assert _OLD_JAVA_FUNC_PATTERN.search(text)
     assert not _NEW_JAVA_FUNC_PATTERN.search(text)
+
+
+_COMMENT_RUN_LEN = 80_000
+
+
+def _assert_comment_run_is_linear(char: str) -> None:
+    """
+    Description: Assert a long run of one comment character plus an assignment extracts within the bound.
+    Parameters:
+        char: the repeated character ("#" or "/").
+    Output: None; raises AssertionError when the bound is exceeded.
+    """
+    line = char * _COMMENT_RUN_LEN + f';var k="{_TOKEN}";'
+    finding = Finding(
+        type="ENTROPY_CANDIDATE",
+        snippet="comment run",
+        evidence=EvidenceType.ENTROPY,
+        severity=Severity.HIGH,
+        token=_TOKEN,
+        line=1,
+    )
+    start = time.perf_counter()
+    context = extract_context(line, 1)
+    extract_features(finding, context)
+    assert time.perf_counter() - start < _TIME_BOUND_SECONDS
+
+
+def test_fr_core_07_hash_run_line():
+    _assert_comment_run_is_linear("#")
+
+
+def test_fr_core_07_slash_run_line():
+    _assert_comment_run_is_linear("/")
+
+
+_OLD_HASH_EXAMPLE = r"#.*example"
+_OLD_SLASH_TEST = r"//.*test"
+
+_COMMENT_CASES = [
+    "#example",
+    "# EXAMPLE",
+    "# Example here",
+    "#examplE",
+    "x#y\nexample",
+    "example#",
+    "example",
+    "#",
+    "#\rexample",
+    "#\nexample",
+    "a #\n# example",
+    "x = 1  # an example value",
+    "//test",
+    "// TEST",
+    "// a Test case",
+    "/ /test",
+    "///test",
+    "/test",
+    "test//",
+    "//\ntest",
+    "//\rtest",
+    "//teſt",
+    "//TEST",
+    "#exaMple\n",
+    "#exampleſ",
+    "#ſ",
+    "# exam ple",
+    "//tes",
+    "//te st",
+    "x//y//test",
+    "#a#example",
+    "##example",
+    "# example # example",
+    "//test//test",
+    "\n",
+    "",
+    "\n\n",
+    "  ",
+    "#" * 50,
+    "/" * 50,
+    "#" * 50 + "example",
+    "/" * 50 + "test",
+    "＃example",
+    "＃ｅｘａｍｐｌｅ",
+    "#ｅxample",
+    "／／test",
+    "//ｔest",
+    "#éxample",
+    "#EXAMPLE\x00",
+    "\t#\texample",
+    "# example",
+    "#\x85example",
+    "// test",
+    "#\x0bexample",
+    "#\x0cexample",
+    "a\n#b\nexample",
+    "#b\nexample\n",
+    "//a\r\ntest",
+    "http://x.test/path",
+    "see # example.com",
+    "K#example",
+    "//Kest",
+    "#K example",
+]
+
+
+def _old_comment_matches(text: str) -> tuple[bool, bool]:
+    """
+    Description: Evaluate the pre-fix quadratic comment patterns the way the score used to.
+    Parameters:
+        text: context text.
+    Output: (hash-example match, slash-test match) from re.search with re.I.
+    """
+    return (
+        bool(re.search(_OLD_HASH_EXAMPLE, text, re.I)),
+        bool(re.search(_OLD_SLASH_TEST, text, re.I)),
+    )
+
+
+def _new_comment_matches(text: str) -> tuple[bool, bool]:
+    """
+    Description: Evaluate the linear helper for both comment patterns.
+    Parameters:
+        text: context text.
+    Output: (hash-example match, slash-test match).
+    """
+    from Harpocrates.ml.features import _line_has_marker_then_word
+
+    return (
+        _line_has_marker_then_word(text, "#", "example"),
+        _line_has_marker_then_word(text, "//", "test"),
+    )
+
+
+@pytest.mark.parametrize("text", _COMMENT_CASES)
+def test_fr_core_07_comment_patterns_same_results(text):
+    assert _new_comment_matches(text) == _old_comment_matches(text)
+
+
+def test_fr_core_07_comment_patterns_seeded_fuzz_same_results():
+    import random
+
+    rng = random.Random(20261018)
+    alphabet = "#/ \n\rexamplEXAMPLtesTſKk"
+    for _ in range(20_000):
+        text = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 24)))
+        assert _new_comment_matches(text) == _old_comment_matches(text), repr(text)

@@ -1041,6 +1041,22 @@ def _calculate_ngram_score(var_name: str, ngram_dict: Dict[str, float]) -> float
     return min(total_score, 1.0)  # Cap at 1.0
 
 
+def _line_has_marker_then_word(text: str, marker: str, word: str) -> bool:
+    """
+    Description: Linear-time equivalent of re.search(re.escape(marker) + '.*' + word, text, re.I).
+    Parameters:
+        text: Text to search; lines are split on newline only, as '.' does not match it.
+        marker: Literal marker that must precede the word on the same line.
+        word: Literal word searched case-insensitively with the regex engine after the marker.
+    Output: True when some line holds the marker followed later by the word.
+    """
+    for line in text.split('\n'):
+        start = line.find(marker)
+        if start >= 0 and re.search(word, line[start + len(marker):], re.I):
+            return True
+    return False
+
+
 def _calculate_semantic_context_score(context_text: str) -> float:
     """
     Description: Calculate a weighted semantic context score.
@@ -1060,8 +1076,6 @@ def _calculate_semantic_context_score(context_text: str) -> float:
         (r'\b(commit|revision|sha|hash|checksum|digest)\b', -0.25),
         (r'\b(uuid|guid|identifier|id)\b', -0.2),
         (r'\b(placeholder|dummy|stub)\b', -0.3),
-        (r'#.*example', -0.2),  # Comments mentioning example
-        (r'//.*test', -0.2),  # Comments mentioning test
     ]
 
     # Risky indicators (positive score)
@@ -1076,6 +1090,12 @@ def _calculate_semantic_context_score(context_text: str) -> float:
     for pattern, weight in safe_patterns:
         if re.search(pattern, context_text, re.I):
             score += weight
+
+    # Comment patterns (#.*example, //.*test) are quadratic as regexes; matched per line instead.
+    if _line_has_marker_then_word(context_text, '#', 'example'):
+        score += -0.2  # Comments mentioning example
+    if _line_has_marker_then_word(context_text, '//', 'test'):
+        score += -0.2  # Comments mentioning test
 
     for pattern, weight in risky_patterns:
         if re.search(pattern, context_text, re.I):
