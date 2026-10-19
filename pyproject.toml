@@ -48,8 +48,11 @@ train = [
 ]
 
 [project.scripts]
-harpocrates = "Harpocrates.cli:main"
-harpocrates-mcp = "Harpocrates.mcp.server:main"
+harpo = "Harpocrates.cli:main"
+harpo-mcp = "Harpocrates.mcp.server:main"
+# FR-NAME-02: the old names print one notice line on stderr, then run the same main. Removed after two minor releases.
+harpocrates = "Harpocrates.deprecated:harpocrates"
+harpocrates-mcp = "Harpocrates.deprecated:harpocrates_mcp"
 
 [project.urls]
 Homepage = "https://github.com/Skipa776/Harpocrates"
@@ -110,6 +113,7 @@ enforce = [
     "cli/Harpocrates/core/result.py",
     "cli/Harpocrates/core/rust_backend.py",
     "cli/Harpocrates/core/scanner.py",
+    "cli/Harpocrates/deprecated.py",
     "cli/Harpocrates/detectors/entropy_detector.py",
     "cli/Harpocrates/detectors/path_tokens.py",
     "cli/Harpocrates/envvars.py",
