@@ -1,0 +1,763 @@
+{
+  "by_agent": {
+    "claude": {
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "received": {
+        "by_class": {
+          "known-format": 5,
+          "ml-only": 3
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "github_token": 1,
+          "openai_key": 1,
+          "slack_token": 1,
+          "twilio_auth_token": 1
+        },
+        "known_format": 5,
+        "total": 8
+      }
+    },
+    "codex": {
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "received": {
+        "by_class": {
+          "known-format": 5,
+          "ml-only": 3
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "github_token": 1,
+          "openai_key": 1,
+          "slack_token": 1,
+          "twilio_auth_token": 1
+        },
+        "known_format": 5,
+        "total": 8
+      }
+    }
+  },
+  "findings": [
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:.env:aws_access_key_id",
+      "kind": "aws_access_key_id",
+      "path": "messages[3].content[0].content",
+      "request": 1,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "claude:.env:aws_secret_access_key",
+      "kind": "aws_secret_access_key",
+      "path": "messages[3].content[0].content",
+      "request": 1,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:.env:openai_key",
+      "kind": "openai_key",
+      "path": "messages[3].content[0].content",
+      "request": 1,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:.env:db_url",
+      "kind": "db_url",
+      "path": "messages[3].content[0].content",
+      "request": 1,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "claude:.env:db_password",
+      "kind": "db_password",
+      "path": "messages[3].content[0].content",
+      "request": 1,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:.env:aws_access_key_id",
+      "kind": "aws_access_key_id",
+      "path": "messages[3].content[0].content",
+      "request": 2,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "claude:.env:aws_secret_access_key",
+      "kind": "aws_secret_access_key",
+      "path": "messages[3].content[0].content",
+      "request": 2,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:.env:openai_key",
+      "kind": "openai_key",
+      "path": "messages[3].content[0].content",
+      "request": 2,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:.env:db_url",
+      "kind": "db_url",
+      "path": "messages[3].content[0].content",
+      "request": 2,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "claude:.env:db_password",
+      "kind": "db_password",
+      "path": "messages[3].content[0].content",
+      "request": 2,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:config/settings.py:github_token",
+      "kind": "github_token",
+      "path": "messages[6].content[0].content",
+      "request": 2,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:config/settings.py:slack_token",
+      "kind": "slack_token",
+      "path": "messages[6].content[0].content",
+      "request": 2,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:.env:aws_access_key_id",
+      "kind": "aws_access_key_id",
+      "path": "messages[3].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "claude:.env:aws_secret_access_key",
+      "kind": "aws_secret_access_key",
+      "path": "messages[3].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:.env:openai_key",
+      "kind": "openai_key",
+      "path": "messages[3].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:.env:db_url",
+      "kind": "db_url",
+      "path": "messages[3].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "claude:.env:db_password",
+      "kind": "db_password",
+      "path": "messages[3].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:config/settings.py:github_token",
+      "kind": "github_token",
+      "path": "messages[6].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:config/settings.py:github_token",
+      "kind": "github_token",
+      "path": "messages[9].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:config/settings.py:slack_token",
+      "kind": "slack_token",
+      "path": "messages[6].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "claude:config/settings.py:slack_token",
+      "kind": "slack_token",
+      "path": "messages[9].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "claude",
+      "block_type": "tool_result",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "claude:src/client.js:twilio_auth_token",
+      "kind": "twilio_auth_token",
+      "path": "messages[9].content[0].content",
+      "request": 3,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:.env:aws_access_key_id",
+      "kind": "aws_access_key_id",
+      "path": "input[5].output",
+      "request": 1,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "codex:.env:aws_secret_access_key",
+      "kind": "aws_secret_access_key",
+      "path": "input[5].output",
+      "request": 1,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:.env:openai_key",
+      "kind": "openai_key",
+      "path": "input[5].output",
+      "request": 1,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:.env:db_url",
+      "kind": "db_url",
+      "path": "input[5].output",
+      "request": 1,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "codex:.env:db_password",
+      "kind": "db_password",
+      "path": "input[5].output",
+      "request": 1,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:.env:aws_access_key_id",
+      "kind": "aws_access_key_id",
+      "path": "input[5].output",
+      "request": 2,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "codex:.env:aws_secret_access_key",
+      "kind": "aws_secret_access_key",
+      "path": "input[5].output",
+      "request": 2,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:.env:openai_key",
+      "kind": "openai_key",
+      "path": "input[5].output",
+      "request": 2,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:.env:db_url",
+      "kind": "db_url",
+      "path": "input[5].output",
+      "request": 2,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "codex:.env:db_password",
+      "kind": "db_password",
+      "path": "input[5].output",
+      "request": 2,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:config/settings.py:github_token",
+      "kind": "github_token",
+      "path": "input[7].output",
+      "request": 2,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:config/settings.py:slack_token",
+      "kind": "slack_token",
+      "path": "input[7].output",
+      "request": 2,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:.env:aws_access_key_id",
+      "kind": "aws_access_key_id",
+      "path": "input[5].output",
+      "request": 3,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "codex:.env:aws_secret_access_key",
+      "kind": "aws_secret_access_key",
+      "path": "input[5].output",
+      "request": 3,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:.env:openai_key",
+      "kind": "openai_key",
+      "path": "input[5].output",
+      "request": 3,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:.env:db_url",
+      "kind": "db_url",
+      "path": "input[5].output",
+      "request": 3,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "codex:.env:db_password",
+      "kind": "db_password",
+      "path": "input[5].output",
+      "request": 3,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:config/settings.py:github_token",
+      "kind": "github_token",
+      "path": "input[7].output",
+      "request": 3,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:config/settings.py:github_token",
+      "kind": "github_token",
+      "path": "input[9].output",
+      "request": 3,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:config/settings.py:slack_token",
+      "kind": "slack_token",
+      "path": "input[7].output",
+      "request": 3,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "codex:config/settings.py:slack_token",
+      "kind": "slack_token",
+      "path": "input[9].output",
+      "request": 3,
+      "route": "openai.responses"
+    },
+    {
+      "agent": "codex",
+      "block_type": "function_call_output",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "codex:src/client.js:twilio_auth_token",
+      "kind": "twilio_auth_token",
+      "path": "input[9].output",
+      "request": 3,
+      "route": "openai.responses"
+    }
+  ],
+  "harness_version": "1",
+  "isolation": {
+    "method": "throwaway HOME and CODEX_HOME, from-scratch environment, fake API keys, loopback mock, paths.home pinned by bootstrap",
+    "real_home_changed": [],
+    "real_home_paths_snapshotted": 9
+  },
+  "mode": "agent",
+  "planted": {
+    "by_class": {
+      "known-format": 22,
+      "ml-only": 8
+    },
+    "by_kind": {
+      "aws_access_key_id": 2,
+      "aws_secret_access_key": 2,
+      "db_password": 2,
+      "db_url": 2,
+      "gcp_api_key": 2,
+      "github_token": 2,
+      "jwt": 2,
+      "npm_token": 2,
+      "openai_key": 2,
+      "postgres_password": 2,
+      "private_key": 2,
+      "sendgrid_key": 2,
+      "slack_token": 2,
+      "stripe_key": 2,
+      "twilio_auth_token": 2
+    },
+    "total": 30
+  },
+  "protection": "none",
+  "received": {
+    "by_class": {
+      "known-format": 10,
+      "ml-only": 6
+    },
+    "by_kind": {
+      "aws_access_key_id": 2,
+      "aws_secret_access_key": 2,
+      "db_password": 2,
+      "db_url": 2,
+      "github_token": 2,
+      "openai_key": 2,
+      "slack_token": 2,
+      "twilio_auth_token": 2
+    },
+    "known_format": 10,
+    "total": 16
+  },
+  "run_id": "20261019T175822Z-agent-control-s0",
+  "runs": [
+    {
+      "agent": "claude",
+      "credential_header_names": [
+        "x-api-key",
+        "x-claude-code-session-id"
+      ],
+      "exit_code": 0,
+      "install": "none (control run)",
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "reason": "",
+      "received": {
+        "by_class": {
+          "known-format": 5,
+          "ml-only": 3
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "github_token": 1,
+          "openai_key": 1,
+          "slack_token": 1,
+          "twilio_auth_token": 1
+        },
+        "known_format": 5,
+        "total": 8
+      },
+      "recording": "mock/20261019T175822Z-agent-control-s0/claude/requests.jsonl",
+      "requests": 4,
+      "scripted_tool_calls": 3,
+      "seconds": 0.3,
+      "status": "ok",
+      "tool_results_seen": 3,
+      "version": "2.1.303 (Claude Code)"
+    },
+    {
+      "agent": "codex",
+      "credential_header_names": [
+        "authorization",
+        "session-id"
+      ],
+      "exit_code": 0,
+      "install": "none (control run)",
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "reason": "",
+      "received": {
+        "by_class": {
+          "known-format": 5,
+          "ml-only": 3
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "github_token": 1,
+          "openai_key": 1,
+          "slack_token": 1,
+          "twilio_auth_token": 1
+        },
+        "known_format": 5,
+        "total": 8
+      },
+      "recording": "mock/20261019T175822Z-agent-control-s0/codex/requests.jsonl",
+      "requests": 4,
+      "scripted_tool_calls": 3,
+      "seconds": 0.3,
+      "status": "ok",
+      "tool_results_seen": 3,
+      "version": "codex-cli 0.163.0"
+    }
+  ],
+  "seed": 0,
+  "started_utc": "2026-10-19T17:58:29+00:00",
+  "target": "mock",
+  "variant": "control",
+  "verdict": {
+    "exit_code": 0,
+    "reason": "ok"
+  },
+  "versions": {
+    "claude": "2.1.303 (Claude Code)",
+    "codex": "codex-cli 0.163.0",
+    "mock_provider": "1",
+    "python": "3.12.12"
+  }
+}
