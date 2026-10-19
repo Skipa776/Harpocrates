@@ -139,3 +139,38 @@ def test_fr_proof_04_g2_analysis_checks_a_header_comes_back() -> None:
     assert g2.header_values(records, "x-codex-turn-state") == {0: "opaque-state-1", 2: "opaque-state-1"}
     assert g2.header_echoed(records, "x-codex-turn-state", "opaque-state-1") == [0, 2]
     assert g2.header_echoed(records, "x-codex-turn-state", "other") == []
+
+
+def test_fr_proof_04_g2_analysis_reads_the_turn_metadata_facts_the_gate_needs() -> None:
+    meta = {"installation_id": "i", "request_kind": "turn", "workspaces": {"/abs/path": {
+        "associated_remote_urls": {"origin": "https://example.test/r.git"}, "latest_git_commit_hash": "a" * 40, "has_changes": True}}}
+    raw = json.dumps(meta)
+    records = [rec(0, "openai.responses", {"client_metadata": {"x-codex-turn-metadata": raw, "thread_id": "t"}},
+                   [["x-codex-turn-metadata", raw]]),
+               rec(1, "openai.responses", {}, [["x-codex-turn-metadata", json.dumps(dict(meta, request_kind="compaction"))]])]
+    facts = g2.turn_metadata_facts(records)
+    assert facts == {"remote_url_has_userinfo": False, "remote_url_scheme_host_path_only": True, "commit_hash_hex_length": 40,
+                     "workspace_keys_are_absolute_paths": True, "same_json_in_body_client_metadata": True,
+                     "request_kinds": {"compaction": 1, "turn": 1}}
+    assert "example.test" not in json.dumps({k: v for k, v in facts.items()})
+    leaky = dict(meta)
+    leaky["workspaces"] = {"/abs/path": {"associated_remote_urls": {"origin": "https://user:pw@example.test/r.git"}}}
+    got = g2.turn_metadata_facts([rec(0, "openai.responses", {}, [["x-codex-turn-metadata", json.dumps(leaky)]])])
+    assert got["remote_url_has_userinfo"] is True and got["same_json_in_body_client_metadata"] is False
+    assert g2.turn_metadata_facts([])["request_kinds"] == {}
+
+
+def test_fr_proof_04_g2_analysis_notes_system_role_messages_by_content_form() -> None:
+    body = {"messages": [{"role": "user", "content": [{"type": "text", "text": "a"}]},
+                         {"role": "system", "content": "# Environment ..."},
+                         {"role": "system", "content": [{"type": "text", "text": "tail", "cache_control": {"type": "ephemeral"}}]}]}
+    got = g2.block_types([rec(0, "anthropic.messages", body)])["anthropic"]
+    assert got["system_role_message_forms"] == ["blocks", "string"]
+    assert g2.block_types([rec(0, "anthropic.messages", ANTHROPIC)])["anthropic"]["system_role_message_forms"] == []
+
+
+def test_fr_proof_04_g2_analysis_reads_the_request_kind_of_one_request() -> None:
+    assert g2.request_kind(rec(0, "openai.responses", {}, [["X-Codex-Turn-Metadata", json.dumps({"request_kind": "compaction"})]])) == "compaction"
+    assert g2.request_kind(rec(0, "openai.responses", {}, [["x-codex-turn-metadata", "not json"]])) is None
+    assert g2.request_kind(rec(0, "openai.responses", {}, [])) is None
+    assert g2.request_kind(rec(0, "openai.responses", {}, [["x-codex-turn-metadata", json.dumps({"request_kind": 3})]])) is None

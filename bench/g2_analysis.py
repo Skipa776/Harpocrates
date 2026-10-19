@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.parse
 from typing import Optional
 
 from bench import canary_match as match
@@ -89,6 +90,7 @@ def _anthropic_types(bodies: list[dict]) -> dict:
     Output: The "anthropic" dict of block_types().
     """
     content, nested, forms, string_roles, tool_kinds, tool_names, roles = set(), set(), set(), set(), set(), set(), set()
+    system_role_forms: set[str] = set()
     system_forms, system_counts, keys, thinking = set(), set(), set(), []
     for body in bodies:
         keys |= set(body)
@@ -103,6 +105,8 @@ def _anthropic_types(bodies: list[dict]) -> dict:
         for message in body.get("messages", []):
             roles.add(message.get("role"))
             blocks = message.get("content")
+            if message.get("role") == "system":
+                system_role_forms.add("string" if isinstance(blocks, str) else "blocks")
             if isinstance(blocks, str):
                 string_roles.add(message.get("role"))
                 continue
@@ -114,7 +118,7 @@ def _anthropic_types(bodies: list[dict]) -> dict:
                     nested |= {b.get("type") for b in inner} if isinstance(inner, list) else set()
     return {"top_level_keys": sorted(keys), "system_form": sorted(system_forms)[0] if len(system_forms) == 1 else sorted(system_forms),
             "system_blocks": max(system_counts, default=0), "message_roles": sorted(roles), "message_string_content_roles": sorted(string_roles),
-            "content_block_types": sorted(content), "tool_result_content_forms": sorted(forms),
+            "system_role_message_forms": sorted(system_role_forms), "content_block_types": sorted(content), "tool_result_content_forms": sorted(forms),
             "tool_result_block_types": sorted(nested), "tool_names": sorted(tool_names), "tool_kinds": sorted(tool_kinds),
             "thinking_param": thinking[0] if thinking else None}
 
@@ -196,13 +200,24 @@ def transport(records: list[dict]) -> dict:
             "response_statuses": dict(sorted(statuses.items()))}
 
 
+def _starts(value: object, prefixes: list[str]) -> bool:
+    """
+    Description: Whether a value is a string that starts with one of the given prefixes (a full value is its own prefix).
+    Parameters:
+        value: the block field to test.
+        prefixes: the values or common prefixes the mock produced.
+    Output: True when value is a string with one of the prefixes.
+    """
+    return isinstance(value, str) and any(value.startswith(p) for p in prefixes)
+
+
 def thinking_resent(records: list[dict], produced: dict) -> dict:
     """
     Description: Check whether the agent sent back the thinking the mock produced (verify item V4).
     Parameters:
         records: the recording entries.
         produced: {"thinking": [signatures], "redacted": [data strings], "reasoning": [encrypted_content strings]} the
-            scripted replies carried.
+            scripted replies carried; each entry may be a prefix (mocksig, mockcipher) of the values.
     Output: {"thinking_resent", "redacted_thinking_resent", "reasoning_items_resent", "first_request_with_it"}: True or
         False when something of that kind was produced, None when nothing was; first_request_with_it is the recording index
         of the first request that carried any of it, or None.
@@ -214,16 +229,16 @@ def thinking_resent(records: list[dict], produced: dict) -> dict:
             for block in message.get("content") or []:
                 if not isinstance(block, dict):
                     continue
-                if block.get("type") == "thinking" and block.get("signature") in produced.get("thinking", []):
+                if block.get("type") == "thinking" and _starts(block.get("signature"), produced.get("thinking", [])):
                     seen["thinking"].add(block["signature"])
-                elif block.get("type") == "redacted_thinking" and block.get("data") in produced.get("redacted", []):
+                elif block.get("type") == "redacted_thinking" and _starts(block.get("data"), produced.get("redacted", [])):
                     seen["redacted"].add(block["data"])
                 else:
                     continue
                 first = rec["index"] if first is None else first
     for rec, body in _bodies(records, RESPONSES):
         for item in body.get("input") if isinstance(body.get("input"), list) else []:
-            if item.get("type") == "reasoning" and item.get("encrypted_content") in produced.get("reasoning", []):
+            if item.get("type") == "reasoning" and _starts(item.get("encrypted_content"), produced.get("reasoning", [])):
                 seen["reasoning"].add(item["encrypted_content"])
                 first = rec["index"] if first is None else first
 
@@ -305,3 +320,69 @@ def where_found(records: list[dict], needle: str) -> list[dict]:
         if isinstance(rec.get("body"), str):
             out += [{"request": rec["index"], "where": "body", "name": hit.path} for hit in match.locate(rec["body"], needle)]
     return out
+
+
+def request_kind(rec: dict) -> Optional[str]:
+    """
+    Description: Read the request_kind (turn, compaction, ...) a Codex request declares in x-codex-turn-metadata.
+    Parameters:
+        rec: one recording entry.
+    Output: The kind string, or None when the header is absent or not JSON.
+    """
+    for name, value in rec.get("headers", []):
+        if name.lower() == "x-codex-turn-metadata":
+            try:
+                kind = json.loads(value).get("request_kind")
+            except (ValueError, AttributeError):
+                return None
+            return kind if isinstance(kind, str) else None
+    return None
+
+
+def turn_metadata_facts(records: list[dict]) -> dict:
+    """
+    Description: State the facts about x-codex-turn-metadata that matter to a scanner (verify item T8), without its content.
+    Parameters:
+        records: the recording entries.
+    Output: {"remote_url_has_userinfo", "remote_url_scheme_host_path_only", "commit_hash_hex_length",
+        "workspace_keys_are_absolute_paths", "same_json_in_body_client_metadata", "request_kinds"} read from the first
+        request's header and the kind counts over all requests; None where the header held no such field. No URL, path or
+        hash is returned.
+    """
+    metas = []
+    for rec in records:
+        for name, value in rec.get("headers", []):
+            if name.lower() == "x-codex-turn-metadata":
+                try:
+                    metas.append((rec, value, json.loads(value)))
+                except ValueError:
+                    pass
+    kinds: dict[str, int] = {}
+    for _, _, meta in metas:
+        kind = meta.get("request_kind") if isinstance(meta, dict) else None
+        if isinstance(kind, str):
+            kinds[kind] = kinds.get(kind, 0) + 1
+    facts = {"remote_url_has_userinfo": None, "remote_url_scheme_host_path_only": None, "commit_hash_hex_length": None,
+             "workspace_keys_are_absolute_paths": None, "same_json_in_body_client_metadata": None,
+             "request_kinds": dict(sorted(kinds.items()))}
+    if not metas:
+        return facts
+    rec, raw, meta = metas[0]
+    spaces = meta.get("workspaces") if isinstance(meta.get("workspaces"), dict) else {}
+    if spaces:
+        facts["workspace_keys_are_absolute_paths"] = all(key.startswith("/") for key in spaces)
+    urls = [u for w in spaces.values() if isinstance(w, dict) for u in (w.get("associated_remote_urls") or {}).values() if isinstance(u, str)]
+    if urls:
+        parts = [urllib.parse.urlsplit(u) for u in urls]
+        facts["remote_url_has_userinfo"] = any(p.username is not None or p.password is not None for p in parts)
+        facts["remote_url_scheme_host_path_only"] = all(p.scheme and p.hostname and p.username is None for p in parts)
+    hashes = [w["latest_git_commit_hash"] for w in spaces.values() if isinstance(w, dict) and isinstance(w.get("latest_git_commit_hash"), str)]
+    if hashes and re.fullmatch(r"[0-9a-f]+", hashes[0]):
+        facts["commit_hash_hex_length"] = len(hashes[0])
+    try:
+        body = json.loads(rec["body"]) if isinstance(rec.get("body"), str) else {}
+    except ValueError:
+        body = {}
+    client = body.get("client_metadata") if isinstance(body, dict) else None
+    facts["same_json_in_body_client_metadata"] = isinstance(client, dict) and client.get("x-codex-turn-metadata") == raw
+    return facts
