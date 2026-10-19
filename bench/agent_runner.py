@@ -12,6 +12,7 @@ snapshotted before and after.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -227,7 +228,8 @@ class AgentRun:
     extra: dict = field(default_factory=dict)
 
 
-def run_process(argv: list[str], env: dict, cwd: Path, timeout: int) -> tuple[Optional[int], bool, float]:
+def run_process(argv: list[str], env: dict, cwd: Path, timeout: int,
+                stdin_data: Optional[bytes] = None) -> tuple[Optional[int], bool, float]:
     """
     Description: Run a command to completion in its own process group, killing the group on timeout.
     Parameters:
@@ -235,14 +237,15 @@ def run_process(argv: list[str], env: dict, cwd: Path, timeout: int) -> tuple[Op
         env: its whole environment.
         cwd: its working directory.
         timeout: seconds before it is killed.
-    Output: (exit code or None, timed out, seconds). stdin is /dev/null (codex exec waits for end of input otherwise); stdout
-        and stderr are captured and dropped, since they hold the model's view of the canary files.
+        stdin_data: bytes to send on stdin (a very long prompt), or None for /dev/null.
+    Output: (exit code or None, timed out, seconds). stdin is /dev/null unless stdin_data is given (codex exec waits for end
+        of input otherwise); stdout and stderr are captured and dropped, since they hold the model's view of the files.
     """
     start = time.monotonic()
-    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            start_new_session=True)
+    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL if stdin_data is None else subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
     try:
-        proc.communicate(timeout=timeout)
+        proc.communicate(input=stdin_data, timeout=timeout)
         return proc.returncode, False, time.monotonic() - start
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -273,6 +276,102 @@ AGENTS: dict[str, dict] = {
 }
 
 
+@dataclass
+class Session:
+    """
+    Description: One agent's throwaway home, canary repo and mock provider, ready to run the agent.
+    Parameters:
+        agent: claude or codex.
+        tw: the throwaway session folders.
+        server: the running mock provider (loopback).
+        canaries: the planted canaries (values in memory only).
+        install: ok, "none (control run)" or a failure summary.
+        install_error: the installer's stderr tail when it failed, else "".
+    Output: A record handed out by agent_session; run() starts the agent.
+    """
+
+    agent: str
+    tw: iso.Throwaway
+    server: mock_provider.MockServer
+    canaries: list
+    install: str
+    install_error: str = ""
+
+    def argv(self) -> list[str]:
+        """
+        Description: The default command line for this agent.
+        Parameters: None
+        Output: claude_argv() or codex_argv(repo).
+        """
+        return AGENTS[self.agent]["argv"](self.tw)
+
+    def env(self) -> dict:
+        """
+        Description: The default environment for this agent.
+        Parameters: None
+        Output: claude_env or codex_env for this session's throwaway home and mock URL.
+        """
+        return AGENTS[self.agent]["env"](self.tw, self.server.url)
+
+    def run(self, argv: Optional[list[str]] = None, env: Optional[dict] = None, timeout: int = AGENT_TIMEOUT,
+            stdin_data: Optional[bytes] = None) -> tuple[Optional[int], bool, float]:
+        """
+        Description: Run the agent in the canary repo.
+        Parameters:
+            argv: a command line instead of the default.
+            env: an environment instead of the default (it must still be built from scratch).
+            timeout: seconds before the process group is killed.
+            stdin_data: bytes for stdin, or None.
+        Output: (exit code or None, timed out, seconds), as run_process.
+        """
+        return run_process(argv or self.argv(), env or self.env(), self.tw.repo, timeout, stdin_data)
+
+
+@contextlib.contextmanager
+def agent_session(agent: str, seed: int, out_root: Path, run_id: str, label: Optional[str] = None,
+                  script: Optional[list[dict]] = None, control: bool = False, keep_work: bool = False,
+                  mock_kwargs: Optional[dict] = None, codex_config: Optional[Callable[..., Path]] = None,
+                  before_install: Optional[Callable[[iso.Throwaway, mock_provider.MockServer], None]] = None):
+    """
+    Description: Set up one agent's throwaway home, seeded canary repo, mock provider and Harpo install.
+    Parameters:
+        agent: claude or codex.
+        seed: the canary seed.
+        out_root: the results folder; the recording goes to mock/<run_id>/<label>/.
+        run_id: the run's id.
+        label: the recording sub-folder, defaulting to the agent name.
+        script: scripted turns instead of the agent's default three reads.
+        control: install nothing into the throwaway home.
+        keep_work: keep the throwaway folder instead of deleting it.
+        mock_kwargs: extra start_server arguments (reply_headers, count_tokens_status).
+        codex_config: a function (tw, url) -> Path that writes the Codex config, instead of route A's.
+        before_install: a function (tw, server) run after the config is written and before Harpo is installed.
+    Output: Yields a Session. The mock is stopped and the throwaway folder deleted on exit (unless keep_work), also when the
+        body raises.
+    """
+    spec = AGENTS[agent]
+    tw = iso.make_throwaway()
+    try:
+        canaries = canaries_from_manifest(seed_repo(tw, seed, agent), agent)
+        turns = script if script is not None else spec["script"](tw.repo)
+        script_path = tw.root / "script.json"
+        script_path.write_text(json.dumps(turns), encoding="utf-8")
+        record_dir = Path(out_root) / "mock" / run_id / (label or agent)
+        with mock_provider.start_server(record_dir=record_dir, turns=mock_provider.load_script(script_path),
+                                        **(mock_kwargs or {})) as server:
+            if agent == "codex":
+                (codex_config or write_codex_config)(tw, server.url)
+            if before_install is not None:
+                before_install(tw, server)
+            installed = None if control else iso.install_harpo(tw, spec["target"])
+            summary = "none (control run)" if installed is None else "ok" if installed.returncode == 0 else f"exit {installed.returncode}"
+            yield Session(agent, tw, server, canaries, summary,
+                          installed.stderr.strip()[-200:] if installed is not None and installed.returncode else "")
+    finally:
+        if not keep_work:
+            iso.discard(tw)
+
+
 def run_one(agent: str, seed: int, out_root: Path, run_id: str, keep_work: bool = False,
             timeout: int = AGENT_TIMEOUT, control: bool = False) -> AgentRun:
     """
@@ -294,40 +393,28 @@ def run_one(agent: str, seed: int, out_root: Path, run_id: str, keep_work: bool 
         run.reason = f"`{spec['binary']}` is not on PATH"
         return run
     run.version = _version(spec["binary"])
-    tw = iso.make_throwaway()
-    try:
-        manifest = seed_repo(tw, seed, agent)
-        run.canaries = canaries_from_manifest(manifest, agent)
-        script_path = tw.root / "script.json"
-        script_path.write_text(json.dumps(spec["script"](tw.repo)), encoding="utf-8")
-        record_dir = Path(out_root) / "mock" / run_id / agent
-        with mock_provider.start_server(record_dir=record_dir, turns=mock_provider.load_script(script_path)) as server:
-            if agent == "codex":
-                write_codex_config(tw, server.url)
-            installed = None if control else iso.install_harpo(tw, spec["target"])
-            run.extra["install"] = "none (control run)" if installed is None else "ok" if installed.returncode == 0 else f"exit {installed.returncode}"
-            if installed is not None and installed.returncode != 0:
-                run.status, run.reason = "failed", "Harpo install into the throwaway home failed: " + installed.stderr.strip()[-200:]
-                return run
-            code, timed_out, seconds = run_process(spec["argv"](tw), spec["env"](tw, server.url), tw.repo, timeout)
-            run.exit_code, run.seconds = code, round(seconds, 1)
-            run.records = server.records()
-        seen = results_seen(run.records)
-        run.extra.update({"scripted_tool_calls": SCRIPTED_CALLS, "tool_results_seen": seen, "requests": len(run.records),
-                          "credential_header_names": credential_header_names(run.records),
-                          "recording": f"mock/{run_id}/{agent}/requests.jsonl"})
-        if timed_out:
-            run.status, run.reason = "timeout", f"the agent did not finish in {timeout} s"
-        elif code != 0:
-            run.status, run.reason = "failed", f"the agent exited with status {code}"
-        elif seen < SCRIPTED_CALLS:
-            run.status, run.reason = "unfinished", f"only {seen} of {SCRIPTED_CALLS} scripted tool calls returned a result"
-        else:
-            run.status = "ok"
-        return run
-    finally:
-        if not keep_work:
-            iso.discard(tw)
+    with agent_session(agent, seed, out_root, run_id, keep_work=keep_work, control=control) as session:
+        run.canaries = session.canaries
+        run.extra["install"] = session.install
+        if session.install_error:
+            run.status, run.reason = "failed", "Harpo install into the throwaway home failed: " + session.install_error
+            return run
+        code, timed_out, seconds = session.run(timeout=timeout)
+        run.exit_code, run.seconds = code, round(seconds, 1)
+        run.records = session.server.records()
+    seen = results_seen(run.records)
+    run.extra.update({"scripted_tool_calls": SCRIPTED_CALLS, "tool_results_seen": seen, "requests": len(run.records),
+                      "credential_header_names": credential_header_names(run.records),
+                      "recording": f"mock/{run_id}/{agent}/requests.jsonl"})
+    if timed_out:
+        run.status, run.reason = "timeout", f"the agent did not finish in {timeout} s"
+    elif code != 0:
+        run.status, run.reason = "failed", f"the agent exited with status {code}"
+    elif seen < SCRIPTED_CALLS:
+        run.status, run.reason = "unfinished", f"only {seen} of {SCRIPTED_CALLS} scripted tool calls returned a result"
+    else:
+        run.status = "ok"
+    return run
 
 
 def _agent_report(run: AgentRun) -> dict:
