@@ -6,6 +6,53 @@ Harpo is a secrets scanner. It combines regex patterns for known credential form
 It is also a guard that keeps secrets out of AI coding agents (Claude Code, Codex): the agent reads secret-bearing files through a tool that replaces each detected secret with a placeholder, so it can work with the file without the credential reaching it through that tool.
 Detection misses and shell reads the hook doesn't cover are listed under [How agent protection works](#how-agent-protection-works). The egress gate, a proxy that scans every provider-bound request, is the next milestone (M2) and is not shipped yet.
 
+## Demos
+
+Both demos run on generated canary secrets, never real ones, in a throwaway home directory. The tapes are in [docs/tapes/](docs/tapes/) and CI re-renders each GIF from its tape.
+
+### Scene 1: `harpo scan` finds secrets a regex scanner misses
+
+![Terminal recording: gitleaks reports two findings in a .env file, then harpo scan reports five findings in the same file, including the DATABASE_URL line.](docs/assets/demo-scan.gif)
+
+Measured on the seed-0 canary repo (15 planted secrets in 8 files, made by `bench/canary_repo.py`), with `harpo 1.3.0` at its default scan settings and gitleaks 8.30.1 at its default rules: harpo found 14 of 15 canaries and gitleaks found 11 of 15. Only harpo found the `DATABASE_URL` connection string; that is two of the canaries, the URL and the password inside it, because one finding covers both. Harpo also flagged the AWS access key id that gitleaks did not, but that one is not evidence: the generator draws the id from `A-Z0-9`, gitleaks's AWS rule accepts only the base32 characters `A-Z2-7` that real ids use, and gitleaks does find a base32-valid key. Gitleaks found the JWT, and harpo flagged that line through its entropy check. Neither found `POSTGRES_PASSWORD: ...` in the compose file. Per-secret results: [bench/results/demos/scan-vs-gitleaks.json](bench/results/demos/scan-vs-gitleaks.json); reproduce with `python bench/demos_measure.py`.
+
+Transcript (secrets shown redacted, as the tools print them):
+
+```text
+$ gitleaks dir .env --no-banner --redact -v 2>&1 | grep -E 'RuleID|Line:|leaks found'
+RuleID:      generic-api-key
+Line:        2
+RuleID:      generic-api-key
+Line:        3
+WRN leaks found: 2
+$ harpo scan .env
+Found 5 potential secrets
+CRITICAL  AWS_ACCESS_KEY_ID   .env:1  AKIA...ISIG
+CRITICAL  OPENAI_API_KEY      .env:3  sk-E...svk9
+HIGH      ENV_ASSIGNMENT      .env:4  post...vice
+INFO      ENTROPY_CANDIDATE   .env:2  AWS_...LpQA
+MEDIUM    ENV_ASSIGNMENT      .env:2  GsNm...LpQA
+$ # whole repo: harpo found 14 of 15 canaries, gitleaks 11 of 15
+```
+
+### Scene 2: an agent's read is blocked, and `safe_read` returns placeholders
+
+![Terminal recording: a scripted Claude Code Read of .env is denied with a pointer to safe_read, then safe_read returns the file with each secret replaced by a HARPO placeholder.](docs/assets/demo-safe-read.gif)
+
+This scene is scripted, not a live session: a Claude Code `PreToolUse` event for reading `.env` is piped into the hook, then the MCP server's `safe_read` function is called directly. The placeholder hashes change on every run.
+
+```text
+$ python -m Harpocrates.hooks < event.json
+{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ".env (api_token, cloud_key, db_credential) contains secrets. Use mcp__harpo__safe_read (...) instead: it returns the same content with each secret replaced by a <<HARPO:type:hash>> placeholder."}}
+$ python -c "from Harpocrates.mcp.server import safe_read; print(safe_read('.env'))"
+     1  AWS_ACCESS_KEY_ID=<<HARPO:cloud_key:7fd7>>
+     2  AWS_SECRET_ACCESS_KEY=<<HARPO:api_token:ff3f>>
+     3  OPENAI_API_KEY=<<HARPO:api_token:9e29>>
+     4  DATABASE_URL=postgresql:<<HARPO:db_credential:d151>>
+     5  DEBUG=true
+[harpo: 4 secret(s) redacted as <<HARPO:type:hash>>. They are not the real values; reference the variable or config key instead of copying them.]
+```
+
 ## Model card
 
 - **Model:** v17 (detector v1.2)
