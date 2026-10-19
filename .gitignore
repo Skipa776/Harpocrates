@@ -185,3 +185,6 @@ cli/tests/test_ml_shortcuts.py
 
 # Local plan for Harpo milestones, never committed
 docs/DO_NOT_TRACK.md
+
+# Mock-provider recordings hold request bodies from agent sessions; never committed (FR-PROOF-04). Reports in bench/results/proof/ (counts only) may be.
+bench/results/mock/
