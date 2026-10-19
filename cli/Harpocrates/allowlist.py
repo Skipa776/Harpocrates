@@ -743,6 +743,25 @@ def _glob_runs_allow(command: str) -> bool:
     return False
 
 
+_CD_WORDS = frozenset({"cd", "pushd", "popd"})
+
+
+def _changes_directory(command: str) -> bool:
+    """
+    Description: Whether any simple command of a shell command line is cd, pushd or popd (SEC-09): the commands that move
+        the shell into a folder so the next command names its files bare.
+    Parameters:
+        command: Shell command text to inspect.
+    Output: True when the first word of some segment (as the shell reads it: quotes and backslashes removed, so a
+        backslash or quotes inside the word do not hide it) is cd, pushd or popd, or when the command cannot be tokenised (fail closed); otherwise False.
+        No filesystem access.
+    """
+    try:
+        return any(seg[0] in _CD_WORDS for seg in _segments(command))
+    except ValueError:
+        return True
+
+
 def touches(command: str, cwd: Optional[Path] = None) -> bool:
     """
     Description: Detect shell commands that could modify the allowlist or session grants so the hook
@@ -757,11 +776,15 @@ def touches(command: str, cwd: Optional[Path] = None) -> bool:
         `harpo allow` or `harpocrates allow` (also with a glob in the program word), or mentions the
         ~/.harpo or ~/.harpocrates directory (also in a quoted, escaped, braced or globbed spelling),
         or runs with either as its working directory (cwd), in anything but a provably read-only
-        command.
+        command. A command that mentions either directory and also runs cd, pushd or popd is refused
+        even if the rest is read-only (SEC-09): it would leave the shell inside the folder.
     """
     norm = _normalise(command)
     if _ALLOW_CMD.search(command) or _ALLOW_CMD.search(norm) or _edits_module(command) or _edits_module(norm):
         return True
     if _glob_runs_allow(command):
         return True
-    return (_mentions_dir(command, norm) or inside_state_dir(cwd)) and not _read_only(command)
+    mentions = _mentions_dir(command, norm)
+    if mentions and _changes_directory(command):  # cd ~/.harpo is "read-only", but the next command runs inside it
+        return True
+    return (mentions or inside_state_dir(cwd)) and not _read_only(command)

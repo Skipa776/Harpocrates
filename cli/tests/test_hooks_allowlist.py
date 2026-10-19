@@ -136,7 +136,6 @@ def test_fr_read_05_agent_cannot_edit_the_allowlist(repo, capsys, cmd) -> None:
     "<bin> scan --help",
     "<bin> --version",
     "cat < ~/.harpocrates/allow",
-    "cd ~/.harpocrates && ls -l | wc -l",
 ]))
 def test_fr_read_05_touches_allows_read_only_commands(cmd) -> None:
     assert not allowlist.touches(cmd), cmd

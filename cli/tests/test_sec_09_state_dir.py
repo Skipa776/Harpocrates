@@ -406,3 +406,84 @@ def test_sec_09_f6_a_state_folder_with_too_many_files_is_refused(home: Path, mon
     other.write_text("x")
     os.link(other, home / "work" / "ordinary2")
     assert allowlist.links_to_state_file(other)  # also for an unrelated link: the walk is over budget, so refuse
+
+
+# ---- F7: cd, pushd and popd next to either state folder are refused ------------------------------------------------
+
+# `{d}` is the folder name (.harpo or .harpocrates), `{n}` the same without the dot, `{n1}`, `{n2}`, `{n4}` cut at 1, 2, 4.
+F7_GUARDED = [
+    "cd ~/{d}",
+    "cd ~/{d} && ls",
+    "cd ~/{d}; cat allow",
+    "(cd ~/{d} && ls)",
+    "true && cd ~/{d}",
+    "ls | cd ~/{d}",
+    "cd $HOME/{d}",
+    "cd -P ~/{d}",
+    "cd '~/{d}'",
+    "pushd ~/{d}",
+    "pushd ~/{d} && ls",
+    "popd ~/{d}",
+    "ls ~/{d}; popd",
+    "ls ~/{d}; cd /tmp",
+    "cd ~ && cd {d}",
+    "cd ~; cd .h{n1}",
+    "cd ~/.\\{n}",  # obfuscated spellings the guard already undoes
+    'cd ~/.ha""{n2}',
+    "cd ~/.ha''{n2}",
+    "cd ~/.'harp'{n4}",
+    "cd ~/{.,}{n}",
+    "cd $'\\056{n}'",
+    "cd ~/.h*",
+    "cd ~/.harp*",
+    "cd ~/.?{n1}",
+    "c\\d ~/{d}",
+    "'cd' ~/{d}",
+    "\"cd\" ~/{d}",
+    "builtin cd ~/{d}",
+    "command cd ~/{d}",
+    "D=~/{d}; cd $D",
+]
+F7_FREE = [
+    "cd ~/project",
+    "cd ~/project && ls",
+    "cd /tmp && cat README.md",
+    "pushd ~/project",
+    "cd ..; popd",
+    "cd ~/work/harpoon-docs && ls",
+    "cd ~/.config && ls",
+]
+
+
+def _f7(templates: list[str]) -> list[str]:
+    out: list[str] = []
+    for d in BOTH:
+        n = d[1:]
+        for template in templates:
+            out.append(template.replace("{d}", d).replace("{n1}", n[1:]).replace("{n2}", n[2:])
+                       .replace("{n4}", n[4:]).replace("{n}", n))
+    return list(dict.fromkeys(out))
+
+
+def _bash(cmd: str, cwd: Path, capsys) -> tuple[int, str]:
+    event = {"tool_name": "Bash", "cwd": str(cwd), "permission_mode": "default", "tool_input": {"command": cmd}}
+    code = hooks.decide(json.dumps(event), ask=True)
+    out = capsys.readouterr().out
+    return code, (json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else "")
+
+
+@pytest.mark.parametrize("cmd", _f7(F7_GUARDED))
+def test_sec_09_f7_changing_directory_next_to_a_state_dir_is_refused(home: Path, capsys, cmd: str) -> None:
+    assert allowlist.touches(cmd), cmd
+    assert _bash(cmd, home, capsys) == (0, "deny"), cmd
+
+
+@pytest.mark.parametrize("cmd", _f7(F7_FREE))
+def test_sec_09_f7_changing_directory_elsewhere_still_passes(home: Path, capsys, cmd: str) -> None:
+    assert not allowlist.touches(cmd), cmd
+    assert _bash(cmd, home, capsys)[1] != "deny", cmd
+
+
+def test_sec_09_f7_a_working_directory_inside_state_is_not_left_by_cd_unnoticed(home: Path) -> None:
+    (home / ".harpo").mkdir()
+    assert allowlist.touches("cd .. && echo x >> allow", home / ".harpo")

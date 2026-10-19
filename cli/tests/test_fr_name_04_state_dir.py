@@ -420,7 +420,6 @@ _READS = [
     "wc -l ~/{d}/allow | head",
     "grep -n tests ~/{d}/allow",
     "cat < ~/{d}/allow",
-    "cd ~/{d} && ls -l | wc -l",
     "ls ~/{d}/grants",
     "ls ~/.ha''{n2}",
 ]
