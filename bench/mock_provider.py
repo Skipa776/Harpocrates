@@ -213,6 +213,87 @@ def anthropic_events(message: dict) -> list[tuple[str, dict]]:
     return events
 
 
+def responses_object(turn: dict, model: str, serial: int, input_tokens: int) -> dict:
+    """
+    Description: Build an OpenAI Responses API reply (the response object) for one scripted turn.
+    Parameters:
+        turn: {"text": str, "tool_calls": [{"name": str, "input": dict}]}, every key optional; an empty turn is a
+            short text reply.
+        model: the model name to echo, taken from the request.
+        serial: a counter that makes the ids unique per reply and identical when replayed.
+        input_tokens: the figure to report as the request's input tokens.
+    Output: A response dict with status completed: a message item (output_text) first when there is text or no call,
+        then a function_call item per call, whose arguments are a JSON string. No side effects.
+    """
+    calls = turn.get("tool_calls", [])
+    output: list[dict] = []
+    if turn.get("text") or not calls:
+        output.append({"type": "message", "id": f"msg_mock{serial:08d}", "status": "completed", "role": "assistant",
+                       "content": [{"type": "output_text", "text": turn.get("text") or DEFAULT_TEXT,
+                                    "annotations": []}]})
+    for index, call in enumerate(calls):
+        output.append({"type": "function_call", "id": f"fc_mock{serial:08d}{index:02d}",
+                       "call_id": f"call_mock{serial:08d}{index:02d}", "name": call["name"],
+                       "arguments": json.dumps(call.get("input", {}), separators=(",", ":")), "status": "completed"})
+    out_tokens = _output_tokens(turn)
+    return {"id": f"resp_mock{serial:08d}", "object": "response", "created_at": CREATED_AT, "status": "completed",
+            "error": None, "incomplete_details": None, "instructions": None, "max_output_tokens": None,
+            "model": model, "output": output, "parallel_tool_calls": True, "previous_response_id": None,
+            "reasoning": {"effort": None, "summary": None}, "store": False, "temperature": 1.0,
+            "text": {"format": {"type": "text"}}, "tool_choice": "auto", "tools": [], "top_p": 1.0,
+            "truncation": "disabled", "metadata": {}, "user": None,
+            "usage": {"input_tokens": input_tokens, "input_tokens_details": {"cached_tokens": 0},
+                      "output_tokens": out_tokens, "output_tokens_details": {"reasoning_tokens": 0},
+                      "total_tokens": input_tokens + out_tokens}}
+
+
+def responses_events(response: dict) -> list[tuple[str, dict]]:
+    """
+    Description: Expand an OpenAI response into its streaming events, in the documented order.
+    Parameters:
+        response: a response dict from responses_object.
+    Output: (event name, data) pairs with a running sequence_number: response.created and response.in_progress (status
+        in_progress, no output), then per output item output_item.added, its content events (content_part.added,
+        output_text.delta, output_text.done, content_part.done for a message; function_call_arguments.delta and .done for
+        a call) and output_item.done, then response.completed carrying the full response.
+    """
+    events: list[tuple[str, dict]] = []
+
+    def emit(kind: str, /, **fields: object) -> None:
+        """
+        Description: Append one event with the next sequence number.
+        Parameters:
+            kind: the event type, which is also its SSE event name.
+            **fields: the remaining members of the event's data object.
+        Output: None; extends the enclosing events list.
+        """
+        events.append((kind, {"type": kind, "sequence_number": len(events), **fields}))
+
+    skeleton = dict(response, status="in_progress", output=[], usage=None)
+    emit("response.created", response=skeleton)
+    emit("response.in_progress", response=skeleton)
+    for index, item in enumerate(response["output"]):
+        if item["type"] == "message":
+            part = item["content"][0]
+            emit("response.output_item.added", output_index=index, item=dict(item, status="in_progress", content=[]))
+            emit("response.content_part.added", item_id=item["id"], output_index=index, content_index=0,
+                 part=dict(part, text=""))
+            emit("response.output_text.delta", item_id=item["id"], output_index=index, content_index=0,
+                 delta=part["text"], logprobs=[])
+            emit("response.output_text.done", item_id=item["id"], output_index=index, content_index=0,
+                 text=part["text"], logprobs=[])
+            emit("response.content_part.done", item_id=item["id"], output_index=index, content_index=0, part=part)
+        else:
+            emit("response.output_item.added", output_index=index, item=dict(item, status="in_progress", arguments=""))
+            emit("response.function_call_arguments.delta", item_id=item["id"], output_index=index,
+                 delta=item["arguments"])
+            emit("response.function_call_arguments.done", item_id=item["id"], output_index=index,
+                 name=item["name"], arguments=item["arguments"])
+        emit("response.output_item.done", output_index=index, item=item)
+    emit("response.completed", response=response)
+    return events
+
+
 def sse_bytes(events: Iterable[tuple[str, dict]]) -> bytes:
     """
     Description: Encode streaming events in the SSE wire format both providers use.

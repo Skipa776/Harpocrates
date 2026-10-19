@@ -105,3 +105,81 @@ def test_fr_proof_04_mock_anthropic_tool_use_block_starts_with_empty_input_like_
 def test_fr_proof_04_mock_anthropic_default_turn_is_a_short_text_reply() -> None:
     msg = mock.anthropic_message({}, "m", 1, 1)
     assert msg["stop_reason"] == "end_turn" and msg["content"] and msg["content"][0]["type"] == "text"
+
+
+# --- OpenAI Responses ------------------------------------------------------------------------------------------
+
+def check_response(resp: dict, turn: dict, status: str = "completed") -> None:
+    assert resp["object"] == "response" and resp["id"].startswith("resp_") and resp["status"] == status
+    assert isinstance(resp["model"], str) and isinstance(resp["created_at"], int)
+    assert resp["error"] is None and resp["incomplete_details"] is None and isinstance(resp["output"], list)
+    calls = turn.get("tool_calls", [])
+    for item in resp["output"]:
+        if status == "completed":
+            assert item["status"] == "completed"
+    messages = [i for i in resp["output"] if i["type"] == "message"]
+    functions = [i for i in resp["output"] if i["type"] == "function_call"]
+    assert len(messages) == (1 if turn.get("text") or not calls else 0) and len(functions) == len(calls)
+    for item in messages:
+        assert item["role"] == "assistant" and item["id"].startswith("msg_")
+        assert item["content"][0]["type"] == "output_text" and item["content"][0]["annotations"] == []
+    for item, call in zip(functions, calls):
+        assert item["id"].startswith("fc_") and item["call_id"].startswith("call_") and item["name"] == call["name"]
+        assert isinstance(item["arguments"], str) and json.loads(item["arguments"]) == call["input"]
+    usage = resp["usage"]
+    assert usage["total_tokens"] == usage["input_tokens"] + usage["output_tokens"]
+    assert "cached_tokens" in usage["input_tokens_details"] and "reasoning_tokens" in usage["output_tokens_details"]
+
+
+@pytest.mark.parametrize("turn", TURNS)
+def test_fr_proof_04_mock_responses_json_reply_has_the_response_shape(turn: dict) -> None:
+    resp = mock.responses_object(turn, "gpt-mock", 9, 55)
+    check_response(json.loads(json.dumps(resp)), turn)
+    assert resp["model"] == "gpt-mock" and resp["usage"]["input_tokens"] == 55
+
+
+@pytest.mark.parametrize("turn", TURNS)
+def test_fr_proof_04_mock_responses_stream_follows_the_documented_event_order(turn: dict) -> None:
+    resp = mock.responses_object(turn, "gpt-mock", 9, 55)
+    events = parse_sse(mock.sse_bytes(mock.responses_events(resp)))
+    names = [name for name, _ in events]
+    assert names[:2] == ["response.created", "response.in_progress"] and names[-1] == "response.completed"
+    assert [d["sequence_number"] for _, d in events] == list(range(len(events)))
+    assert events[0][1]["response"]["status"] == "in_progress" and events[0][1]["response"]["output"] == []
+    assert events[-1][1]["response"] == resp
+    # Per output item: added, its content events, done, in output order.
+    done = [d for n, d in events if n == "response.output_item.done"]
+    added = [d for n, d in events if n == "response.output_item.added"]
+    assert [d["item"] for d in done] == resp["output"]
+    assert [d["output_index"] for d in added] == list(range(len(resp["output"])))
+    assert [d["output_index"] for d in done] == list(range(len(resp["output"])))
+    assert all(d["item"]["status"] == "in_progress" for d in added)
+    for index, item in enumerate(resp["output"]):
+        mine = [n for n, d in events if d.get("output_index") == index]
+        if item["type"] == "message":
+            assert mine == ["response.output_item.added", "response.content_part.added", "response.output_text.delta",
+                            "response.output_text.done", "response.content_part.done", "response.output_item.done"]
+            text = "".join(d["delta"] for n, d in events if n == "response.output_text.delta" and d["output_index"] == index)
+            assert text == item["content"][0]["text"]
+        else:
+            assert mine == ["response.output_item.added", "response.function_call_arguments.delta",
+                            "response.function_call_arguments.done", "response.output_item.done"]
+            args = "".join(d["delta"] for n, d in events
+                           if n == "response.function_call_arguments.delta" and d["output_index"] == index)
+            assert args == item["arguments"]
+    for n, d in events:
+        if "item_id" in d:
+            assert d["item_id"] in {i["id"] for i in resp["output"]}
+
+
+def test_fr_proof_04_mock_responses_default_turn_is_a_short_text_message() -> None:
+    resp = mock.responses_object({}, "m", 1, 1)
+    assert [i["type"] for i in resp["output"]] == ["message"]
+
+
+def test_fr_proof_04_mock_ids_are_stable_for_a_serial_and_differ_between_serials() -> None:
+    a1, a2 = mock.anthropic_message(TOOL_TURN, "m", 3, 1), mock.anthropic_message(TOOL_TURN, "m", 3, 1)
+    assert a1 == a2
+    assert mock.anthropic_message(TOOL_TURN, "m", 4, 1)["id"] != a1["id"]
+    r1, r2 = mock.responses_object(TOOL_TURN, "m", 3, 1), mock.responses_object(TOOL_TURN, "m", 4, 1)
+    assert r1["id"] != r2["id"] and r1["output"][1]["call_id"] != r2["output"][1]["call_id"]
