@@ -105,4 +105,5 @@ disallow_untyped_defs = false
 enforce = [
     "cli/Harpocrates/ml/context.py",
     "cli/Harpocrates/ml/explain.py",
+    "cli/Harpocrates/ml/features.py",
 ]
