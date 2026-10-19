@@ -64,3 +64,19 @@ def test_doc_demo_01_ci_job_renders_every_tape() -> None:
         assert f"docs/assets/{gif}" in tape.read_text(encoding="utf-8"), f"{tape.name} does not write {gif}"
         assert f"docs/assets/{gif}" in workflow, f"CI does not check {gif}"
         assert (ROOT / "docs" / "assets" / gif).stat().st_size <= 5 * 1024 * 1024
+
+
+def test_doc_demo_01_gifs_are_within_the_limits() -> None:
+    """Each committed GIF is at most 20 s and 5 MB, by the same check the CI job runs."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("check_demo_gifs", ROOT / "scripts" / "check_demo_gifs.py")
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    gifs = sorted((ROOT / "docs" / "assets").glob("demo-*.gif"))
+    assert len(gifs) == 2
+    for gif in gifs:
+        assert 1 < checker.duration_seconds(gif.read_bytes()) <= checker.MAX_SECONDS
+        assert gif.stat().st_size <= checker.MAX_BYTES
+    assert checker.main([str(g) for g in gifs]) == 0
+    assert checker.main([]) == 1
