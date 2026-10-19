@@ -5,15 +5,7 @@ import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from Harpocrates.training.generators.context_templates import (
-    generate_negative_context,
-    generate_positive_context,
-)
-from Harpocrates.training.generators.generate_data import (
-    generate_training_data,
-    generate_training_record,
-)
-from Harpocrates.training.generators.secret_templates import (
+from bench.canaries.secret_templates import (
     generate_aws_key,
     generate_checksum,
     generate_git_sha,
@@ -21,6 +13,14 @@ from Harpocrates.training.generators.secret_templates import (
     generate_jwt_token,
     generate_openai_key,
     generate_uuid,
+)
+from Harpocrates.training.generators.context_templates import (
+    generate_negative_context,
+    generate_positive_context,
+)
+from Harpocrates.training.generators.generate_data import (
+    generate_training_data,
+    generate_training_record,
 )
 
 

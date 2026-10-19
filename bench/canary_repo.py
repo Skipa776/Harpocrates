@@ -17,8 +17,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "cli"))
+sys.path.insert(0, str(ROOT))
 
-from Harpocrates.training.generators import secret_templates as g  # noqa: E402
+from bench.canaries import secret_templates as g  # noqa: E402
 
 # Benign code the agent needs to read unchanged, mixed into every file.
 _BENIGN_PY = "import os\n\n\ndef load(path):\n    with open(path) as f:\n        return f.read()\n"

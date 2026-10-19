@@ -30,9 +30,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "cli"))
+sys.path.insert(0, str(ROOT))
 
+from bench.canaries import secret_templates as t
 from Harpocrates.core.detector import _collect_text_findings
-from Harpocrates.training.generators import secret_templates as t
 
 GENERATOR_VERSION = "5"
 CORPUS = ROOT / "data" / "oss"

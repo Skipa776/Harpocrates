@@ -16,16 +16,16 @@ from __future__ import annotations
 import re
 import string
 
+from bench.canaries.secret_templates import (
+    generate_fake_prefixed_token,
+    generate_hex_secret,
+)
 from Harpocrates.ml.features import FeatureVector, extract_features_from_record
 from Harpocrates.training.generators.generate_data import (
     NEGATIVE_DISTRIBUTION,
     POSITIVE_DISTRIBUTION,
     generate_adversarial_test_data,
     generate_training_data,
-)
-from Harpocrates.training.generators.secret_templates import (
-    generate_fake_prefixed_token,
-    generate_hex_secret,
 )
 
 # Known secret prefixes

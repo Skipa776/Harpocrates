@@ -22,13 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from Harpocrates.training.generators.context_templates import (
-    SAFE_VAR_NAMES,
-    SECRET_VAR_NAMES,
-    TEST_VAR_NAMES,
-    generate_context,
-)
-from Harpocrates.training.generators.secret_templates import (
+from bench.canaries.secret_templates import (
     generate_aws_key,
     generate_base64_data,
     generate_base64_secret,
@@ -73,6 +67,12 @@ from Harpocrates.training.generators.secret_templates import (
     generate_uuid_with_auth_context,
     generate_version_hash,
     generate_webhook_url_with_token,
+)
+from Harpocrates.training.generators.context_templates import (
+    SAFE_VAR_NAMES,
+    SECRET_VAR_NAMES,
+    TEST_VAR_NAMES,
+    generate_context,
 )
 
 # --- Constants for Ambiguity Control ---
