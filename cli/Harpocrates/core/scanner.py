@@ -94,10 +94,14 @@ DEFAULT_IGNORE_PATTERNS = {
 
 def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
     """
-    Determine if a file should be scanned.
-
-    Patterns without wildcards are matched exactly against any path component
-    (file name or directory name). Glob patterns are matched with fnmatch.
+    Description: Determine if a file should be scanned.
+    Parameters:
+        path: File path whose components and type are checked.
+        ignore_patterns: Exact names and glob patterns to exclude.
+    Output: True for a nonsymlink regular file with no ignored path component; otherwise False.
+    Queries filesystem metadata.
+    Patterns without wildcards are matched exactly against any path component (file name or
+    directory name). Glob patterns are matched with fnmatch.
     """
     if path.is_symlink():
         return False
@@ -133,26 +137,23 @@ def scan_directory(
     engine: ScanEngine = "auto",
 ) -> ScanResult:
     """
-    Scan a directory for secrets.
-
-    Args:
+    Description: Scan a directory for secrets.
+    Parameters:
         directory: Path to directory to scan
         recursive: If True, scan subdirectories
         max_file_size: Maximum file size to scan (in bytes)
         ignore_patterns: Additional patterns to ignore (merged with defaults)
         verifier: Optional ML verifier for false positive filtering
         ml_threshold: ML confidence threshold when verifier is enabled
-        engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it,
-            and ``python`` uses the original detector
-
-    Returns:
-        ScanResult containing all findings
-
-    Example:
-        >>> result = scan_directory("./my_project")
-        >>> print(f"Found {len(result.findings)} secrets")
-        >>> for finding in result.findings:
-        ...     print(f"{finding.file}:{finding.line} - {finding.type}")
+        engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it, and ``python`` uses the
+        original detector
+    Output: ScanResult containing findings, counts, timing, and captured scan errors; reads
+    directory contents and files and may initialize a native backend or ML verifier. Auto mode
+    records native failures and uses Python fallback; explicit Rust failures return errors.
+    ScanResult containing all findings
+    Example: >>> result = scan_directory("./my_project") >>> print(f"Found {len(result.findings)}
+    secrets") >>> for finding in result.findings: ... print(f"{finding.file}:{finding.line} -
+    {finding.type}")
     """
     start_time = time.time()
     dir_path = Path(directory)
@@ -285,23 +286,20 @@ def scan_file(
     engine: ScanEngine = "auto",
 ) -> ScanResult:
     """
-    Scan a single file for secrets.
-
-    Args:
+    Description: Scan a single file for secrets.
+    Parameters:
         filepath: Path to file
         max_file_size: Maximum file size to scan
         verifier: Optional ML verifier for false positive filtering
         ml_threshold: ML confidence threshold when verifier is enabled
-        engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it,
-            and ``python`` uses the original detector
-
-    Returns:
-        ScanResult containing findings from this file
-
-    Example:
-        >>> result = scan_file("config.env")
-        >>> if result.found_secrets:
-        ...     print(f"⚠️  Found {len(result.findings)} secrets!")
+        engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it, and ``python`` uses the
+        original detector
+    Output: ScanResult with findings, counts, timing, and captured errors; reads the file and may
+    initialize a native backend or ML verifier. Auto mode records native failures and falls back to
+    Python; line-count read failures produce zero lines.
+    ScanResult containing findings from this file
+    Example: >>> result = scan_file("config.env") >>> if result.found_secrets: ... print(f"⚠️ Found
+    {len(result.findings)} secrets!")
     """
     start_time = time.time()
     file_path = Path(filepath)
@@ -382,7 +380,13 @@ def scan_file(
 
 
 def _resolve_native_backend(engine: ScanEngine) -> Optional["RustScannerBackend"]:
-    """Return a native backend for auto/rust, or None for Python."""
+    """
+    Description: Return a native backend for auto/rust, or None for Python.
+    Parameters:
+        engine: Requested auto, python, or rust scan engine.
+    Output: Discovered RustScannerBackend or None; lazily imports/discovers the backend. Raises
+    ValueError for unknown engines and RuntimeError if a required backend is unavailable.
+    """
     if engine not in {"auto", "python", "rust"}:
         raise ValueError(f"Unknown scan engine: {engine}")
     if engine == "python":
@@ -400,11 +404,16 @@ _HUNK_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 def scan_git_history(repo: Path) -> ScanResult:
-    """Scan lines added in every commit of *repo* (FR-COMMIT-01).
-
-    Findings carry ``file="<sha12>:<path>"`` and the line number in that commit.
-    Merge commits are diffed against their first parent so conflict resolutions
-    are covered. Regex + entropy only; the ML stage is not applied to history.
+    """
+    Description: Scan lines added in every commit of *repo* (FR-COMMIT-01).
+    Parameters:
+        repo: Repository path whose history is scanned.
+    Output: ScanResult for added lines across commits; launches a read-only git log subprocess.
+    Raises ValueError for nonzero Git exit status and propagates subprocess startup OSError and
+    detection failures.
+    Findings carry ``file="<sha12>:<path>"`` and the line number in that commit. Merge commits are
+    diffed against their first parent so conflict resolutions are covered. Regex + entropy only; the
+    ML stage is not applied to history.
     """
     start = time.perf_counter()
     cmd = [
