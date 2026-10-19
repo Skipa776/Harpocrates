@@ -103,6 +103,7 @@ disallow_untyped_defs = false
 [tool.harpo.docstrings]
 # Modules converted to the Description/Parameters/Output format (DOC-DOCSTRING-01). Grows one module per commit.
 enforce = [
+    "cli/Harpocrates/core/classification.py",
     "cli/Harpocrates/core/result.py",
     "cli/Harpocrates/core/scanner.py",
     "cli/Harpocrates/detectors/entropy_detector.py",

@@ -27,6 +27,11 @@ from typing import Optional, Tuple
 
 class ViolationCategory(Enum):
     # Specific — 1:1 with regex signature names in regex_patterns.py
+    """
+    Description: Represent the specific or inferred kind of secret reported by a finding.
+    Parameters: None
+    Output: Enum members provide provider-specific, heuristic, and generic-secret category values.
+    """
     AWS_KEY = "aws_key"
     GITHUB_TOKEN = "github_token"
     SLACK_TOKEN = "slack_token"
@@ -74,8 +79,16 @@ _SECRET_TYPE_BY_CATEGORY = {
 
 
 def secret_type(category: Optional[str]) -> str:
-    """Coarse FR-CORE-02 type for a ViolationCategory value; unknown or None -> generic.
-    Every provider token, webhook, JWT, OAuth and session secret is an api_token."""
+    """
+    Description: Map violation categories to the six coarse FR-CORE-02 secret types for consistent
+    reporting.
+    Parameters:
+        category: Violation category value or None for coarse mapping.
+    Output: Coarse secret type; unknown or absent categories map to generic. Provider tokens,
+    webhooks, JWTs, OAuth secrets, and session secrets map to api_token.
+    Coarse FR-CORE-02 type for a ViolationCategory value; unknown or None -> generic. Every provider
+    token, webhook, JWT, OAuth and session secret is an api_token.
+    """
     if category is None:
         return "generic"
     if category in _SECRET_TYPE_BY_CATEGORY:
@@ -87,6 +100,16 @@ def secret_type(category: Optional[str]) -> str:
 # Format: "layer=<l> matched=<m> [var_name='<v>'] confidence=<c>"
 def _reason(layer: str, matched: str, confidence: float,
             var_name: Optional[str] = None) -> str:
+    """
+    Description: Format classification signals into a stable reason string for debugging.
+    Parameters:
+        layer: Inference layer label.
+        matched: Matched pattern or signal description.
+        confidence: Inference confidence from 0.0 to 1.0.
+        var_name: Optional left-hand-side variable name.
+    Output: Reason text with layer, match, optional variable name, and confidence to two decimal
+    places.
+    """
     vn = f" var_name='{var_name}'" if var_name else ""
     return f"layer={layer} matched={matched}{vn} confidence={confidence:.2f}"
 
@@ -94,16 +117,18 @@ def _reason(layer: str, matched: str, confidence: float,
 @dataclass(frozen=True)
 class CategoryInference:
     """
-    Result of heuristic classification.
-
-    `reason` is a structured developer-debuggable string:
-      "layer=signature matched=GITHUB_PAT confidence=1.00"
-      "layer=var_name_lexicon matched=/password/ var_name='DB_PASSWORD' confidence=0.90"
-      "layer=value_structure matched=jwt_three_segment confidence=0.95"
-      "layer=fallback matched=no_signal confidence=0.30"
-
-    `confidence` is 0.0–1.0. Low confidence (<0.5) → hedged language in
-    display ("potential password"). High confidence → asserted.
+    Description: Result of heuristic classification.
+    Parameters:
+        category: Violation category value or None for coarse mapping.
+        reason: Structured explanation of the inference.
+        confidence: Inference confidence from 0.0 to 1.0.
+    Output: Instances provide immutable category, structured reason, and confidence fields.
+    `reason` is a structured developer-debuggable string: "layer=signature matched=GITHUB_PAT
+    confidence=1.00" "layer=var_name_lexicon matched=/password/ var_name='DB_PASSWORD'
+    confidence=0.90" "layer=value_structure matched=jwt_three_segment confidence=0.95"
+    "layer=fallback matched=no_signal confidence=0.30"
+    `confidence` is 0.0–1.0. Low confidence (<0.5) → hedged language in display ("potential
+    password"). High confidence → asserted.
     """
     category: ViolationCategory
     reason: str
@@ -236,7 +261,13 @@ _PROVIDER_FORMATS: Tuple[Tuple[re.Pattern, ViolationCategory, str], ...] = (
 
 
 def _classify_by_value(token: str) -> Optional[CategoryInference]:
-    """Layer 3: structural signal from the token value itself."""
+    """
+    Description: Layer 3: structural signal from the token value itself.
+    Parameters:
+        token: Detected token text.
+    Output: CategoryInference for the first matching provider, JWT, private-key, connection,
+    webhook, or hex pattern; None without a signal.
+    """
     for pattern, category, name in _PROVIDER_FORMATS:
         if pattern.match(token):
             return CategoryInference(category, _reason("value_structure", name, 0.99), 0.99)
@@ -313,9 +344,19 @@ _SEGMENT_CAP = 512  # chars either side of the token; connection strings are far
 
 
 def _segment(line: str, token: str, i: int) -> str:
-    """The string literal holding the token when matching quotes enclose it, else its whitespace-delimited
-    word. ponytail: an escaped quote inside a literal cuts it short; a real string parser if the per-type
-    report shows misses from it."""
+    """
+    Description: Extract the bounded literal or whitespace-delimited word containing a token for
+    line classification.
+    Parameters:
+        line: Source line containing the token.
+        token: Detected token text.
+        i: Token start character offset in the line.
+    Output: Surrounding segment with matching enclosing quotes removed, or a whitespace-bounded
+    slice. Escaped quotes can truncate a literal, as noted below.
+    The string literal holding the token when matching quotes enclose it, else its
+    whitespace-delimited word. ponytail: an escaped quote inside a literal cuts it short; a real
+    string parser if the per-type report shows misses from it.
+    """
     j = i + len(token)
     lo, hi = max(0, i - _SEGMENT_CAP), min(len(line), j + _SEGMENT_CAP)
     left = max(line.rfind(q, lo, i) for q in "\"'`")
@@ -329,8 +370,17 @@ def _segment(line: str, token: str, i: int) -> str:
 
 
 def _classify_by_line(line: str, token: str) -> Optional[CategoryInference]:
-    """Layer 4: the string holding the token is a connection string (a password inside a JDBC URL, an
-    AccountKey inside an Azure storage string). Linear time: the read tool scans minified files."""
+    """
+    Description: Recognize Azure or database connection-string context around a token for FR-CORE-02
+    classification.
+    Parameters:
+        line: Source line containing the token.
+        token: Detected token text.
+    Output: CategoryInference at confidence 0.90, or None when the token is absent or no connection
+    pattern matches.
+    Layer 4: the string holding the token is a connection string (a password inside a JDBC URL, an
+    AccountKey inside an Azure storage string). Linear time: the read tool scans minified files.
+    """
     i = line.find(token)
     if i < 0:
         return None
@@ -357,19 +407,21 @@ def infer_category(
     line: Optional[str] = None,
 ) -> CategoryInference:
     """
-    Infer violation category from available signals (three-layer heuristic).
-
-    Args:
-        signature_name: Regex signature name from CRITICAL_SIGNATURES /
-            HIGH_SIGNATURES if this finding came from the regex tier, else None.
-        var_name: The left-hand-side variable name (e.g., 'database_password').
-            None when the token has no associated LHS variable.
+    Description: Combine signature, name, value, and line-context evidence to infer the violation
+    category.
+    Parameters:
+        signature_name: Regex signature name from CRITICAL_SIGNATURES / HIGH_SIGNATURES if this
+        finding came from the regex tier, else None.
+        var_name: The left-hand-side variable name (e.g., 'database_password'). None when the token
+        has no associated LHS variable.
         token: The raw detected token value.
-        line: The source line, when known. A token inside a connection string on it is reported
-            as that connection string's type unless its own value is decisive (FR-CORE-02).
-
-    Returns:
-        CategoryInference with category, reason, and confidence.
+        line: The source line, when known. A token inside a connection string on it is reported as
+        that connection string's type unless its own value is decisive (FR-CORE-02).
+    Output: CategoryInference with reason and confidence; authoritative signatures and decisive
+    values take precedence over connection-string context. The older three-layer summary predates
+    the line-context layer.
+    Infer violation category from available signals (three-layer heuristic).
+    CategoryInference with category, reason, and confidence.
     """
     # Layer 1: regex signature is authoritative.
     if signature_name and signature_name in _SIGNATURE_TO_CATEGORY:
@@ -387,6 +439,15 @@ def infer_category(
 
 def _infer_from_name_and_value(var_name: Optional[str], token: str) -> CategoryInference:
     # Layer 2: variable name lexicon.
+    """
+    Description: Combine variable lexicon and token structure evidence to choose an inferred
+    category.
+    Parameters:
+        var_name: Optional left-hand-side variable name.
+        token: Detected token text.
+    Output: CategoryInference; decisive value patterns win, otherwise compatible signals augment
+    name confidence, with generic fallback at 0.30.
+    """
     var_match: Optional[CategoryInference] = None
     if var_name:
         for pattern, category, conf in _VAR_NAME_LEXICON:
@@ -434,14 +495,19 @@ _VAR_NAME_WINDOW = 256  # chars left of a token searched for `name =`; identifie
 
 def extract_var_name(line: str, token: str) -> Optional[str]:
     """
+    Description: Extract an assignment name from bounded text before a token or from a token-leading
+    assignment.
+    Parameters:
+        line: Source line containing the token.
+        token: Detected token text.
+    Output: Identifier or None when no recognized assignment is found; supports embedded
+    dotenv/shell keys as described below.
     Pull the LHS variable name from a line of the form `var = 'token'`.
-
-    Looks left of the token for `identifier =` or `identifier:` patterns.
-    Also handles dotenv/shell KEY=VALUE format where the token starts at
-    position 0 and the key is embedded as `KEY=value` in the token itself.
-
-    Returns None if no clear LHS variable is found (multi-assignment, tuple
-    unpacking, dict literals, etc.) — callers fall through to value_structure.
+    Looks left of the token for `identifier =` or `identifier:` patterns. Also handles dotenv/shell
+    KEY=VALUE format where the token starts at position 0 and the key is embedded as `KEY=value` in
+    the token itself.
+    Returns None if no clear LHS variable is found (multi-assignment, tuple unpacking, dict
+    literals, etc.) — callers fall through to value_structure.
     """
     idx = line.find(token)
     if idx < 0:
