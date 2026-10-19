@@ -123,7 +123,7 @@ export function parseAllowArgs(args: string): AllowCommand {
 
 export const unknownText = (word: string): string => `Unknown: ${word}\n${HELP}`
 
-const isAbsolute = (path: string): boolean => path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+export const isAbsolute = (path: string): boolean => path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
 const trimEnd = (dir: string): string => dir.replace(/[\\/]+$/, '')
 
 /**
@@ -138,14 +138,33 @@ export function absolutePath(path: string, cwd: string | undefined, home: string
 }
 
 /**
- * Where `install` records the interpreter that runs the hooks, in order: the
- * state folder `.harpo` (FR-NAME-04), then `.harpocrates`, which is where the
- * record sits until the move happens (or when it was refused).
+ * The state folders in the order they are tried: `.harpo` (FR-NAME-04), then
+ * `.harpocrates`, which is where the record sits until the move happens (or
+ * when it was refused). `.harpocrates` is looked at only when `.harpo` is not
+ * there at all (SEC-09): once `.harpo` exists in any form, it decides.
  */
-export const recordPaths = (home: string): readonly string[] => [
-  `${trimEnd(home)}/.harpo/install.json`,
-  `${trimEnd(home)}/.harpocrates/install.json`,
+export const stateFolders = (home: string): readonly string[] => [
+  `${trimEnd(home)}/.harpo`,
+  `${trimEnd(home)}/.harpocrates`,
 ]
+
+/** The install record inside a state folder. */
+export const recordIn = (folder: string): string => `${folder}/install.json`
+
+/** Where `install` records the interpreter that runs the hooks, one path per state folder. */
+export const recordPaths = (home: string): readonly string[] => stateFolders(home).map(recordIn)
+
+/** What `$.fs.stat` says about a path: what it leads to, and whether it is itself a symbolic link. */
+export type PathInfo = { readonly kind: 'file' | 'dir' | 'other'; readonly isLink: boolean }
+
+/**
+ * Whether a state folder and its record may be read: the folder must be a
+ * plain directory and the record a plain file, neither a symbolic link
+ * (SEC-09). The record is the one thing the plugin runs a program from, so it
+ * is never read through a link an agent could have planted.
+ */
+export const isPlainFolder = (info: PathInfo): boolean => info.kind === 'dir' && !info.isLink
+export const isPlainFile = (info: PathInfo): boolean => info.kind === 'file' && !info.isLink
 
 export type Interpreter = { readonly python: string; readonly args: readonly string[] }
 

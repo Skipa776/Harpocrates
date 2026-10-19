@@ -38,12 +38,30 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
   let answer = firstAnswer
   let record: string | null = RECORD
   let recordAt: Record<string, string> | null = null
+  let home: string | undefined = '/home/me'
+  const statted: string[] = []
+  const links = new Set<string>() // paths that are themselves symbolic links
+  const kinds: Record<string, 'file' | 'dir' | 'other'> = {} // what a path leads to, where it is not the usual
+  const folders = new Set<string>() // folders that exist although no record is in them
+  const failing: Record<string, string> = {} // paths whose stat fails with this error instead of answering
 
   // The install record: a missing file rejects the read, as the engine's does.
   on('fs.read', (_$, e) => {
     read.push(e.path)
     const text = recordAt === null ? record : (recordAt[e.path] ?? null)
     return text === null ? { deny: 'ENOENT' } : { value: text }
+  })
+  // The engine's fs.stat of the folder and of the record: what each leads to, and whether it is itself a link.
+  const recordHolds = (path: string): boolean => (recordAt === null ? record !== null : path in recordAt)
+  const exists = (path: string): boolean =>
+    path.endsWith('/install.json') ? recordHolds(path) : folders.has(path) || recordHolds(`${path}/install.json`)
+  on('fs.stat', (_$, e) => {
+    statted.push(e.path)
+    const error = failing[e.path]
+    if (error !== undefined) return { deny: error }
+    if (!exists(e.path) && !links.has(e.path)) return { deny: 'ENOENT' }
+    const kind = kinds[e.path] ?? (e.path.endsWith('/install.json') ? 'file' : 'dir')
+    return { value: { kind, size: 1, mtimeMs: 0, isLink: links.has(e.path) } }
   })
   on('process.run', (_$, e) => {
     ran.push(e.argv)
@@ -55,7 +73,7 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
     }
   })
   on('session.cwd', () => ({ value: '/proj/app' }))
-  on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
+  on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? home : undefined }))
   on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => {
     const q = e.questions[0]
     if (!q) return { deny: 'no question' }
@@ -68,6 +86,28 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
     ran,
     asked,
     read,
+    statted,
+    /** What HOME holds from now on (undefined: unset). */
+    setHome(value: string | undefined) {
+      home = value
+    },
+    /** Makes `path` a symbolic link (what it leads to is `kind`, a directory unless set). */
+    link(path: string, kind?: 'file' | 'dir' | 'other') {
+      links.add(path)
+      if (kind !== undefined) kinds[path] = kind
+    },
+    /** Makes `path` lead to this kind of thing instead of the usual. */
+    leadsTo(path: string, kind: 'file' | 'dir' | 'other') {
+      kinds[path] = kind
+    },
+    /** A folder that exists with no record in it. */
+    folder(path: string) {
+      folders.add(path)
+    },
+    /** Makes stat of `path` fail with this error (an OS refusal other than a missing path). */
+    failStat(path: string, error: string) {
+      failing[path] = error
+    },
     /** What the install record holds (null: no file) from now on. */
     setRecord(text: string | null) {
       record = text
@@ -398,7 +438,7 @@ test('the record is read from ~/.harpo first and from ~/.harpocrates when the ne
   w.read.length = 0
   w.setRecordAt({ [OLD]: older })
   await say($, 'allow /b')
-  expect(w.read).toEqual([NEW, OLD])
+  expect(w.read).toEqual([OLD]) // ~/.harpo is not there at all, so only the old record is looked for
 
   w.read.length = 0
   w.setRecordAt({ [NEW]: 'not json {', [OLD]: older }) // the new record decides, even when it is unusable
@@ -411,6 +451,85 @@ test('the record is read from ~/.harpo first and from ~/.harpocrates when the ne
     ['/new/python', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/a'],
     ['/old/python', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/b'],
   ])
+})
+
+// -- SEC-09: the record is read only from a plain folder holding a plain file --------------
+
+const NEWDIR = '/home/me/.harpo'
+const OLDDIR = '/home/me/.harpocrates'
+const NEWREC = `${NEWDIR}/install.json`
+const OLDREC = `${OLDDIR}/install.json`
+const VALID = JSON.stringify({ python: '/new/python', python_args: ['-I'] })
+const OLDER = JSON.stringify({ python: '/old/python', python_args: ['-I'] })
+
+test('a plain folder and a plain file: both are stat-ed before the record is read', async ($, on) => {
+  const w = world(on, () => ADDED)
+  w.setRecordAt({ [NEWREC]: VALID })
+  await say($, 'allow /a')
+  expect(w.statted).toEqual([NEWDIR, NEWREC])
+  expect(w.read).toEqual([NEWREC])
+  expect(w.ran).toEqual([['/new/python', '-I', '-m', 'Harpocrates.cli', 'allow', '--json', '/a']])
+})
+
+const UNUSABLE: [string, (w: ReturnType<typeof world>) => void][] = [
+  ['~/.harpo is a symlink to a folder', w => w.link(NEWDIR, 'dir')],
+  ['~/.harpo is a dangling symlink', w => w.link(NEWDIR, 'other')],
+  ['~/.harpo is a symlink to a file', w => w.link(NEWDIR, 'file')],
+  ['~/.harpo is a file', w => w.leadsTo(NEWDIR, 'file')],
+  ['~/.harpo is something else', w => w.leadsTo(NEWDIR, 'other')],
+  ['the record is a symlink', w => w.link(NEWREC, 'file')],
+  ['the record is a dangling symlink', w => w.link(NEWREC, 'other')],
+  ['the record is a folder', w => w.leadsTo(NEWREC, 'dir')],
+  ['the record is something else', w => w.leadsTo(NEWREC, 'other')],
+  ['stat of ~/.harpo is refused', w => w.failStat(NEWDIR, 'EACCES')],
+  ['stat of the record is refused', w => w.failStat(NEWREC, 'EACCES')],
+]
+
+for (const [name, arrange] of UNUSABLE) {
+  test(`${name}: nothing is read or run, and ~/.harpocrates is not used instead`, async ($, on) => {
+    const w = world(on, () => ADDED)
+    w.setRecordAt({ [NEWREC]: VALID, [OLDREC]: OLDER }) // a valid old record is there to be fallen back on
+    arrange(w)
+    for (const args of ['allow /a', 'remove /a', 'allowlist']) {
+      expect(await say($, args)).toBe(NOT_INSTALLED)
+    }
+    expect(w.read).toEqual([])
+    expect(w.ran).toEqual([])
+    expect(w.statted.includes(OLDDIR) || w.statted.includes(OLDREC)).toBe(false)
+  })
+}
+
+test('~/.harpo exists but holds no record: ~/.harpocrates is not consulted', async ($, on) => {
+  const w = world(on, () => ADDED)
+  w.setRecordAt({ [OLDREC]: OLDER })
+  w.folder(NEWDIR)
+  expect(await say($, 'allow /a')).toBe(NOT_INSTALLED)
+  expect(w.read).toEqual([])
+  expect(w.ran).toEqual([])
+})
+
+test('a linked ~/.harpocrates is not read either', async ($, on) => {
+  const w = world(on, () => ADDED)
+  w.setRecordAt({ [OLDREC]: OLDER })
+  w.link(OLDDIR, 'dir')
+  expect(await say($, 'allow /a')).toBe(NOT_INSTALLED)
+  w.setRecordAt({ [OLDREC]: OLDER })
+  w.link(OLDREC, 'file')
+  expect(await say($, 'allow /a')).toBe(NOT_INSTALLED)
+  expect(w.read).toEqual([])
+  expect(w.ran).toEqual([])
+})
+
+test('a HOME that is unset, empty or relative runs nothing and looks at nothing', async ($, on) => {
+  const w = world(on, () => ADDED)
+  w.setRecordAt({ [NEWREC]: VALID })
+  for (const value of [undefined, '', 'home/me', '~', './x']) {
+    w.setHome(value)
+    expect(await say($, 'allow /a')).toBe(NOT_INSTALLED)
+  }
+  expect(w.statted).toEqual([])
+  expect(w.read).toEqual([])
+  expect(w.ran).toEqual([])
 })
 
 test('help and usage do not read the record', async ($, on) => {

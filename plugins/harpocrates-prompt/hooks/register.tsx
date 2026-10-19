@@ -17,15 +17,19 @@ import {
   confirmQuestion,
   doneText,
   failText,
+  isAbsolute,
+  isPlainFile,
+  isPlainFolder,
   listText,
   parseAllowArgs,
   readAnswer,
-  recordPaths,
+  recordIn,
   recordedInterpreter,
+  stateFolders,
   unknownText,
   verbOf,
 } from './allowlist'
-import type { Change, CliAnswer, Interpreter, Target } from './allowlist'
+import type { Change, CliAnswer, Interpreter, PathInfo, Target } from './allowlist'
 import {
   ALLOW_EDITS,
   HEADER,
@@ -85,25 +89,45 @@ type CommandApi = Parameters<Hook<'command.run'>>[0]
 type CliRun = { readonly exitCode: number; readonly answer: CliAnswer | null }
 type Outcome = CliRun | string
 
+/** What stat says about a path, or why not: 'missing' (the path is not there) or 'refused' (any other failure). */
+async function statOf($: CommandApi, path: string): Promise<PathInfo | 'missing' | 'refused'> {
+  try {
+    const stat = await $.fs.stat(path)
+    return { kind: stat.kind, isLink: stat.isLink }
+  } catch (error) {
+    return /ENOENT/.test(String(error)) ? 'missing' : 'refused'
+  }
+}
+
 /**
- * The interpreter `harpo install` recorded, read from the person's
- * install record; null when there is no record, no usable "python" in it, or
- * it cannot be read. The first record file that exists decides (the new state
- * folder before the old one, so a stale old record never overrides it). There
- * is no other fallback: a `harpo` or `harpocrates` found on PATH (or a
- * project-local shim) is never run.
+ * The interpreter `harpo install` recorded, read from the person's install
+ * record; null when there is no record, no usable "python" in it, or it cannot
+ * be read. The state folder is tried in order, `.harpo` then `.harpocrates`,
+ * and the first one that exists decides: if it is not a plain folder (a link,
+ * a file), or its record is not a plain file, or any stat is refused, the
+ * answer is null, never the other folder (SEC-09). There is no other fallback:
+ * a `harpo` or `harpocrates` found on PATH (or a project-local shim) is never
+ * run.
+ *
+ * The home folder comes from HOME (USERPROFILE on Windows) because the plugin
+ * runtime offers no password-database lookup (SEC-08 reads it in the Python
+ * hook); it must be absolute. A project whose settings set HOME could point
+ * the plugin at a record of its own: that is the residual risk the threat
+ * model lists, and why the record must name an absolute interpreter and only
+ * the allowed flags.
  */
 async function readInterpreter($: CommandApi): Promise<Interpreter | null> {
   try {
     const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
-    if (!home) return null
-    for (const path of recordPaths(home)) {
-      let text: unknown
-      try {
-        text = await $.fs.read(path)
-      } catch {
-        continue // no record in this folder: look in the next
-      }
+    if (!home || !isAbsolute(home)) return null
+    for (const folder of stateFolders(home)) {
+      const dir = await statOf($, folder)
+      if (dir === 'missing') continue // this state folder is not there: look in the next
+      if (dir === 'refused' || !isPlainFolder(dir)) return null // a link, a file, an OS refusal: unusable, and no fallback
+      const path = recordIn(folder)
+      const file = await statOf($, path)
+      if (file === 'missing' || file === 'refused' || !isPlainFile(file)) return null
+      const text: unknown = await $.fs.read(path)
       return typeof text === 'string' ? recordedInterpreter(text) : null
     }
     return null
