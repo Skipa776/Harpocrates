@@ -22,7 +22,7 @@ def test_doc_demo_01_tapes_use_only_canaries() -> None:
     for tape in TAPES:
         text = tape.read_text(encoding="utf-8")
         assert "mktemp" in text, f"{tape.name}: no throwaway directory"
-        assert "export HOME=" in text, f"{tape.name}: HOME is not redirected"
+        assert re.search(r"export [^\n]*\bHOME=\$\(mktemp", text), f"{tape.name}: HOME is not redirected"
         assert "bench/canary_repo.py" in text, f"{tape.name}: not built from the generated canary repo"
         assert "Hide" in text and "Show" in text, f"{tape.name}: setup is not hidden"
         for bad in FORBIDDEN:
@@ -40,6 +40,8 @@ def test_doc_demo_01_scanner_scene_numbers_match_the_measurement() -> None:
     assert totals["canaries"] == 15
     assert f"{totals['harpo_found']} of {totals['canaries']}" in README
     assert f"{totals['gitleaks_found']} of {totals['canaries']}" in README
+    caption = (ROOT / "docs" / "tapes" / "scan.tape").read_text(encoding="utf-8")
+    assert f"harpo found {totals['harpo_found']} of 15 canaries, gitleaks {totals['gitleaks_found']} of 15" in caption
     manifest_free = path.read_text(encoding="utf-8")
     assert "value" not in manifest_free
     assert not re.search(r"(AKIA[A-Z0-9]{16}|sk_live_|ghp_[A-Za-z0-9]{20})", manifest_free)
