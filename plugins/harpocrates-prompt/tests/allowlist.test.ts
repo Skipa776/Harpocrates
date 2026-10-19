@@ -14,14 +14,14 @@ import {
 tier('user')
 
 const NOT_FOUND = 'Harpocrates CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
-const REFUSED = 'Only you can change the Harpocrates allowlist: type /harpocrates in the chat box.'
+const REFUSED = 'Only you can change the Harpocrates allowlist: type /harpo in the chat box.'
 const EVERYWHERE = 'Allow it everywhere'
 const PRESENTATION = { isFullscreen: false, columns: 80 }
 const PY = '/venv/bin/python'
 const CLI = [PY, '-P', '-m', 'Harpocrates.cli']
 const RECORD = JSON.stringify({ version: 1, python: PY, python_args: ['-P'], 'claude-code': { mcp: true } })
 const NOT_INSTALLED =
-  'Run `harpocrates install` first: the plugin only runs the Harpocrates interpreter that install recorded.'
+  'Run `harpo install` first: the plugin only runs the Harpocrates interpreter that install recorded.'
 
 type Reply = { exitCode: number; stdout: string } | 'missing'
 
@@ -87,8 +87,11 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
   }
 }
 
-const say = async ($: Engine, args: string, origin: PromptOrigin = { kind: 'composer' }) =>
-  (await $.command.run({ command: 'harpocrates', args, origin, presentation: PRESENTATION })).text
+// The slash command has two names (FR-NAME-02): /harpo, and /harpocrates for two more minor releases.
+const NAMES = ['harpo', 'harpocrates'] as const
+
+const say = async ($: Engine, args: string, origin: PromptOrigin = { kind: 'composer' }, command: string = NAMES[0]) =>
+  (await $.command.run({ command, args, origin, presentation: PRESENTATION })).text
 
 const ADDED = json({ ok: true, action: 'added', kind: 'path', value: '/proj/app/.env' })
 
@@ -447,7 +450,7 @@ test('every origin but composer is refused for allow and remove, and no process 
 
 test('a run with no origin is refused too', async ($, on) => {
   const w = world(on, () => ADDED)
-  const ran = await $.command.run({ command: 'harpocrates', args: 'allow x', presentation: PRESENTATION } as never)
+  const ran = await $.command.run({ command: 'harpo', args: 'allow x', presentation: PRESENTATION } as never)
   expect(ran.text).toBe(REFUSED)
   expect(w.ran).toEqual([])
 })
@@ -466,7 +469,7 @@ test('help, unknown and the list run for any origin', async ($, on) => {
 test('nothing is put in context for the model', async ($, on) => {
   world(on, () => ADDED)
   const ran = await $.command.run({
-    command: 'harpocrates',
+    command: 'harpo',
     args: 'allow x',
     origin: { kind: 'composer' },
     presentation: PRESENTATION,
@@ -484,4 +487,82 @@ test('changeArgv: the argument vectors', () => {
   expect(changeArgv('add', { kind: 'path', value: '/a' })).toEqual(['allow', '--json', '/a'])
   expect(changeArgv('add', { kind: 'name', value: 'n' }, true)).toEqual(['allow', '--json', '--yes', '--name', 'n'])
   expect(changeArgv('remove', { kind: 'name', value: 'n' })).toEqual(['allow', '--remove', '--json', '--name', 'n'])
+})
+
+// -- the old name: /harpocrates is /harpo (FR-NAME-02) ----------------------------
+
+test('session start registers /harpo and, for two more minor releases, /harpocrates', async ($, on) => {
+  const registered: string[] = []
+  on('command.register', (_$, e) => {
+    registered.push(e.name)
+    return { value: undefined }
+  })
+  on('session.start', (_$, e) => e) // the engine beneath the plugin: it just starts
+  await $.session.start({ cwd: '/proj/app' } as never)
+  expect(registered).toEqual(['harpo', 'harpocrates'])
+})
+
+for (const command of NAMES) {
+  test(`/${command}: allow, remove, list and help run the same CLI calls and print the same text`, async ($, on) => {
+    const w = world(on, argv =>
+      argv.includes('--list') ? json({ entries: [{ kind: 'name', value: 'out' }] }) : ADDED,
+    )
+    expect(await say($, 'allow .env', { kind: 'composer' }, command)).toBe('Allowed /proj/app/.env.')
+    expect(await say($, 'remove .env', { kind: 'composer' }, command)).toBe('Removed /proj/app/.env.')
+    expect(await say($, 'allowlist', { kind: 'composer' }, command)).toBe('Names (every project):\n  out')
+    expect(await say($, 'help', { kind: 'composer' }, command)).toBe(HELP)
+    expect(await say($, 'frobnicate', { kind: 'composer' }, command)).toBe(`Unknown: frobnicate\n${HELP}`)
+    expect(w.ran).toEqual([
+      [...CLI, 'allow', '--json', '/proj/app/.env'],
+      [...CLI, 'allow', '--remove', '--json', '/proj/app/.env'],
+      [...CLI, 'allow', '--list', '--json'],
+    ])
+  })
+
+  test(`/${command}: a broad name asks, and only the exact Allow it everywhere re-runs with --yes`, async ($, on) => {
+    const w = world(
+      on,
+      argv =>
+        argv.includes('--yes')
+          ? json({ ok: true, action: 'added', kind: 'name', value: 'src' })
+          : json({ ok: false, error: 'src is broad', needs_confirmation: true }, 3),
+      EVERYWHERE,
+    )
+    expect(await say($, 'allow --name src', { kind: 'composer' }, command)).toBe('Allowed the name src in every project.')
+    expect(w.asked.length).toBe(1)
+    expect(w.ran.length).toBe(2)
+    expect(w.ran[1]).toEqual([...CLI, 'allow', '--json', '--yes', '--name', 'src'])
+  })
+
+  test(`/${command}: every origin but composer is refused for a change, and no process runs`, async ($, on) => {
+    const w = world(on, () => ADDED, EVERYWHERE)
+    for (const origin of OTHERS) {
+      for (const args of ['allow x', 'allow --name src', 'remove x', 'ALLOW x', '"allow" x', 'allow', 'allow a b']) {
+        expect(await say($, args, origin, command)).toBe(REFUSED)
+      }
+    }
+    const noOrigin = await $.command.run({ command, args: 'allow x', presentation: PRESENTATION } as never)
+    expect(noOrigin.text).toBe(REFUSED)
+    expect(w.ran).toEqual([])
+    expect(w.asked).toEqual([])
+    expect(w.read).toEqual([])
+  })
+
+  test(`/${command}: help, unknown and the list run for any origin; nothing goes into context`, async ($, on) => {
+    const w = world(on, () => json({ entries: [{ kind: 'name', value: 'out' }] }))
+    for (const origin of OTHERS) {
+      expect(await say($, 'help', origin, command)).toBe(HELP)
+      expect(await say($, 'allowlist', origin, command)).toBe('Names (every project):\n  out')
+    }
+    expect(w.ran.length).toBe(OTHERS.length)
+    const ran = await $.command.run({ command, args: 'help', origin: { kind: 'composer' }, presentation: PRESENTATION })
+    expect(ran.context).toBeUndefined()
+  })
+}
+
+test('the help and the refusal name /harpo, the command to type', () => {
+  expect(HELP).toContain('/harpo allow <path>')
+  expect(HELP).not.toContain('/harpocrates')
+  expect(REFUSED).toContain('type /harpo in')
+  expect(NOT_INSTALLED).toContain('`harpo install`')
 })

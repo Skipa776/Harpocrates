@@ -1,25 +1,26 @@
-// /harpocrates: parsing and wording for the allowlist command. Pure: nothing
-// here runs a process or touches a file. The Harpocrates CLI (`allow --json`)
-// is the only thing that changes the allowlist, and register.tsx is the only
-// caller, and only for the person's own Enter.
+// /harpo: parsing and wording for the allowlist command (/harpocrates, its old
+// name, does the same: FR-NAME-02). Pure: nothing here runs a process or
+// touches a file. The Harpocrates CLI (`allow --json`) is the only thing that
+// changes the allowlist, and register.tsx is the only caller, and only for the
+// person's own Enter.
 
 import { sanitize } from './parse'
 import { truncateRight } from './width'
 
 export const HELP = [
   'Harpocrates allowlist (only you can change it; every use is logged)',
-  '/harpocrates allow <path>            allow one file or folder',
-  '/harpocrates allow --name <name>     allow a folder or file name in every project',
-  '/harpocrates remove <path>           remove a path',
-  '/harpocrates remove --name <name>    remove a name',
-  '/harpocrates allowlist               show the list',
+  '/harpo allow <path>            allow one file or folder',
+  '/harpo allow --name <name>     allow a folder or file name in every project',
+  '/harpo remove <path>           remove a path',
+  '/harpo remove --name <name>    remove a name',
+  '/harpo allowlist               show the list',
 ].join('\n')
 
 export const ARGUMENT_HINT = 'allow <path> | allow --name <name> | remove … | allowlist'
-export const REFUSED = 'Only you can change the Harpocrates allowlist: type /harpocrates in the chat box.'
+export const REFUSED = 'Only you can change the Harpocrates allowlist: type /harpo in the chat box.'
 export const NOT_FOUND = 'Harpocrates CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
 export const NOT_INSTALLED =
-  'Run `harpocrates install` first: the plugin only runs the Harpocrates interpreter that install recorded.'
+  'Run `harpo install` first: the plugin only runs the Harpocrates interpreter that install recorded.'
 export const BAD_ANSWER ='The Harpocrates CLI returned an answer this plugin cannot read.'
 export const CONFIRM_LABEL = 'Allow it everywhere'
 export const CANCEL_LABEL = 'Cancel'
@@ -78,26 +79,26 @@ function parseTarget(kind: Change, rest: readonly string[]): AllowCommand {
   const usage = (message: string): AllowCommand => ({ kind: 'usage', message })
   const make = (target: Target): AllowCommand => ({ kind, target })
 
-  if (rest.length === 0) return usage(`Usage: /harpocrates ${verb} <path>  or  /harpocrates ${verb} --name <name>`)
+  if (rest.length === 0) return usage(`Usage: /harpo ${verb} <path>  or  /harpo ${verb} --name <name>`)
   if (rest.some(w => CONTROL.test(w))) return usage('A path or name cannot hold control characters.')
 
   if (rest[0] === '--name') {
     const name = rest[1]
-    if (rest.length !== 2 || name === undefined || name === '') return usage(`Usage: /harpocrates ${verb} --name <name>`)
+    if (rest.length !== 2 || name === undefined || name === '') return usage(`Usage: /harpo ${verb} --name <name>`)
     if (name.startsWith('-')) return usage(`Unknown option: ${truncateRight(sanitize(name), 40)}`)
     return make({ kind: 'name', value: name })
   }
 
   const path = rest[0]
-  if (path === undefined || path === '') return usage(`Usage: /harpocrates ${verb} <path>`)
+  if (path === undefined || path === '') return usage(`Usage: /harpo ${verb} <path>`)
   if (path.startsWith('-')) {
     return usage(`Unknown option: ${truncateRight(sanitize(path), 40)} (write ./ before a path that starts with a dash)`)
   }
-  if (rest.length > 1) return usage(`Put a path that contains spaces in quotes: /harpocrates ${verb} "my folder/file"`)
+  if (rest.length > 1) return usage(`Put a path that contains spaces in quotes: /harpo ${verb} "my folder/file"`)
   return make({ kind: 'path', value: path })
 }
 
-/** What the person typed after `/harpocrates`. */
+/** What the person typed after `/harpo` (or `/harpocrates`). */
 export function parseAllowArgs(args: string): AllowCommand {
   const words = tokenize(args)
   if (words === null) return { kind: 'usage', message: 'A quote is never closed.' }
