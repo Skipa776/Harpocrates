@@ -136,7 +136,7 @@ class CodeContext:
         return "\n".join(all_lines)
 
 
-def extract_var_name(line: str, token: str) -> Optional[str]:
+def feature_var_name(line: str, token: str) -> Optional[str]:
     """
     Extract variable name from a line containing a token.
 
@@ -337,7 +337,7 @@ __all__ = [
     "extract_context",
     "extract_context_from_lines",
     "extract_context_from_finding",
-    "extract_var_name",
+    "feature_var_name",
     "is_comment_line",
     "is_test_file",
     "detect_file_type",

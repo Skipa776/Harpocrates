@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from Harpocrates.detectors.entropy_detector import shannon_entropy
 from Harpocrates.ml.context import (
     CodeContext,
-    extract_var_name,
+    feature_var_name,
 )
 
 if TYPE_CHECKING:
@@ -1694,7 +1694,7 @@ def extract_features(
         regex_match_type = type_map.get(finding.type, 9)
 
     # Extract variable name first (needed by context features)
-    var_name = extract_var_name(context.line_content, token)
+    var_name = feature_var_name(context.line_content, token)
 
     # Extract features from each category
     token_features = _extract_token_features(
