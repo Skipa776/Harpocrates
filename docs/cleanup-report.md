@@ -1,6 +1,16 @@
 # R0 cleanup report (FR-CLEAN-01)
 
-Oct 18, 2026 · branch `r0/cleanup` · status: **§1–§3 executed. §4 awaits decisions.**
+Oct 18, 2026 · branch `r0/cleanup` · status: **§1–§4 executed.**
+
+§4 (approved Oct 18):
+- **#26, #27:** commits `60f3edc`, `51edbb9`.
+- **#28, rename to `feature_var_name`:** commit `0133c00`.
+- **#28b (FR-CORE-07):** commits `ea64e6a`, `f4284ff`. Two long-line hangs fixed: `feature_var_name` (197 s → 0.06 s on 200k characters), and the Java signature regex (≥ 60 s → 0.01 s on 50k spaces). The Java signature feature no longer matches across a line break; this is pinned by a test, and the snapshots are unchanged.
+- **#29, #30 (SEC-07):** `xgboost_model.json` is hash-checked before load and ships in the wheel.
+- **#31:** no change.
+- **#32:** the `plugin-tests` CI job. It hasn't run in CI yet.
+
+Findings stayed byte-identical after every step.
 
 Executed:
 - **§1, items 1–8 and 12–14 (file cuts):** commits `23434e1`..`0edec5a`. Items 9–11 (code and config edits): commits `1484851`, `8c15f4d`, `5b8ce35`. Findings byte-identical after them, and 1,151 local tests pass.
