@@ -36,6 +36,12 @@ _PLACEHOLDER = re.compile(r"<<HARPO:\w+:[0-9a-f]{4}>>")
 
 @lru_cache(maxsize=1)
 def _gate_verifier():
+    """
+    Description: Lazily create and cache the recall-first gate verifier for FR-CORE-06.
+    Parameters: None
+    Output: Shared OnnxVerifier instance; imports and initializes the model on first use and
+        propagates initialization errors.
+    """
     from Harpocrates.ml.onnx_verifier import OnnxVerifier
 
     return OnnxVerifier(layer="gate")  # recall-first threshold (FR-CORE-06)
@@ -45,11 +51,17 @@ SNIFF_BYTES = 8192
 
 
 def text_encoding(head: bytes) -> Optional[str]:
-    """The codec of a file that is text in UTF-16 or UTF-32 (a byte order mark, or NULs on one parity of the bytes:
-    ASCII-heavy UTF-16 has them on every other byte); None for UTF-8 and for real binary. Such a file is full of
-    NULs yet reads as plain text once decoded, so treating it as binary would let a secret through (hooks.py) or hide
-    the file from safe_read. Trade-off: binary with the same NUL pattern is decoded and scanned as text, which can
-    only cost a false positive. Both parities mostly NUL (executables, zero fill) stay binary."""
+    """
+    Description: Identify UTF-16 or UTF-32 text from a byte order mark or NULs on one byte
+        parity, as in ASCII-heavy UTF-16, so secrets are not bypassed by hooks.py or hidden
+        from safe_read as binary data.
+    Parameters:
+        head: Initial bytes of a file to inspect for an encoding signature or NUL pattern.
+    Output: UTF-16 or UTF-32 codec name when recognized; None for UTF-8 and real binary.
+        Both parities mostly NUL (executables, zero fill) stay binary. Trade-off: binary with
+        the same NUL pattern is decoded and scanned as text, which can only cost a false
+        positive. Such encoded text contains NULs but reads as plain text after decoding.
+    """
     if head[:4] in (b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"):
         return "utf-32"
     if head[:2] in (b"\xff\xfe", b"\xfe\xff"):
@@ -66,6 +78,15 @@ def text_encoding(head: bytes) -> Optional[str]:
 
 
 def _read_text(path: Path) -> str:
+    """
+    Description: Read a regular text file within the size limit so special or binary files
+        are refused before redaction.
+    Parameters:
+        path: File path to validate and read.
+    Output: Decoded text with invalid sequences replaced; reads the file and raises ValueError
+        for nonregular files, files over MAX_BYTES, or binary data in the sniffed prefix.
+        Filesystem errors propagate as OSError.
+    """
     if not path.is_file():  # also false for FIFOs, sockets and devices, which could block
         raise ValueError(f"not a regular file: {path}")
     if path.stat().st_size > MAX_BYTES:
@@ -78,16 +99,44 @@ def _read_text(path: Path) -> str:
 
 
 class Redactor:
-    """One per agent session: the HMAC key lives only in memory and dies with the process."""
+    """
+    Description: Represent one agent session's secret redactor, whose HMAC key lives only
+        in memory and dies with the process.
+    Parameters: None
+    Output: Instances provide session-keyed placeholders, redacted file reads, and searches;
+        construction generates a random in-memory key.
+    """
 
     def __init__(self) -> None:
+        """
+        Description: Generate the in-memory HMAC key used for session-scoped placeholders (SEC-02).
+        Parameters: None
+        Output: None; stores 32 random bytes on the instance.
+        """
         self._key = secrets.token_bytes(32)  # SEC-02
 
     def placeholder(self, value: str, stype: str) -> str:
+        """
+        Description: Build a typed, session-keyed placeholder to refer to a value without
+            returning the value itself.
+        Parameters:
+            value: Value to hash with the session's HMAC key.
+            stype: Secret type label to include in the placeholder.
+        Output: A <<HARPO:type:hash4>> string containing the first four hexadecimal HMAC characters.
+        """
         digest = hmac.new(self._key, value.encode(), hashlib.sha256).hexdigest()[:4]
         return f"<<HARPO:{stype}:{digest}>>"
 
     def _findings(self, text: str) -> List[Finding]:
+        """
+        Description: Collect regex and other candidates and verify non-regex candidates with
+            the gate model, failing closed by retaining every candidate if verification fails.
+        Parameters:
+            text: Full text to inspect for secrets.
+        Output: Regex findings plus verified candidates, or all findings on verification failure;
+            may initialize the cached model and logs only the exception type when it fails.
+            Errors from initial finding collection propagate.
+        """
         findings = _collect_text_findings(text)
         regex = [f for f in findings if f.evidence == EvidenceType.REGEX]
         candidates = [f for f in findings if f.evidence != EvidenceType.REGEX]
@@ -100,7 +149,14 @@ class Redactor:
             return findings
 
     def redact(self, text: str) -> str:
-        """Replace every detected secret, everywhere it occurs, keeping the line count."""
+        """
+        Description: Replace every detected secret everywhere it occurs while keeping the line
+            count, including entire private-key blocks and unterminated blocks through end of text.
+        Parameters:
+            text: Text whose detected secret values should be replaced.
+        Output: Redacted text with session-keyed placeholders; detection may initialize the model
+            or log a verification failure, and initial detection errors propagate.
+        """
         spans = {m.group(0): "private_key" for m in _PEM_BLOCK.finditer(text)}
         for f in self._findings(text):
             value = f.token or ""
@@ -115,7 +171,17 @@ class Redactor:
         return text
 
     def safe_read(self, path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
-        """Numbered lines (like `cat -n`) of a file, secrets redacted; optional 1-based inclusive range."""
+        """
+        Description: Read and redact the whole file before selecting lines so secrets spanning
+            the requested range remain protected.
+        Parameters:
+            path: Text file path to read.
+            start_line: Optional 1-based inclusive first line, clamped to at least one.
+            end_line: Optional 1-based inclusive last line, bounded by the file's line count.
+        Output: Numbered lines like `cat -n`, with secrets redacted and a placeholder warning when
+            needed; reads the file. Raises ValueError for nonregular, oversized, or binary files;
+            filesystem and detection errors propagate, and verification failures may be logged.
+        """
         lines = self.redact(_read_text(Path(path))).split("\n")
         if lines and lines[-1] == "":
             lines.pop()
@@ -125,7 +191,19 @@ class Redactor:
         return body + _footer(body)
 
     def safe_grep(self, pattern: str, path: str = ".", max_matches: int = MAX_GREP_MATCHES) -> str:
-        """`path:line:text` for each redacted line matching the regex, under a file or directory."""
+        """
+        Description: Search a file or directory for regex matches on redacted lines to avoid
+            reporting secret values, using a raw-text prefilter to skip files that cannot match.
+        Parameters:
+            pattern: Python regular expression to search for.
+            path: File or directory to search recursively, defaulting to the current directory.
+            max_matches: Match count at which to stop collecting results.
+        Output: `path:line:text` for each matching redacted line, with a limit notice when reached
+            and a placeholder warning when needed; reads files and skips unreadable, binary, or
+            oversized files. Raises ValueError for invalid regexes; detection errors propagate and
+            verification failures may be logged. Searching for "<<HARPO" itself finds nothing
+            through the raw prefilter unless that pattern is already present in the source.
+        """
         try:
             rx = re.compile(pattern)
         except re.error as exc:
@@ -153,6 +231,14 @@ class Redactor:
 
 
 def _walk(root: Path):
+    """
+    Description: Enumerate files in stable name order while pruning configured directories
+        such as version-control, dependency, environment, and cache directories.
+    Parameters:
+        root: Directory to traverse, or a nondirectory path to yield directly.
+    Output: Iterator of Path objects; traverses the filesystem without following directory
+        symlinks and uses os.walk's default handling of traversal errors.
+    """
     if not root.is_dir():
         yield root
         return
@@ -163,7 +249,14 @@ def _walk(root: Path):
 
 
 def _footer(body: str) -> str:
-    """Tell the agent placeholders are not values, so it doesn't write them into code."""
+    """
+    Description: Tell the agent placeholders are not real values so it does not write them
+        into code and instead references the variable or config key.
+    Parameters:
+        body: Redacted output to inspect for distinct placeholders.
+    Output: Warning footer with the distinct placeholder count, or an empty string if none
+        occur; no side effects.
+    """
     found = sorted(set(_PLACEHOLDER.findall(body)))
     if not found:
         return ""
