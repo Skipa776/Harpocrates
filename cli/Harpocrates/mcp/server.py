@@ -1,5 +1,5 @@
 """
-MCP server exposing Harpocrates scan APIs to other agents.
+MCP server exposing Harpo scan APIs to other agents.
 
 Stdio transport: ALL logging MUST go to stderr to avoid corrupting
 JSON-RPC frames. We defensively bind logging to stderr at startup
@@ -30,7 +30,7 @@ from Harpocrates.read import Redactor
 # so log lines never corrupt the JSON-RPC stdio frame stream.
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 
-mcp = FastMCP("harpocrates")
+mcp = FastMCP("harpo")
 
 # Hard ceiling on bytes read per scan_file call. Prevents resource exhaustion
 # from large files or slow streams when the caller omits max_bytes.
@@ -208,7 +208,7 @@ def safe_grep(pattern: str, path: str = ".", max_matches: int = 200) -> str:
 
 def main() -> None:
     """
-    Description: Run the stdio MCP server as the entry point for the `harpocrates-mcp`
+    Description: Run the stdio MCP server as the entry point for the `harpo-mcp`
         console script so agents can call its tools.
     Parameters: None
     Output: None; runs the server over standard input and output and propagates server errors.

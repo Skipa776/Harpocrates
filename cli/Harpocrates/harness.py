@@ -1,10 +1,11 @@
 """Per-harness support tiers (FR-INSTALL-03) and read-tool setup config (FR-READ-03).
 
 The config only denies the harness's built-in reads of secret-bearing paths and registers the
-harpocrates MCP server, whose safe_read and safe_grep return those files redacted. Neither harness
+harpo MCP server, whose safe_read and safe_grep return those files redacted. Neither harness
 applies its read-deny rules to MCP servers, so safe_read can still open what the built-in tools can't.
-`harpocrates setup <harness>` prints it; `harpocrates install` writes it into the harness's own files
-(FR-INSTALL-01, Harpocrates/install.py).
+`harpo setup <harness>` prints it; `harpo install` writes it into the harness's own files
+(FR-INSTALL-01, Harpocrates/install.py). The server is registered as `harpo` (FR-NAME-01); an install from before the
+rename registered it as `harpocrates`, and `harpo install` moves that over (LEGACY_* below).
 """
 from __future__ import annotations
 
@@ -31,10 +32,14 @@ SENSITIVE_HOME_DIRS = ("~/.ssh", "~/.aws", "~/.azure", "~/.config/gcloud", "~/.k
 # Both are protected from the agent's edits whichever one is in use (FR-NAME-04, paths.py).
 STATE_DIRS = tuple(f"~/{name}" for name in STATE_DIR_NAMES)
 
-MCP_TOOLS = ("mcp__harpocrates__safe_read", "mcp__harpocrates__safe_grep")
+MCP_NAME = "harpo"  # the name the server is registered under: Claude Code builds tool names from it
+MCP_TOOLS = (f"mcp__{MCP_NAME}__safe_read", f"mcp__{MCP_NAME}__safe_grep")
+# What installs from before the rename wrote (FR-NAME-01): install moves them over, uninstall removes them.
+LEGACY_MCP_NAME = "harpocrates"
+LEGACY_MCP_TOOLS = (f"mcp__{LEGACY_MCP_NAME}__safe_read", f"mcp__{LEGACY_MCP_NAME}__safe_grep")
 AGENT_NOTE = (
     "Files that usually hold secrets (.env, keys, credential stores) are blocked for the built-in read "
-    "tools. Read them with the harpocrates MCP tools safe_read and safe_grep; secrets come back as "
+    "tools. Read them with the harpo MCP tools safe_read and safe_grep; secrets come back as "
     "<<HARPO:type:hash>> placeholders. Never try to recover a placeholder's value."
 )
 # Claude Code asks the user before an edit of such a file (FR-READ-06); Codex has no edit prompt.
@@ -63,7 +68,7 @@ class Harness:
     commands: tuple[str, ...]  # on PATH
     paths: tuple[str, ...]  # under home, or under the applications dir for *.app
     gap: str  # what stays unprotected even at this harness's full tier, printed after "Not protected:"
-    setup: Optional[str] = None  # `harpocrates setup <setup>` prints its config
+    setup: Optional[str] = None  # `harpo setup <setup>` prints its config
 
 
 HARNESSES = (
@@ -127,7 +132,7 @@ def tier_report(found: dict[str, bool]) -> str:
     rows = [h for h in HARNESSES if found.get(h.name)]
     if not rows:
         return "No supported harness detected (Claude Code, Codex CLI, OpenCode, Copilot, Cursor)."
-    lines = ["Detected harnesses and their Harpocrates support tier:", ""]
+    lines = ["Detected harnesses and their Harpo support tier:", ""]
     for h in rows:
         lines.append(f"  {h.name}: {h.tier}")
         lines.append(f"    Not protected: {h.gap}")
@@ -144,7 +149,7 @@ def tier_report(found: dict[str, bool]) -> str:
 
 def _in_user_site() -> bool:
     """
-    Description: Whether this copy of Harpocrates is installed in the user's site-packages (`pip install --user`).
+    Description: Whether this copy of Harpo is installed in the user's site-packages (`pip install --user`).
     Parameters: None
     Output: True when this module's file lies under site.getusersitepackages(), otherwise False, also when either path
         cannot be resolved. No side effects.
@@ -168,8 +173,8 @@ def _choose_flag(user_site: bool, has_p: bool) -> str:
 
 def python_flag() -> str:
     """
-    Description: Select the interpreter flags every generated `python -m Harpocrates...` command carries, so neither an
-        agent-controlled working directory nor an environment variable can put code in front of Harpocrates (SEC-08).
+    Description: Select the interpreter flags every generated `python -m Harpo...` command carries, so neither an
+        agent-controlled working directory nor an environment variable can put code in front of Harpo (SEC-08).
     Parameters: None
     Output: "-I" (isolated mode), or "-E -P" when the package is installed in the user site-packages and this Python is
         3.11 or later; a string that may hold two flags separated by a space (python_flags() splits it). No process
@@ -273,20 +278,20 @@ def codex_config_parts() -> tuple[str, str]:
     command, args = mcp_server()
     files = "\n".join(f'"**/{name}" = "deny"' for name in SENSITIVE_FILES)
     dirs = "\n".join(f'"{d}" = "deny"' for d in (*SENSITIVE_HOME_DIRS, *STATE_DIRS))
-    root = 'default_permissions = "harpocrates"\n'
-    tables = f"""[mcp_servers.harpocrates]
+    root = f'default_permissions = "{MCP_NAME}"\n'
+    tables = f"""[mcp_servers.{MCP_NAME}]
 command = {json.dumps(command, ensure_ascii=False)}
 args = {json.dumps(args, ensure_ascii=False)}
 
-[permissions.harpocrates]
+[permissions.{MCP_NAME}]
 description = "Workspace access with secret-bearing files denied; read them through safe_read."
 extends = ":workspace"
 
-[permissions.harpocrates.filesystem]
+[permissions.{MCP_NAME}.filesystem]
 glob_scan_max_depth = 8
 {dirs}
 
-[permissions.harpocrates.filesystem.":workspace_roots"]
+[permissions.{MCP_NAME}.filesystem.":workspace_roots"]
 {files}
 
 # Deny-only: Codex parses a PreToolUse "ask" but doesn't support it and fails open, so this hook runs without ask mode.
@@ -296,7 +301,7 @@ matcher = "^Bash$"
 [[hooks.PreToolUse.hooks]]
 type = "command"
 command = {json.dumps(guarded_hook(command), ensure_ascii=False)}
-statusMessage = "Harpocrates: checking files for secrets"
+statusMessage = "Harpo: checking files for secrets"
 """
     return root, tables
 
@@ -306,7 +311,7 @@ def codex_config() -> str:
     Description: Combine Codex root settings and tables for the setup command.
     Parameters: None
     Output: Complete configuration string; writes no files.
-    Notes: The same lines in one piece, for `harpocrates setup codex`.
+    Notes: The same lines in one piece, for `harpo setup codex`.
     """
     root, tables = codex_config_parts()
     return f"{root}\n{tables}"
@@ -329,7 +334,7 @@ def setup_instructions(harness: str) -> str:
 
 1. Register the read tool for every project:
 
-   claude mcp add --scope user harpocrates -- {shlex.join([command, *args])}
+   claude mcp add --scope user {MCP_NAME} -- {shlex.join([command, *args])}
 
 2. Merge these keys into ~/.claude/settings.json (append to any existing lists and hooks):
 
@@ -344,7 +349,7 @@ def setup_instructions(harness: str) -> str:
 
 The "hooks" entry scans every file before a built-in Read, Edit or Write, a content Grep, or a Bash
 command such as `cat` touches it. If the file holds a secret, a read is refused with a pointer to
-safe_read / safe_grep, in every mode. Only an EDIT of such a file prompts you ("Harpocrates:" naming the
+safe_read / safe_grep, in every mode. Only an EDIT of such a file prompts you ("Harpo:" naming the
 file), once per file and session, even in accept-edits mode; Yes lets Claude change it (and read it
 as-is, so its values reach the provider), No leaves it untouched. A folder of known false alarms (hashes,
 build output) can be allowed for good with `harpo allow <path>`; each pass is logged in
@@ -362,10 +367,10 @@ gate covers that. For OS-level blocking of the secret paths, see the sandbox ste
 
    {CODEX_NOTE}
 
-3. Trust the hook: start `codex`, type /hooks, review the Harpocrates PreToolUse hook and trust it.
+3. Trust the hook: start `codex`, type /hooks, review the Harpo PreToolUse hook and trust it.
    Codex runs a new or changed hook only after this review.
 
-4. Check: `codex mcp list` shows harpocrates enabled. In a repo with a .env,
+4. Check: `codex mcp list` shows {MCP_NAME} enabled. In a repo with a .env,
    `codex sandbox -- cat .env` prints "Operation not permitted", and asking Codex to show
    config files that hold a token gets the hook's refusal and a safe_read retry.
 

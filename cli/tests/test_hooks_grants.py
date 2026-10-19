@@ -20,7 +20,7 @@ from Harpocrates import allowlist, hooks
 
 SID, TUID = "sess-1", "tu-1"
 PLACEHOLDER = "<<HARPO:" + "generic" + ":" + "ab12>>"  # assembled here so the literal never sits in this file
-PLACEHOLDER_DENY = ("That edit would write a Harpocrates placeholder into the file, replacing a real secret with a "
+PLACEHOLDER_DENY = ("That edit would write a Harpo placeholder into the file, replacing a real secret with a "
                     "fake value. Edit around the secret, or ask the user to change it.")
 EDITS = [
     ("Edit", "file_path", {"old_string": "a", "new_string": "b"}),
@@ -31,10 +31,10 @@ EDITS = [
 
 
 def _reason(path: str, kinds: str) -> str:
-    return (f"Harpocrates: Claude wants to edit {path} without secret protection. It contains secrets ({kinds}). "
+    return (f"Harpo: Claude wants to edit {path} without secret protection. It contains secrets ({kinds}). "
             "Allowing lets Claude read and edit this file with its built-in tools for the rest of this session; "
             "these values go to the model provider as-is. Choose No to keep them protected: "
-            "Claude can still read it with mcp__harpocrates__safe_read.")
+            "Claude can still read it with mcp__harpo__safe_read.")
 
 
 @pytest.fixture(scope="module")
@@ -128,7 +128,7 @@ def test_fr_read_06_reads_never_prompt_in_ask_mode(proj: Path, home: Path, capsy
     for event, tool in ((_read(proj), "safe_read"), (_grep(proj), "safe_grep"), (bash, "safe_read")):
         for mode in ("default", "acceptEdits", "plan", "auto"):
             code, decision, reason = _decision({**event, "permission_mode": mode}, capsys)
-            assert code == 0 and decision == "deny" and f"mcp__harpocrates__{tool}" in reason, (event["tool_name"], mode)
+            assert code == 0 and decision == "deny" and f"mcp__harpo__{tool}" in reason, (event["tool_name"], mode)
     assert not _file(home).exists()  # a refused read records nothing
 
 

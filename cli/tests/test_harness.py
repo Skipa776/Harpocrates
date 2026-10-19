@@ -72,7 +72,7 @@ def test_fr_read_03_claude_code_denies_every_sensitive_path() -> None:
         assert f"Read(//**/{name})" in deny, name
     for d in SENSITIVE_HOME_DIRS:
         assert f"Read({d}/**)" in deny, d
-    assert set(cfg["permissions"]["allow"]) == {"mcp__harpocrates__safe_read", "mcp__harpocrates__safe_grep"}
+    assert set(cfg["permissions"]["allow"]) == {"mcp__harpo__safe_read", "mcp__harpo__safe_grep"}
     (entry,) = cfg["hooks"]["PreToolUse"]
     assert entry["matcher"] == "Read|Grep|Bash|Edit|MultiEdit|Write|NotebookEdit"
     flag = python_flag()
@@ -106,7 +106,7 @@ def test_fr_read_03_codex_denies_every_sensitive_path() -> None:
     roots = profile["filesystem"][":workspace_roots"]
     for name in SENSITIVE_FILES:
         assert roots[f"**/{name}"] == "deny", name
-    assert cfg["mcp_servers"]["harpocrates"]["args"] == [*python_flags(), "-m", "Harpocrates.mcp.server"]
+    assert cfg["mcp_servers"]["harpo"]["args"] == [*python_flags(), "-m", "Harpocrates.mcp.server"]
     (entry,) = cfg["hooks"]["PreToolUse"]
     assert entry["matcher"] == "^Bash$"
     assert _guarded_parts(entry["hooks"][0]["command"]) == (
@@ -120,10 +120,10 @@ def test_fr_read_03_cli_prints_setup_and_tiers() -> None:
 
     runner = CliRunner()
     claude = runner.invoke(app, ["setup", "claude-code"])
-    assert claude.exit_code == 0 and "claude mcp add --scope user harpocrates" in claude.output
+    assert claude.exit_code == 0 and "claude mcp add --scope user harpo " in claude.output
     assert "Read(~/.ssh/**)" in claude.output
     codex = runner.invoke(app, ["setup", "codex"])
-    assert codex.exit_code == 0 and "[mcp_servers.harpocrates]" in codex.output
+    assert codex.exit_code == 0 and "[mcp_servers.harpo]" in codex.output
     assert runner.invoke(app, ["setup", "cursor"]).exit_code == 2
     assert runner.invoke(app, ["setup"]).exit_code == 0
 
@@ -152,7 +152,7 @@ def test_fr_read_03_odd_interpreter_paths_survive(monkeypatch: pytest.MonkeyPatc
     line = next(ln for ln in harness.setup_instructions("Claude-Code").splitlines() if "claude mcp add" in ln)
     assert shlex.split(line)[-3] == odd
     tomllib = pytest.importorskip("tomllib")
-    assert tomllib.loads(harness.codex_config())["mcp_servers"]["harpocrates"]["command"] == odd
+    assert tomllib.loads(harness.codex_config())["mcp_servers"]["harpo"]["command"] == odd
 
 
 def test_fr_read_06_setup_text_says_reads_are_refused_and_only_edits_prompt() -> None:

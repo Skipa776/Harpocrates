@@ -1,10 +1,15 @@
 """FR-INSTALL-01: write the read-tool setup into each harness's own files, and take it out again.
 
-Claude Code: ~/.claude/settings.json (deny/allow rules and hooks, merged), the harpocrates MCP server (through
+Claude Code: ~/.claude/settings.json (deny/allow rules and hooks, merged), the harpo MCP server (through
 `claude mcp`), and a marked note in ~/.claude/CLAUDE.md. Codex: a marked block in ~/.codex/config.toml and a
 marked note in ~/.codex/AGENTS.md. Every file is planned in memory first, so a refusal (unparsable file, a clash
 with the user's own config) writes nothing for that harness. Writes are atomic, keep the file mode, and the first
-original is kept once as <file>.harpocrates.bak (FR-INSTALL-08). Nothing here talks to the network.
+original is kept once as <file>.harpo.bak (FR-INSTALL-08). Nothing here talks to the network.
+
+FR-NAME-01 migration: before the rename the MCP server, the allow rules, the marked blocks, the Codex profile and the
+backups were all named `harpocrates`. A new install moves what it owns over to `harpo` (install record for the rules and
+the registration, the old marks for the blocks) and never drops a deny rule; uninstall removes both the new and the old
+names. Anything the user wrote under the old names themselves is left alone.
 """
 from __future__ import annotations
 
@@ -35,17 +40,19 @@ except ModuleNotFoundError:  # pragma: no cover
 
 TARGETS = ("claude-code", "codex")
 NAMES = {"claude-code": "Claude Code", "codex": "Codex CLI"}
-BACKUP_SUFFIX = ".harpocrates.bak"
+BACKUP_SUFFIX = ".harpo.bak"
+LEGACY_BACKUP_SUFFIX = ".harpocrates.bak"  # an install from before the rename kept its first original under this name
 HOOK_MARK = "-m Harpocrates.hooks"  # in the command of every hook entry we write, whatever the python path
-MCP_NAME = "harpocrates"
+MCP_NAME = harness.MCP_NAME
+LEGACY_MCP_NAME = harness.LEGACY_MCP_NAME
 HOOKS_TRUST_NOTE = (
     "One manual step: Codex runs a new or changed hook only after you trust it. Start `codex`, type /hooks, "
-    "review the Harpocrates PreToolUse hook and trust it (once)."
+    "review the Harpo PreToolUse hook and trust it (once)."
 )
 
 
 NO_RECORD_NOTE = (
-    "No install record (~/.harpo/install.json): removed only Harpocrates' marked blocks and hook commands. "
+    "No install record (~/.harpo/install.json): removed only Harpo's marked blocks and hook commands. "
     "Permission rules and the MCP server are left, since they may be yours; drop them by hand if not."
 )
 
@@ -107,8 +114,10 @@ class _Marks:
     end: str
 
 
-MD_MARKS = _Marks("<!-- harpocrates:start -->", "<!-- harpocrates:end -->")
-TOML_MARKS = _Marks("# >>> harpocrates >>>", "# <<< harpocrates <<<")
+MD_MARKS = _Marks("<!-- harpo:start -->", "<!-- harpo:end -->")
+TOML_MARKS = _Marks("# >>> harpo >>>", "# <<< harpo <<<")
+LEGACY_MD_MARKS = _Marks("<!-- harpocrates:start -->", "<!-- harpocrates:end -->")  # blocks from before the rename
+LEGACY_TOML_MARKS = _Marks("# >>> harpocrates >>>", "# <<< harpocrates <<<")
 
 
 @dataclass(frozen=True)
@@ -165,10 +174,11 @@ class _Edit:
         """
         Description: Check whether a changed nonprivate existing file needs its first backup.
         Parameters: None
-        Output: True when no backup exists and the edit qualifies, otherwise False; filesystem
+        Output: True when no backup exists (under the new or the pre-rename name) and the edit qualifies, otherwise False; filesystem
             lookup errors may propagate.
         """
-        return self.changed and self.old is not None and not self.private and not self.backup.exists()
+        legacy = self.path.with_name(self.path.name + LEGACY_BACKUP_SUFFIX)  # that first original already exists
+        return self.changed and self.old is not None and not self.private and not self.backup.exists() and not legacy.exists()
 
 
 # --- reading and writing files -------------------------------------------------------------------------------------
@@ -311,7 +321,20 @@ def _put(text: str, block: str, where: str) -> str:
     return text + ("" if text.endswith("\n") else "\n") + "\n" + block
 
 
-def _upsert(text: str, marks: _Marks, blocks: Sequence[tuple[str, str]]) -> str:
+def _drop_all(text: str, *marks: _Marks) -> str:
+    """
+    Description: Remove the marked blocks of every given marker pair, so an uninstall takes the pre-rename blocks too.
+    Parameters:
+        text: Existing file text.
+        *marks: Marker pairs whose blocks are cut, in order.
+    Output: Text without those blocks; raises RefusalError for unpaired markers and writes nothing.
+    """
+    for pair in marks:
+        text = _drop(text, _regions(text, pair))
+    return text
+
+
+def _upsert(text: str, marks: _Marks, blocks: Sequence[tuple[str, str]], legacy: Optional[_Marks] = None) -> str:
     """
     Description: Replace matching owned blocks in place or rebuild their placements when counts
         differ.
@@ -319,9 +342,19 @@ def _upsert(text: str, marks: _Marks, blocks: Sequence[tuple[str, str]]) -> str:
         text: Existing file text.
         marks: Ownership markers to locate.
         blocks: Sequence of (body, start or end) pairs.
+        legacy: Markers of blocks an install from before the rename wrote, or None.
     Output: Updated text; raises RefusalError for unpaired markers and writes nothing.
-    Notes: Replace our blocks in place, or add them: (body, "start" | "end") each.
+    Notes: Replace our blocks in place, or add them: (body, "start" | "end") each. Pre-rename blocks (`legacy`) are
+        rewritten in place under the new markers when they are the only ones and as many as the new blocks, so
+        they keep their place; otherwise they are cut and the new blocks go where a fresh install puts them.
     """
+    if legacy is not None:
+        old = _regions(text, legacy)
+        if old and not _regions(text, marks) and len(old) == len(blocks):
+            for (s, e), (body, _) in reversed(list(zip(old, blocks))):
+                text = text[:s] + _block(marks, body) + text[e:]
+            return text
+        text = _drop(text, old)
     spans = _regions(text, marks)
     if spans and len(spans) == len(blocks):
         for (s, e), (body, _) in reversed(list(zip(spans, blocks))):
@@ -347,10 +380,10 @@ def _note_edit(label: str, path: Path, note: str, remove: bool) -> _Edit:
     old = _read(path)
     text = old or ""
     if remove:
-        cut = _drop(text, _regions(text, MD_MARKS))
+        cut = _drop_all(text, MD_MARKS, LEGACY_MD_MARKS)
         new: Optional[str] = old if cut == text else (cut or None)  # a file we emptied goes
     else:
-        new = _upsert(text, MD_MARKS, [(note, "end")])
+        new = _upsert(text, MD_MARKS, [(note, "end")], LEGACY_MD_MARKS)
     return _Edit(label, path, old, new, remove)
 
 
@@ -377,7 +410,7 @@ def _child(parent: dict, key: str, kind: type, where: str) -> object:
 
 def _is_ours(hook: object) -> bool:
     """
-    Description: Identify hook objects containing the Harpocrates module command marker.
+    Description: Identify hook objects containing the Harpo module command marker.
     Parameters:
         hook: Potential hook object.
     Output: True for a dictionary with a string command containing HOOK_MARK, otherwise False.
@@ -401,7 +434,7 @@ def _strip_event(entries: list, pred: Callable[[object], bool] = _is_ours) -> tu
         removal position.
     Parameters:
         entries: Event entries to filter.
-        pred: Predicate selecting hooks to remove, defaulting to Harpocrates hooks.
+        pred: Predicate selecting hooks to remove, defaulting to Harpo hooks.
     Output: Tuple of retained entries and the first affected insertion position, or None if
         unchanged; predicate errors propagate.
     Notes: The event's entries without the hooks `pred` picks (an entry left empty goes), and where
@@ -422,7 +455,7 @@ def _strip_event(entries: list, pred: Callable[[object], bool] = _is_ours) -> tu
 
 def _upsert_event(entries: list, want: dict, prior: list[str]) -> tuple[list, list[str], list[str]]:
     """
-    Description: Keep exactly one desired Harpocrates hook entry and track ownership across
+    Description: Keep exactly one desired Harpo hook entry and track ownership across
         replacements.
     Parameters:
         entries: Existing event entries.
@@ -430,8 +463,8 @@ def _upsert_event(entries: list, want: dict, prior: list[str]) -> tuple[list, li
         prior: Commands owned by an earlier install.
     Output: Tuple of updated entries, owned installed commands, and replaced commands not previously
         owned; malformed desired entries can raise lookup errors.
-    Notes: (entries, hook commands install added, Harpocrates commands it replaced). Our entry stays
-        once: a Harpocrates hook with another python path (or matcher) is replaced. `prior` is what
+    Notes: (entries, hook commands install added, Harpo commands it replaced). Our entry stays
+        once: a Harpo hook with another python path (or matcher) is replaced. `prior` is what
         an earlier install added.
     """
     cmd = want["hooks"][0]["command"]
@@ -462,22 +495,26 @@ def _merge_settings(cur: dict, want: dict, where: str, prior: dict) -> tuple[dic
         uninstall.
     Parameters:
         cur: Current settings object.
-        want: Desired Harpocrates settings.
+        want: Desired Harpo settings.
         where: Display location for validation errors.
         prior: Earlier installation ownership record.
     Output: Tuple of copied merged settings and ownership record; retains earlier owned entries
         still present and raises RefusalError for incompatible settings structures.
     Notes: (merged settings, what this install added). The record is what lets uninstall leave the
         user's own identical rules and hooks alone; entries an earlier install added stay in it
-        while they are still there.
+        while they are still there. An allow rule for the pre-rename MCP tool names that the record lists
+        is dropped (the server is registered as `harpo` now); one the user wrote themselves stays.
     """
     out, added = copy.deepcopy(cur), {"permissions": {}, "hooks": {}}
     replaced = _strs(prior.get("replaced"))
     perms = _child(out, "permissions", dict, where)
     for kind in ("deny", "allow"):
         rules = _child(perms, kind, list, where)
-        new = [r for r in want["permissions"][kind] if r not in rules]
         before = _strs((prior.get("permissions") or {}).get(kind))
+        if kind == "allow":  # the pre-rename tool names an earlier install allowed: they name a server that is gone
+            stale = [r for r in rules if r in harness.LEGACY_MCP_TOOLS and r in before]
+            rules[:] = [r for r in rules if r not in stale]  # allow rules only: a deny rule is never dropped here
+        new = [r for r in want["permissions"][kind] if r not in rules]
         rules.extend(new)
         added["permissions"][kind] = [r for r in before if r in rules and r not in new] + new
     hooks = _child(out, "hooks", dict, where)
@@ -499,7 +536,7 @@ def _strip_settings(cur: dict, prior: Optional[dict]) -> dict:
     Output: Copied settings without selected entries or newly empty affected tables; without a
         record, permission rules remain.
     Notes: Undo _merge_settings. With the install record (`prior`) only what it lists goes; without
-        one only Harpocrates hook commands go, never permission rules (they may be the user's own).
+        one only Harpo hook commands go, never permission rules (they may be the user's own).
         A list or table that ends up empty goes with them.
     """
     out = copy.deepcopy(cur)
@@ -599,47 +636,91 @@ def _claude(argv: list[str], cwd: Path) -> Optional[subprocess.CompletedProcess]
         return None
 
 
-def _mcp_step(remove: bool, dry_run: bool, owned: bool) -> Step:
+def _is_registered(claude: str, name: str, home: Path) -> Optional[subprocess.CompletedProcess]:
+    """
+    Description: Ask Claude Code whether an MCP server is registered under a name.
+    Parameters:
+        claude: Claude executable path.
+        name: Server name to look up.
+        home: Working directory for the subprocess.
+    Output: The `claude mcp get` result when the server is registered, otherwise None (also when `claude` did not
+        run); launches a subprocess.
+    """
+    got = _claude([claude, "mcp", "get", name], home)
+    return got if got is not None and got.returncode == 0 else None
+
+
+def _unregister(claude: str, name: str, home: Path) -> Optional[str]:
+    """
+    Description: Remove a user-scoped MCP registration through Claude Code.
+    Parameters:
+        claude: Claude executable path.
+        name: Server name to remove.
+        home: Working directory for the subprocess.
+    Output: None on success, otherwise the first diagnostic line of the failure; launches a subprocess.
+    """
+    done = _claude([claude, "mcp", "remove", "--scope", "user", name], home)
+    return None if done is not None and done.returncode == 0 else _why(done)
+
+
+def _mcp_step(remove: bool, dry_run: bool, owned: Optional[str]) -> Step:
     """
     Description: Register or remove the Claude MCP server while respecting ownership and dry-run
         mode.
     Parameters:
         remove: Whether to remove the registration.
         dry_run: Whether to report intended changes without invoking Claude.
-        owned: Whether the install record owns the server, used only on removal.
+        owned: The name the install record says install registered the server under, or None if it did not.
     Output: Step reporting unchanged, manual, added, updated, removed, or failed status; may query
         and change user MCP registration unless dry-run or ownership rules prevent it.
-    Notes: `owned`: the install record says install registered the server (only used on removal).
+    Notes: Only the owned name is ever removed. An install from before the rename owns `harpocrates`: installing now
+        drops that registration (so the agent does not see the tools twice) and registers `harpo`; uninstalling
+        without a reinstall removes `harpocrates`. A `harpocrates` server that install did not register is only
+        mentioned, never removed.
     """
     label = "MCP server"
     claude = shutil.which("claude")
     shown_add = shlex.join(_mcp_add_argv("claude"))
-    shown_rm = f"claude mcp remove --scope user {MCP_NAME}"
-    if remove and not owned:  # it may be the user's own registration under our name
-        return Step(label, "unchanged", f"not registered by `harpocrates install`; if it is yours to drop, run: {shown_rm}")
+    shown_rm = f"claude mcp remove --scope user {owned or MCP_NAME}"
+    shown_old_rm = f"claude mcp remove --scope user {LEGACY_MCP_NAME}"
+    if remove and owned is None:  # it may be the user's own registration under our name
+        return Step(label, "unchanged", f"not registered by `harpo install`; if it is yours to drop, run: {shown_rm}")
     if claude is None:
-        what = f"if registered, run: {shown_rm}" if remove else f"run: {shown_add}"
+        what = (f"if registered, run: {shown_rm}" if remove
+                else f"run: {shown_add}" + (f" and then: {shown_old_rm}" if owned == LEGACY_MCP_NAME else ""))
         return Step(label, "manual", f"`claude` isn't on PATH; {what}")
     if dry_run:  # claude isn't invoked at all, not even to look
         return Step(label, "removed" if remove else "added", shown_rm if remove else f"via {shown_add}")
     home = Path.home()
-    got = _claude([claude, "mcp", "get", MCP_NAME], home)
-    registered = got is not None and got.returncode == 0
     if remove:
-        if not registered:
+        name = owned or MCP_NAME
+        if _is_registered(claude, name, home) is None:
             return Step(label, "unchanged", "not registered")
-        done = _claude([claude, "mcp", "remove", "--scope", "user", MCP_NAME], home)
-        return (Step(label, "removed", "claude mcp remove") if done and done.returncode == 0
-                else Step(label, "failed", f"{_why(done)}; run: {shown_rm}"))
+        why = _unregister(claude, name, home)
+        return (Step(label, "removed", "claude mcp remove") if why is None
+                else Step(label, "failed", f"{why}; run: {shown_rm}"))
+    moved, note = False, ""
+    if _is_registered(claude, LEGACY_MCP_NAME, home) is not None:
+        if owned == LEGACY_MCP_NAME:  # an install from before the rename made it: the same server under its old name
+            why = _unregister(claude, LEGACY_MCP_NAME, home)
+            if why is not None:
+                return Step(label, "failed", f"{why}; run: {shown_old_rm}")
+            moved = True
+        else:
+            note = (f"; a `{LEGACY_MCP_NAME}` server that `harpo install` did not register is also there, "
+                    f"drop it if it is yours: {shown_old_rm}")
+    got = _is_registered(claude, MCP_NAME, home)
+    registered = got is not None
     command, args = harness.mcp_server()
     # The whole argument list, flag included, so a registration from before the flag is re-registered.
-    if registered and got is not None and command in got.stdout and " ".join(args) in got.stdout:
-        return Step(label, "unchanged", "already registered with this python")
+    if got is not None and command in got.stdout and " ".join(args) in got.stdout:
+        return (Step(label, "updated", f"dropped the old `{LEGACY_MCP_NAME}` registration" + note) if moved
+                else Step(label, "unchanged", "already registered with this python" + note))
     if registered:  # re-register so the python path is current
         _claude([claude, "mcp", "remove", "--scope", "user", MCP_NAME], home)
     done = _claude(_mcp_add_argv(claude), home)
     if done is not None and done.returncode == 0:
-        return Step(label, "updated" if registered else "added", "claude mcp add --scope user")
+        return Step(label, "updated" if registered or moved else "added", "claude mcp add --scope user" + note)
     return Step(label, "failed", f"{_why(done)}; run: {shown_add}")
 
 
@@ -687,23 +768,22 @@ def _config_edit(path: Path, remove: bool) -> _Edit:
     """
     old = _read(path)
     text = old or ""
-    spans = _regions(text, TOML_MARKS)
-    outside = _drop(text, spans)
+    outside = _drop_all(text, TOML_MARKS, LEGACY_TOML_MARKS)
     if remove:
         return _Edit("config.toml", path, old, old if outside == text else (outside or None), remove)
     data = _parse_toml(outside, path, "isn't valid TOML")
     clash = ("default_permissions" if "default_permissions" in data
-             else "[mcp_servers.harpocrates]" if MCP_NAME in (data.get("mcp_servers") or {})
-             else "a [permissions.harpocrates] table" if MCP_NAME in (data.get("permissions") or {}) else None)
+             else f"[mcp_servers.{MCP_NAME}]" if MCP_NAME in (data.get("mcp_servers") or {})
+             else f"a [permissions.{MCP_NAME}] table" if MCP_NAME in (data.get("permissions") or {}) else None)
     if clash:
-        raise RefusalError(f"{_tilde(path)} already defines {clash} outside the Harpocrates block. Merge by hand "
+        raise RefusalError(f"{_tilde(path)} already defines {clash} outside the Harpo block. Merge by hand "
                       "(`harpo setup codex` prints the lines) or remove yours, then re-run; nothing was written.")
     root, tables = harness.codex_config_parts()
     top = "# default_permissions must stay above the first [table]; the rest of this block is at the end.\n" + root
-    new = _upsert(text, TOML_MARKS, [(top, "start"), (tables, "end")])
-    merged = _parse_toml(new, path, "would not be valid TOML with Harpocrates' lines")
-    if merged.get("default_permissions") != "harpocrates" or MCP_NAME not in merged.get("mcp_servers", {}):
-        raise RefusalError(f"{_tilde(path)} would not take Harpocrates' lines as written; nothing was written.")
+    new = _upsert(text, TOML_MARKS, [(top, "start"), (tables, "end")], LEGACY_TOML_MARKS)
+    merged = _parse_toml(new, path, "would not be valid TOML with Harpo's lines")
+    if merged.get("default_permissions") != MCP_NAME or MCP_NAME not in merged.get("mcp_servers", {}):
+        raise RefusalError(f"{_tilde(path)} would not take Harpo's lines as written; nothing was written.")
     return _Edit("config.toml", path, old, new, remove)
 
 
@@ -833,13 +913,19 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
             _apply(edit, dry_run, report)
         if any(s.state == "failed" for s in report.steps[before:]):
             continue  # the record stays as it was
-        owned = bool(prior and prior.get("mcp"))
+        # The name install registered the server under: "mcp_name" in the record, `harpocrates` for a record from
+        # before the rename (it has "mcp": true and no name), None when the registration is not install's.
+        owned = (None if not (prior and prior.get("mcp")) else
+                 prior["mcp_name"] if isinstance(prior.get("mcp_name"), str) else LEGACY_MCP_NAME)
         if target == "claude-code":
             step = _mcp_step(remove, dry_run, owned)
             report.steps.insert(1, step)
             # Install owns the registration if it made one, or already did and nothing took it away.
-            section["mcp"] = (owned and step.state in ("failed", "manual") if remove
-                              else step.state in ("added", "updated") or owned)
+            kept = ((owned if step.state in ("failed", "manual") else None) if remove
+                    else MCP_NAME if step.state in ("added", "updated") else owned)
+            section["mcp"] = kept is not None
+            if kept is not None:
+                section["mcp_name"] = kept
             if remove and prior is None and not problem:
                 report.notes.append(NO_RECORD_NOTE)
         elif not remove:
@@ -847,17 +933,17 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
         if not remove:
             new_record[target] = section
         elif section.get("mcp"):
-            new_record[target] = {"mcp": True}  # removal failed or `claude` was missing: keep the claim for a retry
+            new_record[target] = {"mcp": True, "mcp_name": section["mcp_name"]}  # removal failed or `claude` was missing: keep the claim for a retry
         else:
             new_record.pop(target, None)
     if problem:
         for report in reports:
-            report.notes.append(f"Install record unreadable ({problem}), so only marked blocks and Harpocrates hook "
+            report.notes.append(f"Install record unreadable ({problem}), so only marked blocks and Harpo hook "
                                 "commands were removed; it was left in place.")
         return reports
     sections = {t: new_record[t] for t in TARGETS if isinstance(new_record.get(t), dict)}
     # "python" is the interpreter that runs the hooks. The Claude Code prompt plugin runs the CLI through it
-    # (never a bare `harpocrates` from PATH). Records from before it existed stay valid without it.
+    # (never a bare `harpo` from PATH). Records from before it existed stay valid without it.
     # "python_args" are the flags it runs with (harness.python_flags: drop the agent-controlled cwd from sys.path and
     # ignore PYTHON* variables), one list item per flag.
     python = record.get("python") if remove else sys.executable
@@ -932,6 +1018,7 @@ def render(reports: Sequence[Report], dry_run: bool, remove: bool) -> str:
             lines.append(f"  refused: {report.refused}")
         lines += [f"  {note}" for note in report.notes]
     if remove:
-        lines.append("Backups (*" + BACKUP_SUFFIX + ") are left in place.")
+        lines.append("Backups (*" + BACKUP_SUFFIX + ", and *" + LEGACY_BACKUP_SUFFIX
+                     + " from an install before the rename) are left in place.")
     return "\n".join(lines)
 

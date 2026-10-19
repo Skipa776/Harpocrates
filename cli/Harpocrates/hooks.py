@@ -17,7 +17,7 @@ instead, in the modes where a human answers; any other mode gets the refusal. Ye
 path with its built-in tools for the rest of the session, never through Bash (Harpocrates/grants.py). The grant is
 recorded by `python -m Harpocrates.hooks --post` (PostToolUse, PostToolUseFailure, SessionEnd): those fire only for a
 call that ran, so a No never reaches them. Trade-off: an approved edit sends those values to the provider; that is
-the user's explicit call. An edit that would leave a Harpocrates placeholder in the file that it did not hold before
+the user's explicit call. An edit that would leave a Harpo placeholder in the file that it did not hold before
 is denied in every mode, granted or not: it would swap a real secret for a fake value. Codex runs without --ask: its
 handling of "ask" isn't verified.
 
@@ -105,7 +105,18 @@ _HEREDOC = re.compile(
 _DYNAMIC = re.compile(r"""[^\s'"]*(?:\$[\w@*#?!]|\$\{|\$$|`)[^\s'"]*""")
 _CLI_MODULE = re.compile(r"Harpocrates(\.cli(\.__main__)?)?$")
 _CLI_NAMES = ("harpo", "harpocrates")  # the command and its old name (FR-NAME-02): both print values when they scan
-SCAN_REFUSAL = ("harpocrates scan prints secret values. Use mcp__harpocrates__scan_file or scan_text, which return "
+def _tool_ref(tool: str) -> str:
+    """
+    Description: Name an MCP tool of the Harpo server the way an agent calls it, and the name an install from before
+        the rename gave it, so a refusal still helps a user who has not re-run `harpo install`.
+    Parameters:
+        tool: The tool's name, such as safe_read.
+    Output: A phrase with both qualified names; pure string building.
+    """
+    return f"mcp__harpo__{tool} (mcp__harpocrates__{tool} until you re-run `harpo install`)"
+
+
+SCAN_REFUSAL = (f"harpo scan prints secret values. Use {_tool_ref('scan_file')} or scan_text, which return "
                 "findings without values.")
 SCAN_UNCHECKABLE = SCAN_REFUSAL + " (git history and --show-secrets can't be checked)"
 
@@ -132,7 +143,7 @@ MATCH_TIMEOUT = 5.0  # seconds for one pattern match over a tree (runs in a chil
 BUDGET = 25.0  # seconds for the whole decision; Codex's documented example hook timeout is 30
 _deadline = float("inf")
 _EDIT_TOOLS = {"Edit", "MultiEdit", "Write", "NotebookEdit"}
-STATE_REFUSAL = ("Only the user can change the Harpocrates allowlist. Ask them to run "
+STATE_REFUSAL = ("Only the user can change the Harpo allowlist. Ask them to run "
                  "`harpo allow <path>` in their own terminal.")
 _PROMPTING_MODES = {"default", "acceptEdits", "plan", "auto"}  # auto: a hook's ask forces a real prompt
 _can_ask = False
@@ -459,7 +470,7 @@ def _check_files(paths: Iterable[Path], tool: str, cwd: Path, event_tool: str = 
 
     hit, passed = _first_flagged(paths, cwd, grep_args, session_id)
     if hit is not None:
-        return _deny(f"{hit[0]} ({hit[1]}) contains secrets. Use mcp__harpocrates__{tool} instead: it returns the "
+        return _deny(f"{hit[0]} ({hit[1]}) contains secrets. Use {_tool_ref(tool)} instead: it returns the "
                      "same content with each secret replaced by a <<HARPO:type:hash>> placeholder.")
     for path in passed:  # the call may run: log the allowlist uses (not on a refusal)
         allowlist.log_use(path, event_tool)
@@ -468,7 +479,7 @@ def _check_files(paths: Iterable[Path], tool: str, cwd: Path, event_tool: str = 
 
 def _placeholders(text: str) -> Counter:
     """
-    Description: Count exact Harpocrates placeholders to detect newly introduced copies.
+    Description: Count exact Harpo placeholders to detect newly introduced copies.
     Parameters:
         text: Text in which to count placeholders.
     Output: Counter mapping complete matched placeholder strings to occurrence counts.
@@ -511,7 +522,7 @@ def _adds_placeholder(tool: str, args: dict, path: Path) -> bool:
     Output: True when the edit introduces a placeholder under the comparison or conservative
         fallback rules, otherwise False; reads current content without printing it. NotebookEdit
         checks new source directly.
-    Notes: True if the edit would leave a Harpocrates placeholder in the file that it did not hold
+    Notes: True if the edit would leave a Harpo placeholder in the file that it did not hold
         before: writing one swaps a real secret for a fake value. The result is judged, not the new
         text alone, because a placeholder can be built from two edits (`<<HAR` now, the rest beside
         it later) or from two MultiEdit steps. Edit and MultiEdit are applied as the tool does
@@ -620,7 +631,7 @@ def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
     if several:  # which of the files the tool writes is not for the hook to guess
         return _deny("That edit names more than one file. Ask the user to make it, or edit one file at a time.")
     if _adds_placeholder(tool, args, path):
-        return _deny("That edit would write a Harpocrates placeholder into the file, replacing a real secret with a "
+        return _deny("That edit would write a Harpo placeholder into the file, replacing a real secret with a "
                      "fake value. Edit around the secret, or ask the user to change it.")
     session_id = event.get("session_id")
     hit, passed = _first_flagged([path], cwd, None, session_id)
@@ -630,10 +641,10 @@ def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
         return 0
     shown, kinds = hit
     if _can_ask and grants.add_pending(session_id, event.get("tool_use_id"), path, tool):
-        return _ask(f"Harpocrates: Claude wants to edit {shown} without secret protection. It contains secrets "
+        return _ask(f"Harpo: Claude wants to edit {shown} without secret protection. It contains secrets "
                     f"({kinds}). Allowing lets Claude read and edit this file with its built-in tools for the rest "
                     "of this session; these values go to the model provider as-is. Choose No to keep them "
-                    "protected: Claude can still read it with mcp__harpocrates__safe_read.")
+                    "protected: Claude can still read it with mcp__harpo__safe_read.")
     return _deny(f"{shown} ({kinds}) contains secrets, and a built-in edit shows its content to the model. "
                  "Ask the user to make this change.")
 
@@ -1456,7 +1467,7 @@ def _copy_dirs(name: str, args: list[str], here: Path) -> list[Path]:
 
 def _scan_operands(argv: list[str]) -> Optional[list[str]]:
     """
-    Description: Identify agent-run Harpocrates scan operands while refusing modes a work-tree check
+    Description: Identify agent-run Harpo scan operands while refusing modes a work-tree check
         cannot cover.
     Parameters:
         argv: Command words including possible wrappers or Python module invocation.
@@ -1493,7 +1504,7 @@ def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dic
         inherited: Inherited variable alternatives, or None.
         named_ok: Whether naming-only commands can be exempted; False for executed substitution
             output.
-        scans: Optional list to receive files whose values an agent-run Harpocrates scan could
+        scans: Optional list to receive files whose values an agent-run Harpo scan could
             print.
     Output: Tuple of candidate files and extra text such as Git blobs; may read Git blobs and mutate
         scans. Raises ValueError for excessive nesting, ambiguous cd, or invalid quoting,
@@ -1652,7 +1663,7 @@ def _bash(command: str, cwd: Path) -> int:
     for text in texts:
         if Redactor().redact(text) != text:
             return _deny("That git object contains secrets. Read the working-tree file with "
-                         "mcp__harpocrates__safe_read instead.")
+                         f"{_tool_ref('safe_read')} instead.")
     if _first_flagged([f for f in scans if _isfile(f)], cwd)[0] is not None:
         return _deny(SCAN_REFUSAL)
     return _check_files(files, "safe_read", cwd, "Bash")
@@ -1690,10 +1701,10 @@ def decide(raw: str, ask: bool = False) -> int:
             return _edit(tool, args, cwd, event)
         return 0
     except _OutOfTimeError:
-        return _deny("Too many files to check for secrets in time. Use mcp__harpocrates__safe_grep or "
-                     "mcp__harpocrates__safe_read on a narrower path instead.")
+        return _deny(f"Too many files to check for secrets in time. Use {_tool_ref('safe_grep')} or "
+                     f"{_tool_ref('safe_read')} on a narrower path instead.")
     except Exception as exc:  # fail closed; the type only, never a message that could quote file content
-        print(f"harpocrates hook error ({type(exc).__name__}); blocked. Use mcp__harpocrates__safe_read.",
+        print(f"harpo hook error ({type(exc).__name__}); blocked. Use {_tool_ref('safe_read')}.",
               file=sys.stderr)
         return 2
 

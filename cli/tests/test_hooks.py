@@ -1010,8 +1010,8 @@ def test_fr_read_03_hook_agent_run_scan_prints_values_and_is_refused(repo, capsy
         code, out = _run(_bash(dirty, cmd), capsys)
         message = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out else ""
         assert code == 0 and _denied(out) and token[:12] not in out, cmd
-        assert message == ("harpocrates scan prints secret values. Use mcp__harpocrates__scan_file or scan_text, "
-                           "which return findings without values."), cmd
+        assert message == ("harpo scan prints secret values. Use mcp__harpo__scan_file (mcp__harpocrates__scan_file until "
+                           "you re-run `harpo install`) or scan_text, which return findings without values."), cmd
     for cmd in with_each_name(["<bin> scan", "<bin> scan .", "<bin> scan src", "python -m Harpocrates.cli scan src",
                                "<bin> scan --help", "<bin> scan -h", "<bin> --version", "<bin> --help",
                                "<bin> install --dry-run", "python -m Harpocrates.cli --version", "echo <bin> scan"]):
@@ -1072,7 +1072,7 @@ def test_fr_read_03_hook_agent_scan_with_history_or_show_secrets_is_refused(repo
                                "bash -c '<bin> scan --history'", "uv run <bin> scan --show-secrets"]):
         code, out = _run(_bash(root, cmd), capsys)
         reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out else ""
-        assert code == 0 and _denied(out) and reason.startswith("harpocrates scan prints secret values.")
+        assert code == 0 and _denied(out) and reason.startswith("harpo scan prints secret values.")
         assert reason.endswith(suffix), cmd
     for cmd in with_each_name(["<bin> scan --help --history", "echo <bin> scan --history", "<bin> --version"]):
         assert _run(_bash(root, cmd), capsys) == (0, ""), cmd

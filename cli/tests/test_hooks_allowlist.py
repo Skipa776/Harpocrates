@@ -88,7 +88,7 @@ def test_fr_read_06_ask_mode_refuses_a_search_over_secret_files(repo, capsys) ->
     code, decision, reason = _decision(
         {"tool_name": "Grep", "cwd": str(root), "permission_mode": "default",
          "tool_input": {"pattern": ".", "path": str(root), "output_mode": "content"}}, capsys, ask=True)
-    assert code == 0 and decision == "deny" and "mcp__harpocrates__safe_grep" in reason
+    assert code == 0 and decision == "deny" and "mcp__harpo__safe_grep" in reason
     assert any(rel in reason for rel in {c["file"] for c in canaries})  # names the file that stopped it
     assert not any(c["value"][:12] in reason for c in canaries)
 

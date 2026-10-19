@@ -1,7 +1,7 @@
-"""FR-INSTALL-01: `harpocrates install` / `uninstall` write the read-tool setup into each harness's own files.
+"""FR-INSTALL-01: `harpo install` / `uninstall` write the read-tool setup into each harness's own files.
 
 Every test runs with HOME in a temp dir and PATH limited to a temp bin dir holding a fake `claude` that logs its
-arguments, so nothing touches the real ~/.claude, ~/.codex, ~/.harpocrates or the real `claude` binary.
+arguments, so nothing touches the real ~/.claude, ~/.codex, ~/.harpo or the real `claude` binary.
 """
 from __future__ import annotations
 
@@ -19,16 +19,16 @@ from Harpocrates import harness, install
 from Harpocrates.cli import app
 
 PY = sys.executable
-ADD_LINE = f"mcp add --scope user harpocrates -- {PY} {harness.python_flag()} -m Harpocrates.mcp.server"
-CLAUDE_START, CLAUDE_END = "<!-- harpocrates:start -->", "<!-- harpocrates:end -->"
-TOML_START, TOML_END = "# >>> harpocrates >>>", "# <<< harpocrates <<<"
+ADD_LINE = f"mcp add --scope user harpo -- {PY} {harness.python_flag()} -m Harpocrates.mcp.server"
+CLAUDE_START, CLAUDE_END = "<!-- harpo:start -->", "<!-- harpo:end -->"
+TOML_START, TOML_END = "# >>> harpo >>>", "# <<< harpo <<<"
 
 FAKE_CLAUDE = """#!/bin/sh
 echo "$*" >> "@LOG@"
 case "$1 $2" in
-  "mcp get") [ -f "@STATE@" ] && { /bin/cat "@STATE@"; exit 0; }; exit 1;;
-  "mcp add") echo "$*" > "@STATE@"; exit 0;;
-  "mcp remove") /bin/rm -f "@STATE@"; exit 0;;
+  "mcp get") f="@STATE@.$3"; [ -f "$f" ] && { /bin/cat "$f"; exit 0; }; exit 1;;
+  "mcp add") echo "$*" > "@STATE@.$5"; exit 0;;
+  "mcp remove") /bin/rm -f "@STATE@.$5"; exit 0;;
 esac
 exit 0
 """
@@ -49,7 +49,7 @@ def fake_claude(home: Path) -> Path:
     """Put a fake `claude` on PATH; returns its call log."""
     bindir, log = home.parent / "bin", home.parent / "claude.log"
     exe = bindir / "claude"
-    exe.write_text(FAKE_CLAUDE.replace("@LOG@", str(log)).replace("@STATE@", str(home.parent / "claude.state")))
+    exe.write_text(FAKE_CLAUDE.replace("@LOG@", str(log)).replace("@STATE@", str(home.parent / "claude.state")))  # one file per server name
     exe.chmod(0o755)
     return log
 
@@ -63,7 +63,7 @@ def snap(root: Path) -> dict[str, bytes]:
 
 
 def no_bak(files: dict[str, bytes]) -> dict[str, bytes]:
-    return {k: v for k, v in files.items() if not k.endswith(".harpocrates.bak")}
+    return {k: v for k, v in files.items() if not k.endswith(".harpo.bak")}
 
 
 def write_json(path: Path, obj: object) -> bytes:
@@ -153,7 +153,7 @@ def test_fr_install_01_claude_backup_once_and_mode_kept(home: Path, fake_claude:
     original = write_json(path, {"theme": "dark"})
     path.chmod(0o640)
     install.install_harnesses(["claude-code"])
-    bak = path.with_name("settings.json.harpocrates.bak")
+    bak = path.with_name("settings.json.harpo.bak")
     assert bak.read_bytes() == original
     assert stat.S_IMODE(path.stat().st_mode) == 0o640
     write_json(path, {"theme": "light"})
@@ -173,10 +173,10 @@ def test_fr_install_01_claude_reinstall_replaces_the_note_block(home: Path, fake
 
 
 def test_fr_install_01_claude_re_registers_a_stale_mcp_server(home: Path, fake_claude: Path) -> None:
-    (home.parent / "claude.state").write_text("mcp add --scope user harpocrates -- /old/python -m x\n")
+    (home.parent / "claude.state.harpo").write_text("mcp add --scope user harpo -- /old/python -m x\n")
     install.install_harnesses(["claude-code"])
     seen = calls(fake_claude)
-    assert seen == ["mcp get harpocrates", "mcp remove --scope user harpocrates", ADD_LINE]
+    assert seen == ["mcp get harpocrates", "mcp get harpo", "mcp remove --scope user harpo", ADD_LINE]
 
 
 def test_fr_install_01_claude_missing_prints_the_command_and_still_writes_settings(home: Path) -> None:
@@ -200,7 +200,7 @@ def test_fr_install_01_codex_fresh_install(home: Path) -> None:
     assert TOML_START in text and TOML_END in text
     cfg = codex_cfg(home)
     want = tomllib.loads(harness.codex_config())
-    assert cfg == want and cfg["default_permissions"] == "harpocrates"
+    assert cfg == want and cfg["default_permissions"] == "harpo"
     assert "--ask" not in text and "deny-only" in text.lower()  # Codex fails open on ask
     agents = (home / ".codex" / "AGENTS.md").read_text()
     assert harness.CODEX_NOTE in agents and "Ask the user to edit such files." in agents
@@ -224,20 +224,20 @@ def test_fr_install_01_codex_keeps_user_config_and_replaces_a_stale_block(
     with monkeypatch.context() as m:
         m.setattr(harness, "mcp_server", lambda: ("/old/python", ["-m", "Harpocrates.mcp.server"]))
         install.install_harnesses(["codex"])
-    assert codex_cfg(home)["mcp_servers"]["harpocrates"]["command"] == "/old/python"
+    assert codex_cfg(home)["mcp_servers"]["harpo"]["command"] == "/old/python"
     install.install_harnesses(["codex"])
     text = cfg.read_text()
     cfg_now = codex_cfg(home)
     assert "/old/python" not in text
-    assert cfg_now["mcp_servers"]["harpocrates"]["command"] == PY
+    assert cfg_now["mcp_servers"]["harpo"]["command"] == PY
     assert cfg_now["model"] == "o3" and cfg_now["mcp_servers"]["other"] == {"command": "x"}
     assert len(cfg_now["hooks"]["PreToolUse"]) == 1
 
 
 @pytest.mark.parametrize("clash", [
-    '[mcp_servers.harpocrates]\ncommand = "mine"\n',
+    '[mcp_servers.harpo]\ncommand = "mine"\n',
     'default_permissions = ":workspace"\n',
-    '[permissions.harpocrates.filesystem]\n"x" = "deny"\n',
+    '[permissions.harpo.filesystem]\n"x" = "deny"\n',
 ])
 def test_fr_install_01_codex_conflict_outside_the_block_refuses(home: Path, clash: str) -> None:
     cfg = home / ".codex" / "config.toml"
@@ -283,8 +283,8 @@ def test_fr_install_01_uninstall_restores_the_originals(home: Path, fake_claude:
     reports = install.uninstall_harnesses(["claude-code", "codex"])
     assert ours(reports)
     assert no_bak(snap(home)) == original
-    assert calls(fake_claude)[-1] == "mcp remove --scope user harpocrates"
-    assert not (home.parent / "claude.state").exists()
+    assert calls(fake_claude)[-1] == "mcp remove --scope user harpo"
+    assert not (home.parent / "claude.state.harpo").exists()
 
 
 def test_fr_install_01_uninstall_of_a_fresh_install_leaves_no_files(home: Path, fake_claude: Path) -> None:
@@ -376,7 +376,7 @@ def record(home: Path) -> dict:
 
 def test_fr_install_01_uninstall_keeps_the_users_own_identical_rules_and_hooks(home: Path, fake_claude: Path) -> None:
     want = harness.claude_code_settings()
-    mine = {"permissions": {"deny": ["Read(//**/.env)"], "allow": ["mcp__harpocrates__safe_read"]},
+    mine = {"permissions": {"deny": ["Read(//**/.env)"], "allow": ["mcp__harpo__safe_read"]},
             "hooks": {"SessionEnd": want["hooks"]["SessionEnd"]}}  # the user pasted some of ours by hand earlier
     original = write_json(home / ".claude" / "settings.json", mine)
     install.install_harnesses(["claude-code"])
@@ -385,7 +385,7 @@ def test_fr_install_01_uninstall_keeps_the_users_own_identical_rules_and_hooks(h
     assert got["hooks"]["SessionEnd"] == mine["hooks"]["SessionEnd"]
     rec = record(home)["claude-code"]
     assert "Read(//**/.env)" not in rec["permissions"]["deny"]
-    assert "mcp__harpocrates__safe_read" not in rec["permissions"]["allow"]
+    assert "mcp__harpo__safe_read" not in rec["permissions"]["allow"]
     assert "SessionEnd" not in rec["hooks"] and "PreToolUse" in rec["hooks"]
     install.uninstall_harnesses(["claude-code"])
     assert (home / ".claude" / "settings.json").read_bytes() == original
@@ -436,11 +436,11 @@ def test_fr_install_01_uninstall_without_a_record_leaves_rules_and_mcp(home: Pat
 
 
 def test_fr_install_01_uninstall_leaves_an_mcp_server_the_user_registered(home: Path, fake_claude: Path) -> None:
-    (home.parent / "claude.state").write_text(ADD_LINE + "\n")  # theirs, with this very python
+    (home.parent / "claude.state.harpo").write_text(ADD_LINE + "\n")  # theirs, with this very python
     install.install_harnesses(["claude-code"])
     assert record(home)["claude-code"]["mcp"] is False
     install.uninstall_harnesses(["claude-code"])
-    assert (home.parent / "claude.state").exists()
+    assert (home.parent / "claude.state.harpo").exists()
     assert not any(c.startswith("mcp remove") for c in calls(fake_claude))
 
 
@@ -468,7 +468,7 @@ def test_sec_hijack_reinstall_replaces_hook_commands_and_mcp_registration_that_l
     write_json(home / ".claude" / "settings.json", {"hooks": {
         "PreToolUse": [old_hook(old_pre)], "PostToolUse": [old_hook(old_post)],
         "SessionEnd": [old_hook(old_post)]}})
-    (home.parent / "claude.state").write_text(f"mcp add --scope user harpocrates -- {PY} -m Harpocrates.mcp.server\n")
+    (home.parent / "claude.state.harpo").write_text(f"mcp add --scope user harpo -- {PY} -m Harpocrates.mcp.server\n")
     assert ours(install.install_harnesses(["claude-code"]))
     text = json.dumps(settings_of(home))
     assert old_pre not in text and old_post not in text
