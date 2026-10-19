@@ -15,6 +15,11 @@ from bench.canary_repo import build
 from Harpocrates import allowlist, hooks
 
 
+def _both(cmds: list[str]) -> list[str]:
+    """FR-NAME-04: every command that names ~/.harpocrates, once more naming ~/.harpo; the others once."""
+    return cmds + [c.replace(".harpocrates", ".harpo") for c in cmds if ".harpocrates" in c]
+
+
 @pytest.fixture(scope="module")
 def repo(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[dict]]:
     root = tmp_path_factory.mktemp("canary_repo")
@@ -96,7 +101,7 @@ def test_fr_read_05_without_ask_flag_still_denies(repo, capsys) -> None:
     assert _decision(_read(root, _secret_file(canaries)), capsys)[1] == "deny"
 
 
-@pytest.mark.parametrize("cmd", [
+@pytest.mark.parametrize("cmd", _both([
     "harpocrates allow graphify-out",
     "python -m Harpocrates.cli allow .",
     "echo /tmp >> ~/.harpocrates/allow",
@@ -109,7 +114,7 @@ def test_fr_read_05_without_ask_flag_still_denies(repo, capsys) -> None:
     "harpocrates 'allow' /",
     "python -c \"from Harpocrates import allowlist; allowlist.add(Path('/'))\"",
     "rm -rf ~/.harpocrates",
-])
+]))
 def test_fr_read_05_agent_cannot_edit_the_allowlist(repo, capsys, cmd) -> None:
     root, _ = repo
     code, decision, _ = _decision({"tool_name": "Bash", "cwd": str(root), "permission_mode": "default",
@@ -117,7 +122,7 @@ def test_fr_read_05_agent_cannot_edit_the_allowlist(repo, capsys, cmd) -> None:
     assert code == 0 and decision == "deny", cmd
 
 
-@pytest.mark.parametrize("cmd", [
+@pytest.mark.parametrize("cmd", _both([
     "ls ~/.harpocrates",
     "cat ~/.harpocrates/allow.log",
     "wc -l ~/.harpocrates/allow | head",
@@ -128,12 +133,12 @@ def test_fr_read_05_agent_cannot_edit_the_allowlist(repo, capsys, cmd) -> None:
     "harpocrates scan --help",
     "cat < ~/.harpocrates/allow",
     "cd ~/.harpocrates && ls -l | wc -l",
-])
+]))
 def test_fr_read_05_touches_allows_read_only_commands(cmd) -> None:
     assert not allowlist.touches(cmd), cmd
 
 
-@pytest.mark.parametrize("cmd", [
+@pytest.mark.parametrize("cmd", _both([
     "echo /x >> ~/.harpocrates/allow",
     "tee -a ~/.harpocrates/allow",
     "cp evil ~/.harpocrates/allow",
@@ -189,7 +194,7 @@ def test_fr_read_05_touches_allows_read_only_commands(cmd) -> None:
     "echo \"${x:-$(rm ~/.harpocrates/allow)}\"",
     "find ~/.harpocrates -name allow",
     "less ~/.harpocrates/allow",
-])
+]))
 def test_fr_read_05_touches_blocks_writes_and_allow_cmd(cmd) -> None:
     assert allowlist.touches(cmd), cmd
 
@@ -203,6 +208,13 @@ def _glob_cmds() -> list[str]:
         "cp evil ~/.{" + d[1:] + ",x}/allow",
         "cp evil ~/.?" + d[2:] + "/allow",
         "mv x ~/.h" + "?" * 10 + "/allow",
+        "cp evil ~/.harp*/allow",
+        "cp evil ~/.harpo*/allow",
+        "cp evil ~/.harp{o,ocrates}/allow",
+        "cp evil $HOME/.[h]arpo/allow",
+        "cp evil ~/.{harpo,x}/allow",
+        "cp evil ~/.?arpo/allow",
+        "mv x ~/.h????/allow",
     ]
 
 
@@ -316,21 +328,24 @@ def test_fr_read_05_edit_edge_cases(repo, capsys, tmp_path: Path, monkeypatch: p
 
 
 def _obfuscated_cmds() -> list[str]:
-    n = "harp" + "ocrates"  # assembled so the literal path never appears in a command line
-    return [
-        "echo / >> ~/.\\" + n + "/allow",
-        "cd ~ && echo / >> .h\\" + n[1:] + "/allow",
-        'echo / >> ~/.ha""' + n[2:] + "/allow",
-        "echo / >> ~/.ha''" + n[2:] + "/allow",
-        "echo / >> ~/.'harp'" + n[4:] + "/allow",
-        "echo / >> ~/{.h,x}" + n[1:] + "/allow",
-        "echo / >> ~/{.,}" + n + "/allow",
-        "echo / >> $'\\056" + n + "'/allow",
-        "echo / >> $'\\x2e" + n + "'/allow",
-        "shopt -s dotglob; echo / >> ~/*" + n[1:] + "/allow",
-        "cp x ~/?" + n[1:] + "/allow",
-        "cp x ~/[.]" + n + "/allow",
-        "h''" + n[1:] + " allow /",
+    out = []
+    for n in ("harp" + "ocrates", "harp" + "o"):  # assembled so the literal path never appears in a command line
+        out += [
+            "echo / >> ~/.\\" + n + "/allow",
+            "cd ~ && echo / >> .h\\" + n[1:] + "/allow",
+            'echo / >> ~/.ha""' + n[2:] + "/allow",
+            "echo / >> ~/.ha''" + n[2:] + "/allow",
+            "echo / >> ~/.'harp'" + n[4:] + "/allow",
+            "echo / >> ~/{.h,x}" + n[1:] + "/allow",
+            "echo / >> ~/{.,}" + n + "/allow",
+            "echo / >> $'\\056" + n + "'/allow",
+            "echo / >> $'\\x2e" + n + "'/allow",
+            "shopt -s dotglob; echo / >> ~/*" + n[1:] + "/allow",
+            "cp x ~/?" + n[1:] + "/allow",
+            "cp x ~/[.]" + n + "/allow",
+        ]
+    return out + [
+        "h''" + "arpocrates allow /",
         "rm -rf .[a-z]*cache",  # accepted over-block: a dot-glob in a non-read-only command
     ]
 
@@ -340,7 +355,7 @@ def test_fr_read_05_touches_blocks_obfuscated_spellings(cmd) -> None:
     assert allowlist.touches(cmd), cmd
 
 
-@pytest.mark.parametrize("cmd", [
+@pytest.mark.parametrize("cmd", _both([
     "harpocrates scan .",
     "python -m Harpocrates.cli scan .",
     "cd /Users/joshuado/harpocrates && pytest -q",
@@ -350,12 +365,12 @@ def test_fr_read_05_touches_blocks_obfuscated_spellings(cmd) -> None:
     "cat ~/.harpocrates/allow.log",
     "ls ~/.ha''rpocrates",
     "echo 'a,b' {1,2}",
-])
+]))
 def test_fr_read_05_touches_allows_clean_and_read_only_after_normalising(cmd) -> None:
     assert not allowlist.touches(cmd), cmd
 
 
-@pytest.mark.parametrize("cmd", [
+@pytest.mark.parametrize("cmd", _both([
     "cp evil /srv/harpocrates/grants/s9.json",  # the directory by name, no dot: only the grants alternative sees it
     "rm -rf /srv/harpocrates/grants",
     "echo '{}' > /srv/harpocrates/grants/s9.json",
@@ -367,12 +382,12 @@ def test_fr_read_05_touches_allows_clean_and_read_only_after_normalising(cmd) ->
     "echo '{}' > ~/.ha''rpocrates/grants/s9.json",
     "echo '{}' > ~/{.,}harpocrates/grants/s9.json",
     "echo '{}' > $'~/\\056harpocrates/grants/s9.json'",
-])
+]))
 def test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling(cmd) -> None:
     assert allowlist.touches(cmd), cmd
 
 
-@pytest.mark.parametrize("cmd", [
+@pytest.mark.parametrize("cmd", _both([
     "ls ~/.harpocrates/grants",
     "cat cli/Harpocrates/grants.py",
     "git add cli/Harpocrates/grants.py cli/tests/test_hooks_grants.py",
@@ -380,21 +395,22 @@ def test_fr_read_06_touches_blocks_the_grants_dir_in_any_spelling(cmd) -> None:
     "cd /Users/joshuado/harpocrates && git add cli/Harpocrates/grants.py",
     ".venv/bin/python -m ruff check cli/Harpocrates/grants.py",
     "pytest -q cli/tests/test_hooks_grants.py",
-])
+]))
 def test_fr_read_06_touches_leaves_the_grants_module_and_read_only_listing_alone(cmd) -> None:
     assert not allowlist.touches(cmd), cmd
 
 
-def test_fr_read_06_touches_takes_the_working_directory_into_account(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("name", [".harpocrates", ".harpo"])
+def test_fr_read_06_touches_takes_the_working_directory_into_account(tmp_path: Path, monkeypatch, name: str) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    state = tmp_path / ".harpocrates"
+    state = tmp_path / name
     (state / "grants").mkdir(parents=True)
     other = tmp_path / "work"
     other.mkdir()
     assert allowlist.touches("echo x >> allow", state) and allowlist.touches("tee s9.json", state / "grants")
     assert not allowlist.touches("ls -la", state) and not allowlist.touches("cat allow", state)
     assert not allowlist.touches("echo x >> allow", other) and not allowlist.touches("echo x >> allow")
-    assert not allowlist.touches("echo x >> allow", tmp_path / ".harpocrates-not")  # a sibling is not inside
+    assert not allowlist.touches("echo x >> allow", tmp_path / f"{name}-not")  # a sibling is not inside
 
 
 # ---- name rules, remove, list, CLI (FR-READ-05, name:<NAME> lines) ----
@@ -405,7 +421,7 @@ _REFUSED_NAMES = [
     "", ".", "..", "a/b", "a\\b", "*", "a?", "a[b]", "a{b}", "a]", "a}", "a\nb", "a\x1b[0m", "a\x00b", "x" * 256,
     " lead", "tail ", ".env", ".env.local", "x.pem", "a.key", "id_rsa", "id_rsa.pub", "id_ed25519", "credentials.json",
     ".netrc", ".npmrc", ".pypirc", ".git-credentials", "prod.tfvars", ".ENV", "X.PEM", ".ssh", ".aws", ".azure",
-    "gcloud", ".kube", ".docker", ".gnupg", ".harpocrates", ".SSH",
+    "gcloud", ".kube", ".docker", ".gnupg", ".harpocrates", ".harpo", ".HARPO", ".SSH",
 ]
 
 
@@ -454,8 +470,10 @@ def test_fr_read_05_name_rule_never_covers_secret_home_dirs(repo, capsys, tmp_pa
     monkeypatch.setenv("HOME", str(home))
     inside = _project(home, canaries, root, ".ssh", "graphify-out", "k.py")
     state = _project(home, canaries, root, ".harpocrates", "graphify-out", "k.py")
+    state_new = _project(home, canaries, root, ".harpo", "graphify-out", "k.py")
     allowlist.add_name("graphify-out")
     assert not allowlist.allowed(Path(inside)) and not allowlist.allowed(Path(state))
+    assert not allowlist.allowed(Path(state_new))
     assert _decision(_read(tmp_path, inside), capsys)[1] == "deny"
 
 

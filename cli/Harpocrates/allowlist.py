@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from Harpocrates.harness import SENSITIVE_FILES, SENSITIVE_HOME_DIRS
-from Harpocrates.paths import state_dir
+from Harpocrates.paths import STATE_DIR_NAMES, state_dir
 
 # None: the file sits in the state directory (paths.state_dir(), looked up per call so a test can move HOME). A test
 # can set a Path here to point the module elsewhere.
@@ -58,6 +58,7 @@ def log_file() -> Path:
     """
     return LOG_FILE if LOG_FILE is not None else state_dir() / "allow.log"
 
+
 # ponytail: text match, best effort. A script that builds the path at runtime gets past it, but such a
 # script could just as well open the secret file itself, a gap the hook already has (hooks.py docstring).
 # The egress gate (M2) sees whatever reaches the provider either way.
@@ -65,6 +66,8 @@ def log_file() -> Path:
 # exempt), so a repo directory of that name over-blocks `git -C .../harpocrates log --grep allow`. A
 # mention of the directory (`.harp`, also `~/.harp*`) passes only when it is a plain read: no output
 # redirect, substitution or heredoc, and every command word in _READ_ONLY. Fail closed on anything else.
+# Both state folders are covered (FR-NAME-04): `.harp` is the start of `.harpo` and of `.harpocrates`, so the first
+# alternative of _DIR sees either, and the normalised patterns below take `arpo` with or without `crates`.
 # A dot-name containing a glob or brace character (`~/.*`, `~/.h*`, `.[h]arp...`, `.{a,b}`, `.?arp...`) also
 # counts as a mention, so it needs a plain read too. Known gap: a name built at runtime (variables, command
 # substitution, printf) matches nothing; that is the script gap above. Matching runs on the raw command and on
@@ -96,7 +99,6 @@ _SECRET_WORDS = ("secret", "credential", "password", "token")
 _SYSTEM_NAMES = frozenset(
     "private tmp var etc opt usr volumes system library applications home root mnt documents desktop downloads "
     "users".split())
-_HARPOCRATES_DIR = ".harpocrates"
 
 
 class NeedsConfirmationError(ValueError):
@@ -184,7 +186,7 @@ def _refusal(name: str) -> Optional[str]:
     folded = _fold(name)
     if _GLOB_CHARS & (set(name) | set(folded)):
         return "a name is exact; globs (* ? [ ] { }) are not supported"
-    secret_dirs = {_fold(Path(d).name) for d in SENSITIVE_HOME_DIRS} | {_fold(_HARPOCRATES_DIR)}
+    secret_dirs = {_fold(Path(d).name) for d in SENSITIVE_HOME_DIRS} | {_fold(n) for n in STATE_DIR_NAMES}
     if folded in secret_dirs or any(fnmatch.fnmatchcase(folded, _fold(pat)) for pat in SENSITIVE_FILES):
         return f"{name} names a secret store, which no name rule may cover"
     parts, dots, _ = _facts()
@@ -321,9 +323,10 @@ _ANSI_C = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.S)
 _ESCAPE = re.compile(r"\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|[0-7]{1,3}|.)", re.S)
 _SIMPLE_ESC = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "f": "\f", "v": "\v"}
 # On the normalised text: the allow file or the grants dir (FR-READ-06) by name, a glob char right before
-# `arpocrates` (or `h?arpocrates`), or dotglob/globdots next to any glob, all count as a mention of the directory.
+# `arpo` (or `h?arpo`; `arpocrates` starts with `arpo`), or dotglob/globdots next to any glob, all count as a mention
+# of either state directory (`harpo` or `harpocrates`).
 # `grants` must end the name: the module cli/Harpocrates/grants.py is no mention.
-_MENTION_NORM = re.compile(r"arpocrates/(?:allow\b|grants(?![\w.-]))|[*?\]]h?arpocrates", re.I)
+_MENTION_NORM = re.compile(r"arpo(?:crates)?/(?:allow\b|grants(?![\w.-]))|[*?\]]h?arpo", re.I)
 _DOTGLOB = re.compile(r"dotglob|globdots", re.I)
 
 
@@ -349,13 +352,18 @@ def _mentions_dir(command: str, norm: str) -> bool:
 
 
 def _inside_state_dir(cwd: Optional[Path]) -> bool:
-    """Whether the working directory is ~/.harpocrates or under it (links resolved): a command run there names
-    its files without the directory, so the text alone shows nothing."""
+    """Whether the working directory is ~/.harpo or ~/.harpocrates, or under either (links resolved): a command run
+    there names its files without the directory, so the text alone shows nothing. Both names are checked whichever
+    one is in use, and without running the migration."""
     if cwd is None:
         return False
-    state = (Path.home() / ".harpocrates").resolve()  # looked up per call so a test can move HOME
     real = cwd.resolve()
-    return real == state or real.is_relative_to(state)
+    home = Path.home()  # looked up per call so a test can move HOME
+    for name in STATE_DIR_NAMES:
+        state = (home / name).resolve()
+        if real == state or real.is_relative_to(state):
+            return True
+    return False
 
 
 # Any command naming the allowlist module together with an add/remove word (add, add_name, remove_name ...) in any
@@ -372,8 +380,8 @@ def _edits_module(text: str) -> bool:
 
 def touches(command: str, cwd: Optional[Path] = None) -> bool:
     """Whether a shell command could change the allowlist or the session grants: it runs `harpocrates allow`, or
-    mentions the ~/.harpocrates directory (also in a quoted, escaped, braced or globbed spelling), or runs with
-    that directory as its working directory (cwd), in anything but a provably read-only command."""
+    mentions the ~/.harpo or ~/.harpocrates directory (also in a quoted, escaped, braced or globbed spelling), or
+    runs with either as its working directory (cwd), in anything but a provably read-only command."""
     norm = _normalise(command)
     if _ALLOW_CMD.search(command) or _ALLOW_CMD.search(norm) or _edits_module(command) or _edits_module(norm):
         return True

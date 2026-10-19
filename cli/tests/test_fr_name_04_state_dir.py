@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from Harpocrates import allowlist, envvars, grants, install, paths
+from Harpocrates import allowlist, envvars, grants, hooks, install, paths
 
 SID = "sess-1"
 CANARY_PATH = "/proj/canary-0123456789/app.py"  # in the fixture files, so a leak into a message is visible
@@ -325,5 +325,162 @@ def test_fr_name_04_env_precedence_in_the_rust_backend(monkeypatch, tmp_path: Pa
     monkeypatch.setenv("HARPO_RUST_TIMEOUT_SECONDS", "soon")
     with pytest.raises(RustScannerError, match="HARPO_RUST_TIMEOUT_SECONDS"):
         RustScannerBackend._directory_timeout()
+
+
+# ---- part 3: the agent cannot edit either directory ---------------------------------------------------------------
+
+def _bash(cmd: str, cwd: Path, capsys) -> tuple[int, str]:
+    event = {"tool_name": "Bash", "cwd": str(cwd), "permission_mode": "default", "tool_input": {"command": cmd}}
+    code = hooks.decide(json.dumps(event), ask=True)
+    out = capsys.readouterr().out
+    return code, (json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else "")
+
+
+# `{d}` is the folder name (.harpo or .harpocrates), `{n}` the same without the dot. The glob and obfuscated cases are
+# built from pieces, as in test_hooks_allowlist.py, so no spelling of the path sits in one literal.
+_WRITES = [
+    "echo /tmp >> ~/{d}/allow",
+    "bash -c 'printf x > $HOME/{d}/allow'",
+    "cd ~/{d} && echo /x >> allow",
+    "cd ~; cd {d}; echo / >> allow",
+    "D=~/{d}; echo / >> $D/allow",
+    "rm -rf ~/{d}",
+    "mv ~/{d} /tmp/x",
+    "ln -s /tmp/evil ~/{d}",
+    "echo '{}' > ~/{d}/grants/s9.json",
+    "tee -a ~/{d}/allow",
+    "cp evil ~/{d}/allow",
+    "rm ~/{d}/allow.log",
+    "rm ~/{d}/install.json",
+    "sed -i '' 1d ~/{d}/allow",
+    "sort -o ~/{d}/allow x",
+    "uniq x ~/{d}/allow",
+    "find ~/{d} -delete",
+    "python -c \"open('$HOME/{d}/allow','a')\"",
+    "ls ~/{d}; rm ~/{d}/allow",
+    "ls $(rm ~/{d}/allow)",
+    "ls `rm ~/{d}/allow`",
+    "cat <(cp evil ~/{d}/allow)",
+    "cat <<EOF ~/{d}/allow\nrm ~/{d}/allow\nEOF",
+    "echo 'unbalanced ~/{d}",
+    "echo /x | sed -n 'w/Users/me/{d}/allow'",
+]
+_GLOBS = [
+    "cp evil ~/.*/allow",
+    "cp evil ~/.h*/allow",
+    "cp evil ~/.harp*/allow",
+    "cp evil ~/.harpo*/allow",
+    "cp evil ~/.harp{o,ocrates}/allow",
+    "cp evil ~/.harp{o,}/allow",
+    "cp evil ~/.{harpo,x}/allow",
+    "cp evil ~/.{harpocrates,x}/allow",
+    "cp evil $HOME/.[h]arpo/allow",
+    "cp evil $HOME/.[h]arpocrates/allow",
+    "cp evil ~/.?arpo/allow",
+    "cp evil ~/.?arpocrates/allow",
+    "mv x ~/.h????/allow",
+    "mv x ~/.h??????????/allow",
+]
+_NO_DOT = [  # the folder by name with no dot before it: only the `allow` / `grants` alternative of the guard sees it
+    "cp evil /srv/{n}/grants/s9.json",
+    "rm -rf /srv/{n}/grants",
+    "echo '{}' > /srv/{n}/grants/s9.json",
+    "tee /Users/u/{n}/grants/s9.json",
+    "tee /Users/u/{n}/allow",
+    "cp evil $HOME/*{n1}/grants/s9.json",
+    "cp evil ~/?{n1}/grants/s9.json",
+    "shopt -s dotglob; rm ~/*{n1}/grants/s9.json",
+    "echo '{}' > ~/.h\\{n1}/grants/s9.json",
+    "echo '{}' > ~/.ha''{n2}/grants/s9.json",
+    "echo '{}' > ~/{.,}{n}/grants/s9.json",
+    "echo '{}' > $'~/\\056{n}/grants/s9.json'",
+]
+_SPELLINGS = [  # the obfuscated spellings test_hooks_allowlist.py covers for .harpocrates, for either name
+    "echo / >> ~/.\\{n}/allow",
+    "cd ~ && echo / >> .h\\{n1}/allow",
+    'echo / >> ~/.ha""{n2}/allow',
+    "echo / >> ~/.ha''{n2}/allow",
+    "echo / >> ~/.'harp'{n4}/allow",
+    "echo / >> ~/{.h,x}{n1}/allow",
+    "echo / >> ~/{.,}{n}/allow",
+    "echo / >> $'\\056{n}'/allow",
+    "echo / >> $'\\x2e{n}'/allow",
+    "shopt -s dotglob; echo / >> ~/*{n1}/allow",
+    "cp x ~/?{n1}/allow",
+    "cp x ~/[.]{n}/allow",
+    "echo / >> ~/{.,}{n}",
+]
+_READS = [
+    "ls ~/{d}",
+    "cat ~/{d}/allow.log",
+    "wc -l ~/{d}/allow | head",
+    "grep -n tests ~/{d}/allow",
+    "cat < ~/{d}/allow",
+    "cd ~/{d} && ls -l | wc -l",
+    "ls ~/{d}/grants",
+    "ls ~/.ha''{n2}",
+]
+
+
+def _expand(templates: list[str]) -> list[str]:
+    """Each template once per folder name; the `{n..}` pieces are the name without its dot, cut at 1, 2 and 4."""
+    out: list[str] = []
+    for d in BOTH:
+        n = d[1:]
+        for t in templates:
+            out.append(t.replace("{d}", d).replace("{n1}", n[1:]).replace("{n2}", n[2:])
+                       .replace("{n4}", n[4:]).replace("{n}", n))
+    return list(dict.fromkeys(out))  # the glob cases do not depend on the name: once each
+
+
+@pytest.mark.parametrize("cmd", _expand(_WRITES + _GLOBS + _NO_DOT + _SPELLINGS))
+def test_fr_name_04_agent_cannot_edit_either_dir(home: Path, capsys, cmd: str) -> None:
+    assert allowlist.touches(cmd), cmd
+    assert _bash(cmd, home, capsys) == (0, "deny"), cmd
+
+
+@pytest.mark.parametrize("cmd", _expand(_READS))
+def test_fr_name_04_read_only_commands_on_either_dir_pass(home: Path, capsys, cmd: str) -> None:
+    assert not allowlist.touches(cmd), cmd
+    assert _bash(cmd, home, capsys)[1] != "deny", cmd
+
+
+@pytest.mark.parametrize("name", BOTH)
+def test_fr_name_04_working_directory_inside_either_dir(home: Path, name: str) -> None:
+    state = home / name
+    (state / "grants").mkdir(parents=True)
+    (home / "work").mkdir()
+    assert allowlist.touches("echo x >> allow", state) and allowlist.touches("tee s9.json", state / "grants")
+    assert not allowlist.touches("ls -la", state) and not allowlist.touches("cat allow", state)
+    assert not allowlist.touches("echo x >> allow", home / "work") and not allowlist.touches("echo x >> allow")
+    for sibling in (name + "-not", name + "x"):  # a sibling is not inside, whatever the shared prefix
+        (home / sibling).mkdir()
+        assert not allowlist.touches("echo x >> allow", home / sibling)
+
+
+def test_fr_name_04_working_directory_through_a_link_is_resolved(home: Path) -> None:
+    for name in BOTH:
+        (home / name).mkdir()
+    (home / "shortcut").symlink_to(home / ".harpo", target_is_directory=True)
+    (home / "shortcut2").symlink_to(home / ".harpocrates", target_is_directory=True)
+    assert allowlist.touches("echo x >> allow", home / "shortcut")
+    assert allowlist.touches("echo x >> allow", home / "shortcut2")
+
+
+@pytest.mark.parametrize("name", [".harpo", ".HARPO", ".Harpo", ".harpocrates", ".HarpoCrates"])
+def test_fr_name_04_name_rules_refuse_either_dir(home: Path, name: str) -> None:
+    with pytest.raises(ValueError) as exc:
+        allowlist.add_name(name, confirmed=True)
+    assert not isinstance(exc.value, allowlist.NeedsConfirmationError)
+    assert allowlist.names() == [] and _names(home) == []
+
+
+@pytest.mark.parametrize("name", BOTH)
+def test_fr_name_04_name_rules_never_cover_a_path_under_either_dir(home: Path, name: str) -> None:
+    inside = home / name / "graphify-out" / "k.py"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("x = 1\n")
+    allowlist.add_name("graphify-out")
+    assert not allowlist.allowed(inside)
 
 
