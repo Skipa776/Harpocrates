@@ -182,3 +182,6 @@ cli/Harpocrates/training/generators/generate_data.py
 cli/Harpocrates/training/train_model.py
 cli/tests/test_data_generator.py
 cli/tests/test_ml_shortcuts.py
+
+# Local plan for Harpo milestones, never committed
+docs/DO_NOT_TRACK.md
