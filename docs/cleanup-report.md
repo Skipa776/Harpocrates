@@ -1,9 +1,9 @@
 # R0 cleanup report (FR-CLEAN-01)
 
-Oct 18, 2026 · branch `r0/cleanup` · status: **§1–§3 approved and executed. §4 still awaits decisions.**
+Oct 18, 2026 · branch `r0/cleanup` · status: **§1 file cuts, §2 and §3 executed. §1 items 9–11 and all of §4 are pending.**
 
 Executed:
-- **§1, items 1–14:** commits `23434e1`..`0edec5a`.
+- **§1, items 1–8 and 12–14 (file cuts):** commits `23434e1`..`0edec5a`. Items 9–11 are code and config edits, not files, and are still pending.
 - **§2, items 15–22:** commits `ee24aa2`..`de0f5cf`.
 
 Verification:
