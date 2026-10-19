@@ -160,6 +160,9 @@ def rows() -> list[Row]:
         # mid-conversation system messages
         Row("anthropic_system_role_text", "system-role", "text", "redact", lambda c: _req(_msgs(
             ("user", "hi"), ("system", [{"type": "text", "text": f"note {c}"}])))),
+        Row("anthropic_system_role_string", "system-role", "text", "redact", lambda c: _req(_msgs(
+            ("user", "hi"), ("system", f"# Environment\nYou have been invoked in the following environment: key {c}"))),
+            spec=False),
         Row("anthropic_tool_addition", "system-role", "tool_addition", "redact", lambda c: _req(_msgs(
             ("user", "hi"), ("system", [{"type": "tool_addition", "definition": {
                 "name": "lookup", "description": f"look up {c}", "input_schema": _schema("query")}}])))),
