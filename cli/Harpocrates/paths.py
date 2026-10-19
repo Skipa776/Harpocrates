@@ -178,7 +178,8 @@ def state_dir() -> Path:
     Parameters:
         None: the home folder is looked up on every call, so a test can move HOME.
     Output: The folder's path (it may not exist yet; writers create it). Side effects: the first call in a process may
-        copy ~/.harpocrates to ~/.harpo; a refusal or failure prints one line to stderr. Never raises.
+        copy ~/.harpocrates to ~/.harpo; a refusal or failure prints one line to stderr. Raises nothing of its own;
+        only Path.home() can raise (RuntimeError), when no home folder can be determined.
     """
     home = Path.home()
     new, old = home / NEW_DIR, home / OLD_DIR
