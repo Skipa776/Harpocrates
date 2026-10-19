@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import shlex
 import shutil
+import site
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -141,20 +142,61 @@ def tier_report(found: dict[str, bool]) -> str:
     return "\n".join(lines)
 
 
+def _in_user_site() -> bool:
+    """
+    Description: Whether this copy of Harpocrates is installed in the user's site-packages (`pip install --user`).
+    Parameters: None
+    Output: True when this module's file lies under site.getusersitepackages(), otherwise False, also when either path
+        cannot be resolved. No side effects.
+    """
+    try:
+        return Path(__file__).resolve().is_relative_to(Path(site.getusersitepackages()).resolve())
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _choose_flag(user_site: bool, has_p: bool) -> str:
+    """
+    Description: Pick the interpreter flags for the generated commands (see python_flag).
+    Parameters:
+        user_site: whether the package lives in the user site-packages.
+        has_p: whether this Python has the -P flag (3.11 and later).
+    Output: "-E -P" for a user-site install on a Python with -P, otherwise "-I". No side effects.
+    """
+    return "-E -P" if user_site and has_p else "-I"
+
+
 def python_flag() -> str:
     """
-    Description: Select an interpreter flag that prevents an agent-controlled working directory from
-        shadowing Harpocrates.
+    Description: Select the interpreter flags every generated `python -m Harpocrates...` command carries, so neither an
+        agent-controlled working directory nor an environment variable can put code in front of Harpocrates (SEC-08).
     Parameters: None
-    Output: The -P flag on Python 3.11+, otherwise -I; no process is launched.
-    Notes: The interpreter flag every generated `python -m Harpocrates...` command carries. `python
-        -m` puts the current directory first on sys.path, and the current directory is the
+    Output: "-I" (isolated mode), or "-E -P" when the package is installed in the user site-packages and this Python is
+        3.11 or later; a string that may hold two flags separated by a space (python_flags() splits it). No process
+        is launched.
+    Notes: `python -m` puts the current directory first on sys.path, and the current directory is the
         agent-controlled project, so a planted `Harpocrates/` package there would run in place of
-        ours (a hook that exits 0 is an allow). -P (3.11+) drops only that entry and keeps user
-        site-packages; older Pythons have no -P, so -I (isolated mode, which also drops the user
-        site and PYTHON* variables) is the closest.
+        ours (a hook that exits 0 is an allow). PYTHONPATH, PYTHONSTARTUP, PYTHONHOME and the user site
+        are the same kind of door, and a project's settings can set environment variables. -I (isolated
+        mode: -E -P -s) closes all of them, and is the choice for every install that keeps the package in
+        the interpreter's own site-packages. A `pip install --user` install needs the user site, which -I
+        drops, so there -E (ignore PYTHON* variables) and -P (3.11+: drop only the cwd entry) are used instead;
+        older Pythons have no -P and get -I, so a user-site install is not found there and the hook
+        fails closed (exit 2). RESIDUAL RISK of "-E -P": the user site is found from $HOME, so a hook whose
+        $HOME an agent controls would load a package planted in that user site. Install into a virtual
+        environment (or the interpreter's own site-packages) to avoid it; docs/threat-model.md lists it.
     """
-    return "-P" if sys.version_info >= (3, 11) else "-I"
+    return _choose_flag(_in_user_site(), sys.version_info >= (3, 11))
+
+
+def python_flags() -> list[str]:
+    """
+    Description: The interpreter flags of python_flag() as separate command-line arguments.
+    Parameters: None
+    Output: ["-I"] or ["-E", "-P"]; the list to put before `-m` when building an argv or a shell command. No process
+        is launched.
+    """
+    return python_flag().split()
 
 
 def mcp_server() -> tuple[str, list[str]]:
@@ -167,7 +209,7 @@ def mcp_server() -> tuple[str, list[str]]:
     Notes: This interpreter running the MCP server, so it works from any venv and from IDE-launched
         agents.
     """
-    return sys.executable, [python_flag(), "-m", "Harpocrates.mcp.server"]
+    return sys.executable, [*python_flags(), "-m", "Harpocrates.mcp.server"]
 
 
 def guarded_hook(python: str, *flags: str) -> str:
@@ -185,7 +227,7 @@ def guarded_hook(python: str, *flags: str) -> str:
         runs the string in a shell or splits it into argv; the python path travels as $0, so spaces
         and quotes in it are safe. --post hooks stay bare: they must never block.
     """
-    script = " ".join(['"$0"', python_flag(), "-m", "Harpocrates.hooks", *flags, "||", "exit", "2"])
+    script = " ".join(['"$0"', *python_flags(), "-m", "Harpocrates.hooks", *flags, "||", "exit", "2"])
     return shlex.join(["sh", "-c", script, python])
 
 
@@ -207,7 +249,7 @@ def claude_code_settings() -> dict:
     # --ask: an edit of such a file prompts the user instead of being refused (reads are always refused, FR-READ-06).
     hook = {"type": "command", "command": guarded_hook(command, "--ask")}
     # --post records a Yes: PostToolUse/PostToolUseFailure fire only for an edit that ran, SessionEnd drops the grants.
-    post = {"type": "command", "command": shlex.join([command, python_flag(), "-m", "Harpocrates.hooks", "--post"])}
+    post = {"type": "command", "command": shlex.join([command, *python_flags(), "-m", "Harpocrates.hooks", "--post"])}
     edits = "Edit|MultiEdit|Write|NotebookEdit"
     return {"permissions": {"deny": deny, "allow": list(MCP_TOOLS)},
             "hooks": {"PreToolUse": [{"matcher": f"Read|Grep|Bash|{edits}", "hooks": [hook]}],

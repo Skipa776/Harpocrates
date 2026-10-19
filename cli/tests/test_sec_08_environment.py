@@ -132,3 +132,4 @@ def test_sec_08_the_rust_scanner_path_expands_tilde_with_the_password_home(homes
     monkeypatch.delenv("HARPOCRATES_RUST_SCANNER", raising=False)
     monkeypatch.setenv("HARPO_RUST_SCANNER", "~/scanner")
     assert RustScannerBackend.discover(required=True).executable == exe
+

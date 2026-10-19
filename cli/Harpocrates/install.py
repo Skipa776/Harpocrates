@@ -850,9 +850,10 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
     sections = {t: new_record[t] for t in TARGETS if isinstance(new_record.get(t), dict)}
     # "python" is the interpreter that runs the hooks. The Claude Code prompt plugin runs the CLI through it
     # (never a bare `harpocrates` from PATH). Records from before it existed stay valid without it.
-    # "python_args" are the flags it runs with (harness.python_flag: drop the agent-controlled cwd from sys.path).
+    # "python_args" are the flags it runs with (harness.python_flags: drop the agent-controlled cwd from sys.path and
+    # ignore PYTHON* variables), one list item per flag.
     python = record.get("python") if remove else sys.executable
-    python_args = record.get("python_args") if remove else [harness.python_flag()]
+    python_args = record.get("python_args") if remove else harness.python_flags()
     extra: dict = {}
     if isinstance(python, str) and python:
         extra["python"] = python

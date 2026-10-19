@@ -19,6 +19,7 @@ from Harpocrates.harness import (
     detect,
     mcp_server,
     python_flag,
+    python_flags,
     tier_report,
 )
 
@@ -79,7 +80,7 @@ def test_fr_read_03_claude_code_denies_every_sensitive_path() -> None:
         sys.executable, f'"$0" {flag} -m Harpocrates.hooks --ask || exit 2')
     assert "timeout" not in entry["hooks"][0]  # a timed-out hook allows the call; keep Claude's 600 s
     command, args = mcp_server()
-    assert args == [flag, "-m", "Harpocrates.mcp.server"] and Path(command).exists()
+    assert args == [*python_flags(), "-m", "Harpocrates.mcp.server"] and Path(command).exists()
 
 
 def test_fr_read_06_claude_code_settings_register_the_post_hooks() -> None:
@@ -105,7 +106,7 @@ def test_fr_read_03_codex_denies_every_sensitive_path() -> None:
     roots = profile["filesystem"][":workspace_roots"]
     for name in SENSITIVE_FILES:
         assert roots[f"**/{name}"] == "deny", name
-    assert cfg["mcp_servers"]["harpocrates"]["args"] == [python_flag(), "-m", "Harpocrates.mcp.server"]
+    assert cfg["mcp_servers"]["harpocrates"]["args"] == [*python_flags(), "-m", "Harpocrates.mcp.server"]
     (entry,) = cfg["hooks"]["PreToolUse"]
     assert entry["matcher"] == "^Bash$"
     assert _guarded_parts(entry["hooks"][0]["command"]) == (

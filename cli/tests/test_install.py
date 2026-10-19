@@ -448,7 +448,7 @@ def test_fr_install_01_record_names_the_interpreter_and_old_records_stay_valid(h
     install.install_harnesses(["claude-code", "codex"])
     path = home / ".harpo" / "install.json"
     assert record(home)["python"] == sys.executable and Path(record(home)["python"]).is_absolute()
-    assert record(home)["python_args"] == [harness.python_flag()]
+    assert record(home)["python_args"] == harness.python_flags()
     assert record(home)["version"] == 1
     old = {k: v for k, v in record(home).items() if k not in ("python", "python_args")}  # from before they existed
     path.write_text(json.dumps(old, indent=2) + "\n")

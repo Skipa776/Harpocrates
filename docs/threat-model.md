@@ -92,6 +92,14 @@ None of these channels is meant to carry prompt content, but Guard can't verify 
 
 **What helps:** approve edits only for files you accept sending to the provider, and keep the allowlist short.
 
+## Residual risk 5: the hook's own interpreter and the user site
+
+**Risk.** The hook is a Python process the harness starts, and a project's settings can set the environment variables it starts with (SEC-08). Harpo does not trust any of them for anything security-relevant. The state folder (`~/.harpo`) is found from the password database, not from `$HOME`, and the generated hook and MCP commands run the interpreter with `-I` (isolated mode), which ignores `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, the user site-packages and the working directory. A planted `Harpocrates` package therefore never runs in the hook.
+
+**Why Guard can't fully fix it.** An install into the user site-packages (`pip install --user`) needs that site, which `-I` drops. For that one case the commands use `-E -P` instead (3.11 and later): `-E` ignores the `PYTHON*` variables and `-P` drops the working directory, but Python still finds the user site from `$HOME`. If an agent can set `HOME` for the hook, it can point it at a folder with a planted user site and its own `Harpocrates`. On Python 3.10 there is no `-P`, so a user-site install gets `-I`, is not found, and the hook fails closed (exit 2).
+
+**What helps:** install into a virtual environment or the interpreter's own site-packages (the default for `pipx` and `python -m venv`), where the commands use `-I` and nothing in the environment can reach the hook.
+
 ## Also out of scope
 
 These are listed in the design doc's non-goals:

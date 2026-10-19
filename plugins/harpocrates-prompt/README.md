@@ -81,9 +81,9 @@ schedule) gets "Only you can change the Harpocrates allowlist: type /harpocrates
 in the chat box." and nothing is changed. Help and the listing change nothing,
 so they run for any origin. The plugin never writes the allowlist itself: it
 runs the CLI with the Python interpreter that `harpocrates install` recorded
-(`"python"` and `"python_args"`, `-P` or `-I`, in the install record under
-`~/.harpocrates`), as `<python> <flag> -m Harpocrates.cli allow ...` (the flag
-keeps the project folder off the import path), started by argument list and not
+(`"python"` and `"python_args"`, `-I`, `-P`, or `-E -P`, in the install record under
+`~/.harpocrates`), as `<python> <flag> -m Harpocrates.cli allow ...` (the flags
+keep the project folder and `PYTHONPATH` off the import path), started by argument list and not
 through a shell, and shows its answer as plain text. It never looks for
 `harpocrates` on your `PATH`, so a look-alike earlier in `PATH` or in a project
 cannot run. With no record, or no absolute `python` in it, it replies "Run

@@ -336,6 +336,9 @@ const RECORDS: [string, string | null][] = [
   ['python_args with another flag', JSON.stringify({ python: PY, python_args: ['-P', '-c'] })],
   ['python_args that import', JSON.stringify({ python: PY, python_args: ['-m', 'evil'] })],
   ['python_args with a non-string', JSON.stringify({ python: PY, python_args: [1] })],
+  ['python_args -E alone, which keeps the cwd on sys.path', JSON.stringify({ python: PY, python_args: ['-E'] })],
+  ['python_args -E twice', JSON.stringify({ python: PY, python_args: ['-E', '-E'] })],
+  ['python_args -E with another flag', JSON.stringify({ python: PY, python_args: ['-E', '-P', '-c'] })],
   ['python_args null', JSON.stringify({ python: PY, python_args: null })],
   ['a control character', JSON.stringify({ python: '/usr/bin/py\nthon' })],
 ]
@@ -360,10 +363,13 @@ test('a recorded absolute python runs with its recorded flags, -I when the recor
   await say($, 'allow /y')
   w.setRecord(JSON.stringify({ python: '/p/python', python_args: ['-P'] }))
   await say($, 'allow /z')
+  w.setRecord(JSON.stringify({ python: '/u/python', python_args: ['-E', '-P'] })) // an install in the user site (SEC-08)
+  await say($, 'allow /w')
   expect(w.ran).toEqual([
     ['/opt/py 3/bin/python', '-I', '-m', 'Harpocrates.cli', 'allow', '--json', '/x'],
     ['C:\\Python\\python.exe', '-I', '-m', 'Harpocrates.cli', 'allow', '--json', '/y'],
     ['/p/python', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/z'],
+    ['/u/python', '-E', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/w'],
   ])
 })
 

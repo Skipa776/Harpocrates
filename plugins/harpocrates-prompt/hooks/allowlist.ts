@@ -152,17 +152,22 @@ export type Interpreter = { readonly python: string; readonly args: readonly str
 /**
  * `python -m` puts the working directory (the agent-controlled project) first
  * on sys.path, so a planted Harpocrates package there would run instead of the
- * real one. Only these flags, which drop it, are accepted from the record:
- * -P (3.11 and later) and -I (isolated mode).
+ * real one, and so would one on PYTHONPATH (SEC-08). Only these flags are
+ * accepted from the record: -I (isolated mode), -P (3.11 and later: drops the
+ * working directory) and -E (ignores PYTHON* variables, written with -P for an
+ * install in the user site). -E alone leaves the working directory on sys.path,
+ * so a list must hold -I or -P.
  */
-const SAFE_FLAGS: readonly string[] = ['-I', '-P']
+const SAFE_FLAGS: readonly string[] = ['-E', '-I', '-P']
+const DROPS_CWD: readonly string[] = ['-I', '-P']
 
 /**
  * The interpreter the install record names (`"python"`) and the flags it runs
  * with (`"python_args"`, `["-I"]` when the record has none). The path must be
  * absolute with no control characters; the flags must be a non-empty list of
- * -I or -P. Null for anything else (no such key, a relative or bare name,
- * other flags, garbage). The plugin never falls back to PATH.
+ * -I, -P or -E that holds -I or -P. Null for anything else (no such key, a
+ * relative or bare name, other flags, garbage). The plugin never falls back to
+ * PATH.
  */
 export function recordedInterpreter(text: string): Interpreter | null {
   let raw: unknown
@@ -178,6 +183,7 @@ export function recordedInterpreter(text: string): Interpreter | null {
   if (flags === undefined) return { python, args: ['-I'] }
   if (!Array.isArray(flags) || flags.length === 0) return null
   if (!flags.every((f: unknown) => typeof f === 'string' && SAFE_FLAGS.includes(f))) return null
+  if (!flags.some(f => DROPS_CWD.includes(f as string))) return null
 
   return { python, args: flags as string[] }
 }
