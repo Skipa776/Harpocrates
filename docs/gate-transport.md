@@ -134,7 +134,7 @@ Switches: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `skipWebFetchPrefligh
 
 Doctor reports bypass as a failure with the agent name and the check that failed. Claude Code and Codex that are not running are skipped, not passed.
 
-## Open questions for Josh
+## Open questions for Josh (decided Oct 19, 2026: see Decisions in `docs/gate-parser-spec.md`)
 
 1. **WebSocket scope.** Proposed: not in v1; route A avoids it; route B refuses the upgrade and relies on Codex's HTTP fallback. If ChatGPT-login users need route B, WebSocket moves into M2. Accept?
 2. **Gate token.** SEC-03 says per session. Claude Code's `env` block and Codex's `http_headers` are static files, and IDE-launched agents do not see shell variables (FR-INSTALL-06). Options: rewrite both configs on every `harpo guard up` (proposed), or a stable per-install token stored `0600`. The token stops other users and browser pages, not other processes of the same user, who can read the same files.

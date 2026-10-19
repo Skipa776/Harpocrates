@@ -6,6 +6,26 @@ Formats in v1: Anthropic Messages (`POST /v1/messages`, Claude Code) and OpenAI 
 
 All external facts cite a source from the table at the end, each checked 2026-10-19. A claim is **VERIFIED** (source named) or **TO VERIFY** (what will confirm it). Both lists are collected in the last section.
 
+## Decisions (approved by Josh, Oct 19, 2026)
+
+These settle the open questions below and bind the implementation.
+
+1. **`previous_response_id`:** block in v1. Route A (custom provider) is not expected to send it (V5). A relay that tees response ids can come later.
+2. **JSON-in-string tool arguments:** parse, redact string leaves, splice the redacted strings back into the raw bytes. A clean body is forwarded byte-identical. A secret in a free-form object key blocks the request.
+3. **WebSocket:** not in v1. The gate refuses an upgrade with 426, and Codex falls back to HTTP.
+4. **A secret in provider-signed readable text** (`reasoning.summary`, `web_search_result` title or URL, `cited_text`): block, until a live test (V2) shows the provider accepts a rewrite.
+5. **FR-GATE-10:** drop every thinking and redacted-thinking block from the request instead of blocking it. The API allows this, nothing unredacted is forwarded, and the session survives. `design.md` FR-GATE-10 is reworded to match.
+6. **A credential the user configured for a provider-hosted MCP connector** (`authorization_token` and similar): pass, with a logged warning that names the field, never the value.
+7. **Session key:** in memory only (SEC-02). A gate restart breaks prompt caching and thinking for sessions already open. That is accepted and documented.
+8. **Redacting a newly found secret in earlier turns:** off in v1, because it would change bytes the provider already saw.
+9. **Body cap:** 64 MiB, applied after decompression. v1 buffers the whole body before forwarding.
+10. **Block response:** HTTP 400 in the provider's own error shape. The message avoids the phrases Claude Code uses to trigger its own recovery ("thinking", "signature", "bound to a different conversation", "Extra inputs are not permitted", "prompt is too long").
+11. **Gate token (SEC-03):** a new token on every `harpo guard up`, written into `ANTHROPIC_CUSTOM_HEADERS` and Codex `http_headers`.
+12. **Non-auth header values:** scanned. A finding blocks the request.
+13. **Unknown routes:** block (fail closed). The Codex features this disables are listed in `docs/gate-transport.md`.
+14. **`design.md` Codex row:** corrected (zstd and WebSocket apply only to the built-in OpenAI provider).
+15. **Strict parsing:** reject duplicate JSON keys, invalid UTF-8 and nesting deeper than 128.
+
 ## Goal and the one rule
 
 Every string the model will see goes through the scanner. Anything found is replaced by a placeholder `<<HARPO:type:xxxx>>`. Anything the gate cannot read or cannot rewrite is either passed untouched (when it holds no readable text) or blocks the request. Nothing is ever silently skipped.
@@ -219,7 +239,7 @@ Audit entries (FR-LOG-01) name the block type and field path (`messages[7].conte
 - Cross-cutting tests are in the invariants table. Add a fuzz target for the tree parser under SEC-04 in M3.
 - The corpus for these tests is captured in G2 from scripted agent sessions against the mock server (V6). Until then the tests use hand-written fixtures built from the shapes above.
 
-## Open questions for Josh
+## Open questions for Josh (decided, see Decisions at the top)
 
 1. **`previous_response_id` policy.** Block unless the gate relayed that id (proposed), or pass with a warning? Proposed is safer and costs a stream tee.
 2. **OpenAI `compaction` items and Anthropic `encrypted_*` fields are ciphertext.** The gate cannot read what the provider already put there. Accept as a documented residual risk (proposed)?

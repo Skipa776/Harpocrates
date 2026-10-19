@@ -150,7 +150,7 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | FR-GATE-07 | Defined policy for images and PDFs in requests: block, pass with warning, or OCR; default is pass with warning in v1 | Policy documented and tested | M2 |
 | FR-GATE-08 | User-approved allowlist by path or secret hash, every use logged | Allowlisted secret passes; log entry exists | M3 |
 | FR-GATE-09 | Confirm the transport each agent uses (HTTP, server-sent events, WebSocket) and support it | Transport notes in `docs/`; both agents work | M2 |
-| FR-GATE-10 | Content the gate can't rewrite, such as signed thinking blocks: if it contains a detected secret, block the request and tell the user to start a new session | Secret planted in a signed block triggers a block with a clear message | M2 |
+| FR-GATE-10 | Content the gate can't rewrite. Signed thinking and redacted-thinking blocks are dropped from every request, which the API allows, so nothing unredacted in them is forwarded and the session survives. Other unrewritable content (encrypted reasoning, provider-signed readable text) that holds a detected secret blocks the request with a clear message. Trade-off (Josh, Oct 19, 2026): dropping thinking costs the model its earlier reasoning in later turns; blocking would end the session | A secret planted in a signed thinking block never reaches the mock provider and the request still succeeds; a secret in encrypted reasoning triggers a block with a clear message | M2 |
 
 **Commit gate, logging, and setup**
 
@@ -415,7 +415,7 @@ Not every coding harness can be routed through a local proxy, so Harpocrates sta
 | Harness | Tier | Request format | How traffic reaches the gate | Known issues |
 | --- | --- | --- | --- | --- |
 | Claude Code | Full | Anthropic Messages | [`ANTHROPIC_BASE_URL`](https://code.claude.com/docs/en/llm-gateway) in Claude Code settings | Subscription logins still work; the gate must forward the OAuth `anthropic-beta` header untouched |
-| Codex CLI | Full | OpenAI Responses | Custom provider in user-level `~/.codex/config.toml`; [project-level provider keys are ignored](https://learn.chatgpt.com/codex/config-file/config-reference) | Request bodies are zstd-compressed by default; WebSocket mode exists |
+| Codex CLI | Full | OpenAI Responses | Custom provider in user-level `~/.codex/config.toml`; [project-level provider keys are ignored](https://learn.chatgpt.com/codex/config-file/config-reference) | zstd request bodies and WebSocket transport apply only to the built-in `OpenAI` provider. A custom provider with `supports_websockets` off (the route Harpo uses) gets plain HTTP with SSE, no compression and full history every turn (`docs/gate-transport.md`) |
 | OpenCode | Full, per provider | Varies by provider | Provider `baseURL` in [opencode.json](https://opencode.ai/docs/config/) | A repo's own `opencode.json` can override global config |
 | GitHub Copilot, own API key | Partial | OpenAI Chat Completions | [Custom endpoint for chat and agent](https://developer.konghq.com/cookbooks/github-copilot-byok/) | Inline completions and Copilot-hosted models never pass through the gate |
 | Cursor | Read tool only | n/a | [Base URL override covers only the chat panel](https://docs.orq.ai/ai-studio/integrations/code-assistants/cursor) | Agent, Composer, and tab completion stay on Cursor's backend; possibly routed server-side (unverified) |
