@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from Harpocrates import harness
+from Harpocrates.paths import state_dir
 
 try:  # stdlib from 3.11; the package supports 3.10
     import tomllib
@@ -44,7 +45,7 @@ HOOKS_TRUST_NOTE = (
 
 
 NO_RECORD_NOTE = (
-    "No install record (~/.harpocrates/install.json): removed only Harpocrates' marked blocks and hook commands. "
+    "No install record (~/.harpo/install.json): removed only Harpocrates' marked blocks and hook commands. "
     "Permission rules and the MCP server are left, since they may be yours; drop them by hand if not."
 )
 
@@ -490,7 +491,7 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
     """The install record (RECORD) says what install added, so uninstall removes only that and leaves the
     user's own identical rules, hooks and MCP registration. It is written last, after the files it describes."""
     home = Path.home()
-    rpath = home / ".harpocrates" / "install.json"
+    rpath = state_dir() / "install.json"
     rtext, record, problem = _load_record(rpath)
     reports = [Report(t) for t in targets]
     if problem and not remove:  # without it a later uninstall couldn't tell ours from theirs

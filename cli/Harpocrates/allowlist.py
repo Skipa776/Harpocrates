@@ -1,6 +1,6 @@
 """User-approved paths the read hook lets through even when they hold secrets (FR-READ-05).
 
-One entry per line in ~/.harpocrates/allow: an absolute path (a directory covers everything under it), or
+One entry per line in ~/.harpo/allow (the state directory, see paths.py): an absolute path (a directory covers everything under it), or
 `name:NAME`, which covers any path whose resolved real path has a component equal to NAME (exact, case-sensitive),
 so `name:graphify-out` covers that folder in every project. `#` starts a comment. Everything is compared after
 resolving symlinks: a link inside an allowed folder that points elsewhere is still checked, and a link NAMED like a
@@ -31,9 +31,32 @@ from pathlib import Path
 from typing import Optional
 
 from Harpocrates.harness import SENSITIVE_FILES, SENSITIVE_HOME_DIRS
+from Harpocrates.paths import state_dir
 
-ALLOW_FILE = Path.home() / ".harpocrates" / "allow"
-LOG_FILE = Path.home() / ".harpocrates" / "allow.log"
+# None: the file sits in the state directory (paths.state_dir(), looked up per call so a test can move HOME). A test
+# can set a Path here to point the module elsewhere.
+ALLOW_FILE: Optional[Path] = None
+LOG_FILE: Optional[Path] = None
+
+
+def allow_file() -> Path:
+    """
+    Description: The allowlist file: ALLOW_FILE if a test set it, else allow in the state directory.
+    Parameters:
+        None: nothing is passed.
+    Output: The path (it may not exist). May run the one-time ~/.harpocrates to ~/.harpo copy (paths.state_dir).
+    """
+    return ALLOW_FILE if ALLOW_FILE is not None else state_dir() / "allow"
+
+
+def log_file() -> Path:
+    """
+    Description: The allow log: LOG_FILE if a test set it, else allow.log in the state directory.
+    Parameters:
+        None: nothing is passed.
+    Output: The path (it may not exist). May run the one-time ~/.harpocrates to ~/.harpo copy (paths.state_dir).
+    """
+    return LOG_FILE if LOG_FILE is not None else state_dir() / "allow.log"
 
 # ponytail: text match, best effort. A script that builds the path at runtime gets past it, but such a
 # script could just as well open the secret file itself, a gap the hook already has (hooks.py docstring).
@@ -81,20 +104,22 @@ class NeedsConfirmationError(ValueError):
 
 
 def _lines() -> list[str]:
-    if not ALLOW_FILE.exists():
+    path = allow_file()
+    if not path.exists():
         return []
-    return ALLOW_FILE.read_text(encoding="utf-8").splitlines()
+    return path.read_text(encoding="utf-8").splitlines()
 
 
 def _write(lines: list[str]) -> None:
     """Atomic rewrite: temp file in the same folder (mkstemp gives 0o600), then os.replace. A reader never sees
     a half-written list, and a file hand-edited without a final newline can't glue the next entry onto its line."""
-    ALLOW_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=ALLOW_FILE.parent, prefix=".allow.")
+    target = allow_file()
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".allow.")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write("".join(f"{line}\n" for line in lines))
-        os.replace(tmp, ALLOW_FILE)
+        os.replace(tmp, target)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
@@ -261,8 +286,9 @@ def remove_name(name: str) -> str:
 
 
 def log_use(path: Path, tool: str) -> None:
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with LOG_FILE.open("a", encoding="utf-8") as f:
+    target = log_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as f:
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\t{tool}\t{printable(str(path.resolve()))}\n")
 
 

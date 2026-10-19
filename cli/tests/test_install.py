@@ -368,10 +368,10 @@ def test_fr_install_01_writes_through_a_symlinked_settings_file(home: Path, fake
     assert "hooks" in json.loads(real.read_text())
 
 
-# --- install record (~/.harpocrates/install.json): uninstall removes only what install added ------------------------
+# --- install record (~/.harpo/install.json): uninstall removes only what install added ------------------------
 
 def record(home: Path) -> dict:
-    return json.loads((home / ".harpocrates" / "install.json").read_text())
+    return json.loads((home / ".harpo" / "install.json").read_text())
 
 
 def test_fr_install_01_uninstall_keeps_the_users_own_identical_rules_and_hooks(home: Path, fake_claude: Path) -> None:
@@ -389,14 +389,14 @@ def test_fr_install_01_uninstall_keeps_the_users_own_identical_rules_and_hooks(h
     assert "SessionEnd" not in rec["hooks"] and "PreToolUse" in rec["hooks"]
     install.uninstall_harnesses(["claude-code"])
     assert (home / ".claude" / "settings.json").read_bytes() == original
-    assert not (home / ".harpocrates" / "install.json").exists()
+    assert not (home / ".harpo" / "install.json").exists()
 
 
 def test_fr_install_01_record_is_private_and_stays_accurate_on_reinstall(
         home: Path, fake_claude: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write_json(home / ".claude" / "settings.json", {"permissions": {"deny": ["Read(//**/.env)"]}})
     install.install_harnesses(["claude-code", "codex"])
-    path = home / ".harpocrates" / "install.json"
+    path = home / ".harpo" / "install.json"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600 and stat.S_IMODE(path.parent.stat().st_mode) == 0o700
     first = path.read_bytes()
     assert record(home)["claude-code"]["mcp"] is True and "codex" in record(home)
@@ -424,7 +424,7 @@ def test_fr_install_01_record_notes_the_stale_hooks_install_replaced(home: Path,
 
 def test_fr_install_01_uninstall_without_a_record_leaves_rules_and_mcp(home: Path, fake_claude: Path) -> None:
     install.install_harnesses(["claude-code"])
-    (home / ".harpocrates" / "install.json").unlink()
+    (home / ".harpo" / "install.json").unlink()
     result = CliRunner().invoke(app, ["uninstall", "--claude-code"])
     assert result.exit_code == 0, result.output
     got = settings_of(home)
@@ -446,7 +446,7 @@ def test_fr_install_01_uninstall_leaves_an_mcp_server_the_user_registered(home: 
 
 def test_fr_install_01_record_names_the_interpreter_and_old_records_stay_valid(home: Path, fake_claude: Path) -> None:
     install.install_harnesses(["claude-code", "codex"])
-    path = home / ".harpocrates" / "install.json"
+    path = home / ".harpo" / "install.json"
     assert record(home)["python"] == sys.executable and Path(record(home)["python"]).is_absolute()
     assert record(home)["python_args"] == [harness.python_flag()]
     assert record(home)["version"] == 1
@@ -480,7 +480,7 @@ def test_sec_hijack_reinstall_replaces_hook_commands_and_mcp_registration_that_l
 
 def test_fr_install_01_unreadable_record_blocks_install_but_not_uninstall(home: Path) -> None:
     install.install_harnesses(["codex"])
-    (home / ".harpocrates" / "install.json").write_text("{nope")
+    (home / ".harpo" / "install.json").write_text("{nope")
     before = snap(home)
     report = install.install_harnesses(["codex"])
     assert report[0].refused and "install.json" in report[0].refused

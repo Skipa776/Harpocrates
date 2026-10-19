@@ -136,8 +136,15 @@ export function absolutePath(path: string, cwd: string | undefined, home: string
   return cwd ? `${trimEnd(cwd)}/${path}` : null
 }
 
-/** Where `install` records the interpreter that runs the hooks, under the home folder. */
-export const recordPath = (home: string): string => `${trimEnd(home)}/.harpocrates/install.json`
+/**
+ * Where `install` records the interpreter that runs the hooks, in order: the
+ * state folder `.harpo` (FR-NAME-04), then `.harpocrates`, which is where the
+ * record sits until the move happens (or when it was refused).
+ */
+export const recordPaths = (home: string): readonly string[] => [
+  `${trimEnd(home)}/.harpo/install.json`,
+  `${trimEnd(home)}/.harpocrates/install.json`,
+]
 
 export type Interpreter = { readonly python: string; readonly args: readonly string[] }
 

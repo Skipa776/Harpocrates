@@ -1,6 +1,6 @@
 """Per-session edit grants (FR-READ-06): the one path the user said Yes to for a built-in edit of a secret-bearing file.
 
-~/.harpocrates/grants/<session_id>.json:
+~/.harpo/grants/<session_id>.json (the state directory, see paths.py):
     {"pending": {"<tool_use_id>": {"path": "<realpath>", "tool": "Edit", "ts": 1760000000.0}},
      "granted": {"<realpath>": 1760000100.0}}
 The PreToolUse hook records a `pending` entry when it asks. `python -m Harpocrates.hooks --post` moves it to `granted`
@@ -11,7 +11,7 @@ one real path, never a directory, and is ignored after TTL (a stale file is prun
 Storage: the directory is 0o700 and each file 0o600, written to a temp file and renamed so a reader never sees half a
 file. A file that is missing, unreadable or corrupt means no grants (fail closed). Parallel hook processes may lose
 an update to each other (no lock); the cost is a repeated prompt, never a grant nobody gave.
-RESIDUAL: ~/.harpocrates is protected from the agent by the Edit deny rule and the Bash `touches` guard, but a script
+RESIDUAL: ~/.harpo and ~/.harpocrates are protected from the agent by the Edit deny rule and the Bash `touches` guard, but a script
 that writes the file itself could forge a grant. It is the same documented script gap as the allowlist (hooks.py
 docstring); the egress gate (M2) covers what reaches the provider either way.
 """
@@ -24,12 +24,14 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from Harpocrates.paths import state_dir
+
 TTL = 24 * 3600  # seconds a pending or granted entry stays valid
 _SESSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")  # becomes a file name: no separator, no leading dot
 
 
 def _dir() -> Path:
-    return Path.home() / ".harpocrates" / "grants"  # looked up per call so a test can move HOME
+    return state_dir() / "grants"  # looked up per call so a test can move HOME
 
 
 def _file(session_id: object) -> Optional[Path]:

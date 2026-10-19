@@ -481,7 +481,7 @@ def allow(
     def fail(message: str, code: int = 1, needs_confirmation: bool = False) -> NoReturn:
         done({"ok": False, "error": message, "needs_confirmation": needs_confirmation}, f"✗ {message}", code)
 
-    logged = f"Uses are logged to {allowlist.LOG_FILE}."
+    logged = f"Uses are logged to {allowlist.log_file()}."
     if path is not None and name is not None:
         fail("Give a PATH or --name NAME, not both.")
     if list_ or (path is None and name is None and not remove):
@@ -503,7 +503,7 @@ def allow(
             fail(str(exc))
         what = f"the name {value}" if kind == "name" else allowlist.printable(value)
         done({"ok": True, "action": "removed", "kind": kind, "value": value},
-             f"Removed {what}. Earlier uses stay in {allowlist.LOG_FILE}.")
+             f"Removed {what}. Earlier uses stay in {allowlist.log_file()}.")
 
     if name is not None:
         existed = name in allowlist.names()

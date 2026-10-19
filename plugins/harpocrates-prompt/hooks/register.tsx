@@ -20,7 +20,7 @@ import {
   listText,
   parseAllowArgs,
   readAnswer,
-  recordPath,
+  recordPaths,
   recordedInterpreter,
   unknownText,
   verbOf,
@@ -88,15 +88,25 @@ type Outcome = CliRun | string
 /**
  * The interpreter `harpocrates install` recorded, read from the person's
  * install record; null when there is no record, no usable "python" in it, or
- * it cannot be read. There is no fallback: a `harpocrates` found on PATH (or a
- * project-local shim) is never run.
+ * it cannot be read. The first record file that exists decides (the new state
+ * folder before the old one, so a stale old record never overrides it). There
+ * is no other fallback: a `harpocrates` found on PATH (or a project-local
+ * shim) is never run.
  */
 async function readInterpreter($: CommandApi): Promise<Interpreter | null> {
   try {
     const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
     if (!home) return null
-    const text = await $.fs.read(recordPath(home))
-    return typeof text === 'string' ? recordedInterpreter(text) : null
+    for (const path of recordPaths(home)) {
+      let text: unknown
+      try {
+        text = await $.fs.read(path)
+      } catch {
+        continue // no record in this folder: look in the next
+      }
+      return typeof text === 'string' ? recordedInterpreter(text) : null
+    }
+    return null
   } catch {
     return null
   }

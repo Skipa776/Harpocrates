@@ -37,11 +37,13 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
   let reply = first
   let answer = firstAnswer
   let record: string | null = RECORD
+  let recordAt: Record<string, string> | null = null
 
   // The install record: a missing file rejects the read, as the engine's does.
   on('fs.read', (_$, e) => {
     read.push(e.path)
-    return record === null ? { deny: 'ENOENT' } : { value: record }
+    const text = recordAt === null ? record : (recordAt[e.path] ?? null)
+    return text === null ? { deny: 'ENOENT' } : { value: text }
   })
   on('process.run', (_$, e) => {
     ran.push(e.argv)
@@ -69,6 +71,11 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
     /** What the install record holds (null: no file) from now on. */
     setRecord(text: string | null) {
       record = text
+      recordAt = null
+    },
+    /** What each folder's install record holds, by path (a path left out has no file) from now on. */
+    setRecordAt(files: Record<string, string>) {
+      recordAt = files
     },
     /** Changes what the CLI answers (and, optionally, what the person picks) from now on; clears the record. */
     use(next: (argv: readonly string[]) => Reply, nextAnswer: string | null = null) {
@@ -159,7 +166,7 @@ test('allow <path>: the CLI is called by argv, a relative path made absolute aga
   const w = world(on, () => ADDED)
   expect(await say($, 'allow .env')).toBe('Allowed /proj/app/.env.')
   expect(w.ran).toEqual([[...CLI, 'allow', '--json', '/proj/app/.env']])
-  expect(w.read).toEqual(['/home/me/.harpocrates/install.json'])
+  expect(w.read).toEqual(['/home/me/.harpo/install.json'])
 })
 
 test('allow <path>: absolute, ~ and quoted paths with spaces reach the CLI as one argument', async ($, on) => {
@@ -366,6 +373,35 @@ test('no bare harpocrates is ever run, whatever the record says', async ($, on) 
   }
   expect(w.ran.every(argv => argv[0] === '/venv/bin/python' || argv[0]?.startsWith('/'))).toBe(true)
   expect(w.ran.some(argv => argv[0] === 'harpocrates')).toBe(false)
+})
+
+test('the record is read from ~/.harpo first and from ~/.harpocrates when the new folder has none', async ($, on) => {
+  const w = world(on, () => ADDED)
+  const NEW = '/home/me/.harpo/install.json'
+  const OLD = '/home/me/.harpocrates/install.json'
+  const newer = JSON.stringify({ python: '/new/python', python_args: ['-P'] })
+  const older = JSON.stringify({ python: '/old/python', python_args: ['-P'] })
+
+  w.setRecordAt({ [NEW]: newer, [OLD]: older })
+  await say($, 'allow /a')
+  expect(w.read).toEqual([NEW])
+
+  w.read.length = 0
+  w.setRecordAt({ [OLD]: older })
+  await say($, 'allow /b')
+  expect(w.read).toEqual([NEW, OLD])
+
+  w.read.length = 0
+  w.setRecordAt({ [NEW]: 'not json {', [OLD]: older }) // the new record decides, even when it is unusable
+  expect(await say($, 'allow /c')).toBe(NOT_INSTALLED)
+  expect(w.read).toEqual([NEW])
+
+  w.setRecordAt({})
+  expect(await say($, 'allow /d')).toBe(NOT_INSTALLED)
+  expect(w.ran).toEqual([
+    ['/new/python', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/a'],
+    ['/old/python', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/b'],
+  ])
 })
 
 test('help and usage do not read the record', async ($, on) => {
