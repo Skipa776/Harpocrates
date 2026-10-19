@@ -1,12 +1,12 @@
 # harpocrates-prompt
 
-A Claude Code plugin that draws the Harpocrates "edit without secret
+A Claude Code plugin that draws the Harpo "edit without secret
 protection" question as a styled card.
 
-Harpocrates keeps files that contain secrets out of the model's context: Claude
-reads them through `mcp__harpocrates__safe_read`, which replaces each secret with
+Harpo keeps files that contain secrets out of the model's context: Claude
+reads them through `mcp__harpo__safe_read`, which replaces each secret with
 a placeholder. When Claude wants to **edit** such a file with its built-in tools,
-the Harpocrates hook asks first (reads of secret files never ask). This plugin
+the Harpo hook asks first (reads of secret files never ask). This plugin
 replaces the plain permission text with a card that says which file, which kinds
 of secret, and what allowing means, above a two-option choice.
 
@@ -32,12 +32,12 @@ behalf, so install only plugins you trust.
 
 ## Requirements
 
-The Harpocrates CLI hook must be installed, because it is what produces the
+The Harpo CLI hook must be installed, because it is what produces the
 verdict this plugin asks about. Install the CLI (it includes the read tool and the hooks):
 
 ```
 pip install "harpocrates[mcp]"
-harpocrates install
+harpo install
 ```
 
 Without it the plugin does nothing.
@@ -56,47 +56,47 @@ under the user scope in every session after.
 
 ## Manage the allowlist from the chat box
 
-The plugin adds a `/harpocrates` slash command that drives the Harpocrates CLI's
+The plugin adds a `/harpo` slash command that drives the Harpo CLI's
 allowlist (the paths and names Claude may read even when they hold secrets):
 
 ```
-Harpocrates allowlist (only you can change it; every use is logged)
-/harpocrates allow <path>            allow one file or folder
-/harpocrates allow --name <name>     allow a folder or file name in every project
-/harpocrates remove <path>           remove a path
-/harpocrates remove --name <name>    remove a name
-/harpocrates allowlist               show the list
+Harpo allowlist (only you can change it; every use is logged)
+/harpo allow <path>            allow one file or folder
+/harpo allow --name <name>     allow a folder or file name in every project
+/harpo remove <path>           remove a path
+/harpo remove --name <name>    remove a name
+/harpo allowlist               show the list
 ```
 
-`/harpocrates` alone (or `help`) prints this help. A relative path is resolved
+`/harpo` alone (or `help`) prints this help. A relative path is resolved
 against the session's folder and a leading `~` against your home folder. Put a
-path that contains spaces in quotes: `/harpocrates allow "My Project/.env"`.
+path that contains spaces in quotes: `/harpo allow "My Project/.env"`.
 `allow --name` for a broad name such as `src` asks you first ("Allow it
 everywhere" or "Cancel"); only that exact choice goes ahead.
 
 **Only you can change the allowlist.** `allow` and `remove` run only when you
 press Enter in the chat box. Any other origin (another plugin, the SDK, the
 Remote Control bridge, a run started by the model, a background task or a
-schedule) gets "Only you can change the Harpocrates allowlist: type /harpocrates
+schedule) gets "Only you can change the Harpo allowlist: type /harpo
 in the chat box." and nothing is changed. Help and the listing change nothing,
 so they run for any origin. The plugin never writes the allowlist itself: it
-runs the CLI with the Python interpreter that `harpocrates install` recorded
+runs the CLI with the Python interpreter that `harpo install` recorded
 (`"python"` and `"python_args"`, `-I`, `-P`, or `-E -P`, in the install record
 `~/.harpo/install.json`, or `~/.harpocrates/install.json` while `~/.harpo` does not exist; the folder must be a
 plain folder and the record a plain file, never a symlink, or the plugin reads nothing and does not fall back to the
 other folder), as `<python> <flag> -m Harpocrates.cli allow ...` (the flags
 keep the project folder and `PYTHONPATH` off the import path), started by argument list and not
 through a shell, and shows its answer as plain text. It never looks for
-`harpocrates` on your `PATH`, so a look-alike earlier in `PATH` or in a project
+`harpo` on your `PATH`, so a look-alike earlier in `PATH` or in a project
 cannot run. With no record, or no absolute `python` in it, it replies "Run
-`harpocrates install` first" and runs nothing. The answer is never put in front
+`harpo install` first" and runs nothing. The answer is never put in front
 of the model.
 
 ## What it looks like
 
 ```
 ╭──────────────────────────────────────────────────╮
-│ 🔒 Harpocrates — edit without secret protection  │
+│ 🔒 Harpo — edit without secret protection  │
 │ Edit  config/settings.py                         │
 │ Claude wants to edit config/settings.py, which   │
 │ contains secrets (api_token, password).          │

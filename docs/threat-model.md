@@ -1,6 +1,6 @@
 # Threat model and residual risks
 
-SEC-06. Harpocrates Guard protects one boundary: data leaving your machine toward the configured LLM provider. This page states what it doesn't protect, so nobody mistakes it for a sandbox. The full threat model, including the STRIDE analysis of Guard itself, is in the [design doc](design.md#threat-model).
+SEC-06. Harpo Guard protects one boundary: data leaving your machine toward the configured LLM provider. This page states what it doesn't protect, so nobody mistakes it for a sandbox. The full threat model, including the STRIDE analysis of Guard itself, is in the [design doc](design.md#threat-model).
 
 Facts about Claude Code and Codex were checked against their documentation on Sep 30, 2026, for Claude Code 2.1.286 and Codex CLI 0.159.2.
 
@@ -80,13 +80,13 @@ None of these channels is meant to carry prompt content, but Guard can't verify 
 
 **Edit grants.** On Claude Code, editing a file that holds a secret asks you first. If you approve, that file's current and future secrets go to the provider as-is for the rest of the session, through built-in Read and Edit of that one file.
 - A grant is recorded only after the edit actually ran (PostToolUse), so a declined prompt leaves nothing.
-- Grants live in `~/.harpocrates/grants/<session>.json`. They expire after 24 hours or when the session ends.
+- Grants live in `~/.harpo/grants/<session>.json`. They expire after 24 hours or when the session ends.
 - A grant never covers Bash. A shell command that would print the file is still refused.
 
-**Allowlist.** Paths in `~/.harpocrates/allow` (`harpocrates allow PATH`) pass the read hook even when they hold secrets, for every session until you remove them. Each pass is logged to `allow.log`, never the content. Name rules (`--name NAME`) apply in every project, so they are broader than a path: names of secret stores, credential folders and wildcards are refused, and broad names such as `src` need an explicit confirmation. Symlinks are resolved before matching, so a link named like a rule but pointing elsewhere does not match. In Claude Code, the `/harpocrates` slash command changes the list only when you type it in the chat box.
+**Allowlist.** Paths in `~/.harpo/allow` (`harpo allow PATH`) pass the read hook even when they hold secrets, for every session until you remove them. Each pass is logged to `allow.log`, never the content. Name rules (`--name NAME`) apply in every project, so they are broader than a path: names of secret stores, credential folders and wildcards are refused, and broad names such as `src` need an explicit confirmation. Symlinks are resolved before matching, so a link named like a rule but pointing elsewhere does not match. In Claude Code, the `/harpo` slash command changes the list only when you type it in the chat box.
 
 **Why Guard can't fully fix it.**
-- A script that writes the grant file or the allowlist itself can forge an entry. This is the same class as the script gap above. The hook refuses shell commands that visibly touch `~/.harpocrates`, and the settings deny Edit and Write there, but a script that builds the path at runtime gets past both.
+- A script that writes the grant file or the allowlist itself can forge an entry. This is the same class as the script gap above. The hook refuses shell commands that visibly touch `~/.harpo` or `~/.harpocrates`, and the settings deny Edit and Write there, but a script that builds the path at runtime gets past both.
 - A grant names a path, not a file's content. If the file is replaced during the session (for example by `git checkout`), the grant still applies to the new file.
 - Codex has no edit prompt. Its edits to such a file are refused, and you make them yourself.
 
@@ -94,9 +94,9 @@ None of these channels is meant to carry prompt content, but Guard can't verify 
 
 ## Residual risk 5: the hook's own interpreter and the user site
 
-**Risk.** The hook is a Python process the harness starts, and a project's settings can set the environment variables it starts with (SEC-08). Harpo does not trust any of them for anything security-relevant. The state folder (`~/.harpo`) is found from the password database, not from `$HOME`, and the generated hook and MCP commands run the interpreter with `-I` (isolated mode), which ignores `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, the user site-packages and the working directory. A planted `Harpocrates` package therefore never runs in the hook.
+**Risk.** The hook is a Python process the harness starts, and a project's settings can set the environment variables it starts with (SEC-08). Harpo does not trust any of them for anything security-relevant. The state folder (`~/.harpo`) is found from the password database, not from `$HOME`, and the generated hook and MCP commands run the interpreter with `-I` (isolated mode), which ignores `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, the user site-packages and the working directory. A planted `Harpo` package therefore never runs in the hook.
 
-**Why Guard can't fully fix it.** An install into the user site-packages (`pip install --user`) needs that site, which `-I` drops. For that one case the commands use `-E -P` instead (3.11 and later): `-E` ignores the `PYTHON*` variables and `-P` drops the working directory, but Python still finds the user site from `$HOME`. If an agent can set `HOME` for the hook, it can point it at a folder with a planted user site and its own `Harpocrates`. On Python 3.10 there is no `-P`, so a user-site install gets `-I`, is not found, and the hook fails closed (exit 2).
+**Why Guard can't fully fix it.** An install into the user site-packages (`pip install --user`) needs that site, which `-I` drops. For that one case the commands use `-E -P` instead (3.11 and later): `-E` ignores the `PYTHON*` variables and `-P` drops the working directory, but Python still finds the user site from `$HOME`. If an agent can set `HOME` for the hook, it can point it at a folder with a planted user site and its own `Harpo`. On Python 3.10 there is no `-P`, so a user-site install gets `-I`, is not found, and the hook fails closed (exit 2).
 
 The Claude Code prompt plugin (`/harpo allow`) has the same exposure in a second place. It runs the interpreter named in `~/.harpo/install.json`, and the plugin runtime offers no password-database lookup, so it finds that file from `HOME`. It reads the record only from a plain folder and a plain file (never through a symlink), accepts only an absolute interpreter path with the flags above, and runs only on your own Enter in the chat box. But a `HOME` that a project's settings point at a folder of its own, holding its own `install.json`, would make the next `/harpo allow` you type run a program of the project's choosing.
 
@@ -119,6 +119,6 @@ These are listed in the design doc's non-goals:
 - general personal data;
 - guaranteed detection of novel secret formats;
 - harnesses that can't be routed through a local proxy at all;
-- ONNX Runtime telemetry when a host process imports onnxruntime before Harpocrates, because Harpocrates disables it only by setting `ORT_DISABLE_TELEMETRY=1` before its own first import (export it yourself in that case).
+- ONNX Runtime telemetry when a host process imports onnxruntime before Harpo, because Harpo disables it only by setting `ORT_DISABLE_TELEMETRY=1` before its own first import (export it yourself in that case).
 
-For the last one, `harpocrates setup` prints each detected harness's tier. Cursor, OpenCode, and Copilot have no setup yet, and it says plainly that nothing is protected for them today.
+For the last one, `harpo setup` prints each detected harness's tier. Cursor, OpenCode, and Copilot have no setup yet, and it says plainly that nothing is protected for them today.

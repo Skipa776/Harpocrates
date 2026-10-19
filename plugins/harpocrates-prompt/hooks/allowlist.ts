@@ -1,6 +1,6 @@
 // /harpo: parsing and wording for the allowlist command (/harpocrates, its old
 // name, does the same: FR-NAME-02). Pure: nothing here runs a process or
-// touches a file. The Harpocrates CLI (`allow --json`) is the only thing that
+// touches a file. The Harpo CLI (`allow --json`) is the only thing that
 // changes the allowlist, and register.tsx is the only caller, and only for the
 // person's own Enter.
 
@@ -8,7 +8,7 @@ import { sanitize } from './parse'
 import { truncateRight } from './width'
 
 export const HELP = [
-  'Harpocrates allowlist (only you can change it; every use is logged)',
+  'Harpo allowlist (only you can change it; every use is logged)',
   '/harpo allow <path>            allow one file or folder',
   '/harpo allow --name <name>     allow a folder or file name in every project',
   '/harpo remove <path>           remove a path',
@@ -17,11 +17,11 @@ export const HELP = [
 ].join('\n')
 
 export const ARGUMENT_HINT = 'allow <path> | allow --name <name> | remove … | allowlist'
-export const REFUSED = 'Only you can change the Harpocrates allowlist: type /harpo in the chat box.'
-export const NOT_FOUND = 'Harpocrates CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
+export const REFUSED = 'Only you can change the Harpo allowlist: type /harpo in the chat box.'
+export const NOT_FOUND = 'Harpo CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
 export const NOT_INSTALLED =
-  'Run `harpo install` first: the plugin only runs the Harpocrates interpreter that install recorded.'
-export const BAD_ANSWER ='The Harpocrates CLI returned an answer this plugin cannot read.'
+  'Run `harpo install` first: the plugin only runs the Harpo interpreter that install recorded.'
+export const BAD_ANSWER ='The Harpo CLI returned an answer this plugin cannot read.'
 export const CONFIRM_LABEL = 'Allow it everywhere'
 export const CANCEL_LABEL = 'Cancel'
 export const CANCELLED = 'Cancelled.'
@@ -170,7 +170,7 @@ export type Interpreter = { readonly python: string; readonly args: readonly str
 
 /**
  * `python -m` puts the working directory (the agent-controlled project) first
- * on sys.path, so a planted Harpocrates package there would run instead of the
+ * on sys.path, so a planted Harpo package there would run instead of the
  * real one, and so would one on PYTHONPATH (SEC-08). Only these flags are
  * accepted from the record: -I (isolated mode), -P (3.11 and later: drops the
  * working directory) and -E (ignores PYTHON* variables, written with -P for an

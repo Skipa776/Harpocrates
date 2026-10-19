@@ -13,15 +13,15 @@ import {
 
 tier('user')
 
-const NOT_FOUND = 'Harpocrates CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
-const REFUSED = 'Only you can change the Harpocrates allowlist: type /harpo in the chat box.'
+const NOT_FOUND = 'Harpo CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
+const REFUSED = 'Only you can change the Harpo allowlist: type /harpo in the chat box.'
 const EVERYWHERE = 'Allow it everywhere'
 const PRESENTATION = { isFullscreen: false, columns: 80 }
 const PY = '/venv/bin/python'
 const CLI = [PY, '-P', '-m', 'Harpocrates.cli']
 const RECORD = JSON.stringify({ version: 1, python: PY, python_args: ['-P'], 'claude-code': { mcp: true } })
 const NOT_INSTALLED =
-  'Run `harpo install` first: the plugin only runs the Harpocrates interpreter that install recorded.'
+  'Run `harpo install` first: the plugin only runs the Harpo interpreter that install recorded.'
 
 type Reply = { exitCode: number; stdout: string } | 'missing'
 
@@ -342,7 +342,7 @@ test('the CLI is missing: the install message, for a change and for the list', a
 })
 
 test('an unreadable answer is a safe message, never a throw', async ($, on) => {
-  const bad = 'The Harpocrates CLI returned an answer this plugin cannot read.'
+  const bad = 'The Harpo CLI returned an answer this plugin cannot read.'
   const w = world(on, () => 'missing')
   for (const stdout of ['', 'not json', '[1,2]', 'null', '{"ok":']) {
     w.use(() => ({ exitCode: 0, stdout }))

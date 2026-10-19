@@ -252,7 +252,7 @@ export const register: Register = on => {
     try {
       await $.command.register({
         name: 'harpo',
-        description: 'Manage the Harpocrates allowlist',
+        description: 'Manage the Harpo allowlist',
         argumentHint: ARGUMENT_HINT,
       })
     } catch {
@@ -263,7 +263,7 @@ export const register: Register = on => {
     try {
       await $.command.register({
         name: 'harpocrates',
-        description: 'Manage the Harpocrates allowlist (the old name of /harpo)',
+        description: 'Manage the Harpo allowlist (the old name of /harpo)',
         argumentHint: ARGUMENT_HINT,
       })
     } catch {

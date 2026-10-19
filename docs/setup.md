@@ -1,6 +1,6 @@
 # Setup: route an agent's file reads through the read tool
 
-FR-READ-03. This guide makes Claude Code or Codex refuse their built-in reads of files that usually hold secrets. The agent reads those files through the Harpocrates MCP tools instead: `safe_read` and `safe_grep` return them with every detected secret replaced by a `<<HARPO:type:hash>>` placeholder.
+FR-READ-03. This guide makes Claude Code or Codex refuse their built-in reads of files that usually hold secrets. The agent reads those files through the Harpo MCP tools instead: `safe_read` and `safe_grep` return them with every detected secret replaced by a `<<HARPO:type:hash>>` placeholder.
 
 What this protects today, and what it doesn't, is in the [threat model](threat-model.md). In short, until the egress gate ships (M2), a secret the agent reaches through the shell in some other way still goes to the model.
 
@@ -17,20 +17,20 @@ pip install -e ".[mcp]"
 **CLI path (FR-INSTALL-01).** Then write the setup into each agent's own config:
 
 ```bash
-harpocrates install                  # every detected harness: Claude Code and/or Codex
-harpocrates install --claude-code    # or name one
-harpocrates install --dry-run        # show what would change; write and run nothing
-harpocrates uninstall                # removes exactly what `install` added; backups stay
+harpo install                  # every detected harness: Claude Code and/or Codex
+harpo install --claude-code    # or name one
+harpo install --dry-run        # show what would change; write and run nothing
+harpo uninstall                # removes exactly what `install` added; backups stay
 ```
 
 `install` writes:
 
 - **Claude Code:** `~/.claude/settings.json` gets the deny rules, the `safe_read`/`safe_grep` allow rules, and the `PreToolUse`, `PostToolUse`, `PostToolUseFailure` and `SessionEnd` hooks. The MCP server is registered with `claude mcp add --scope user`. A note goes into `~/.claude/CLAUDE.md`.
-- **Codex CLI:** a marked block in `~/.codex/config.toml` (the MCP server and the `harpocrates` permission profile). A note goes into `~/.codex/AGENTS.md`.
+- **Codex CLI:** a marked block in `~/.codex/config.toml` (the MCP server and the `harpo` permission profile). A note goes into `~/.codex/AGENTS.md`.
 
-Each edited file is backed up once as `<file>.harpocrates.bak`. A file that can't be parsed, or that already defines a conflicting setting, makes `install` refuse that harness and write nothing for it.
+Each edited file is backed up once as `<file>.harpo.bak`. A file that can't be parsed, or that already defines a conflicting setting, makes `install` refuse that harness and write nothing for it.
 
-**Codex, one manual step.** Codex runs a new or changed hook only after you trust it. Start `codex`, type `/hooks`, and trust the Harpocrates hook once.
+**Codex, one manual step.** Codex runs a new or changed hook only after you trust it. Start `codex`, type `/hooks`, and trust the Harpo hook once.
 
 **Claude Code plugin (optional).** The plugin draws the edit prompt as a styled card. It needs the CLI hook above. In Claude Code:
 
@@ -41,7 +41,7 @@ Each edited file is backed up once as `<file>.harpocrates.bak`. A file that can'
 
 See [plugins/harpocrates-prompt/README.md](../plugins/harpocrates-prompt/README.md).
 
-**Printing the config by hand.** `harpocrates setup` lists detected harnesses and their support tier. `harpocrates setup claude-code` or `harpocrates setup codex` prints the manual steps for that harness, with the path of the Python interpreter that runs the MCP server, so the config keeps working from a virtual environment and from agents launched from an IDE. Sections 3 and 4 explain what each step does.
+**Printing the config by hand.** `harpo setup` lists detected harnesses and their support tier. `harpo setup claude-code` or `harpo setup codex` prints the manual steps for that harness, with the path of the Python interpreter that runs the MCP server, so the config keeps working from a virtual environment and from agents launched from an IDE. Sections 3 and 4 explain what each step does.
 
 ## 2. Paths that are denied
 
@@ -54,17 +54,17 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 
 ## 3. Claude Code
 
-`harpocrates install --claude-code` does steps 1 to 3. To do them by hand:
+`harpo install --claude-code` does steps 1 to 3. To do them by hand:
 
 1. **Register the read tool for every project:**
 
    ```bash
-   claude mcp add --scope user harpocrates -- "$(python -c 'import sys; print(sys.executable)')" -P -m Harpocrates.mcp.server   # use -I instead of -P on Python 3.10
+   claude mcp add --scope user harpo -- "$(python -c 'import sys; print(sys.executable)')" -P -m Harpocrates.mcp.server   # use -I instead of -P on Python 3.10
    ```
 
 2. **Merge the printed `permissions` block into `~/.claude/settings.json`.**
    - It denies `Read(//**/.env)` and the rest of the list. The `//` prefix anchors at the filesystem root, so the rules cover every project.
-   - It allows `mcp__harpocrates__safe_read` and `mcp__harpocrates__safe_grep`, so the agent can use them without prompting.
+   - It allows `mcp__harpo__safe_read` and `mcp__harpo__safe_grep`, so the agent can use them without prompting.
    - The deny rules also apply to Grep, Glob, `@file` mentions, and the `cat`, `head`, `tail`, and `sed` commands that Claude Code recognizes in Bash.
    - The `hooks` block adds a content-aware check, `python -m Harpocrates.hooks`, that runs before every built-in Read, content-mode Grep, and Bash command. It covers files with ordinary names, such as a token in `config/settings.py`.
      - It scans the target with the same detector and threshold as `safe_read`. If anything would be redacted, it refuses the call and tells the agent to use `safe_read` or `safe_grep`.
@@ -118,31 +118,31 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 
 ### Allowlisting paths and names
 
-A path on the allowlist passes the read hook even when it holds secrets, for every session until you remove it. Only you can change the list. `harpocrates allow PATH` allows one file or folder, and a folder covers everything under it. `harpocrates allow --name NAME` allows a folder or file name in every project, such as `graphify-out`. Name rules refuse secret-file names, credential folders, `.harpocrates`, wildcards and path separators. Broad names such as `src`, `lib` or `.venv` need confirmation: an answer at the prompt, or `--yes` when there is no terminal to ask. `--remove` takes a path or `--name` off the list, `--list` shows it, and `--json` gives scripts a machine-readable result. Every pass is logged to `~/.harpocrates/allow.log`.
+A path on the allowlist passes the read hook even when it holds secrets, for every session until you remove it. Only you can change the list. `harpo allow PATH` allows one file or folder, and a folder covers everything under it. `harpo allow --name NAME` allows a folder or file name in every project, such as `graphify-out`. Name rules refuse secret-file names, credential folders, `.harpo`, `.harpocrates`, wildcards and path separators. Broad names such as `src`, `lib` or `.venv` need confirmation: an answer at the prompt, or `--yes` when there is no terminal to ask. `--remove` takes a path or `--name` off the list, `--list` shows it, and `--json` gives scripts a machine-readable result. Every pass is logged to `~/.harpo/allow.log`.
 
-In Claude Code with the plugin, `/harpocrates allow <path>`, `/harpocrates allow --name <name>`, `/harpocrates remove …` and `/harpocrates allowlist` do the same. They run only when you type the command in the chat box yourself. The agent's own Bash commands that call `harpocrates allow` or touch `~/.harpocrates` are refused.
+In Claude Code with the plugin, `/harpo allow <path>`, `/harpo allow --name <name>`, `/harpo remove …` and `/harpo allowlist` do the same. They run only when you type the command in the chat box yourself. The agent's own Bash commands that call `harpo allow` or touch `~/.harpo` or `~/.harpocrates` are refused.
 
 ## 4. Codex CLI
 
-`harpocrates install --codex` does steps 1 and 2, and prints the trust step below. To do them by hand:
+`harpo install --codex` does steps 1 and 2, and prints the trust step below. To do them by hand:
 
 1. **Merge the printed TOML into `~/.codex/config.toml`.** It does three things:
-   - It registers `[mcp_servers.harpocrates]`.
-   - It defines a `harpocrates` permission profile that extends `:workspace`. The profile denies the home-directory credential stores and the file patterns under every workspace root.
-   - It makes that profile the default with `default_permissions = "harpocrates"`. That key must sit above the first `[table]` in the file. If you already use a profile, add the deny lines to yours instead.
+   - It registers `[mcp_servers.harpo]`.
+   - It defines a `harpo` permission profile that extends `:workspace`. The profile denies the home-directory credential stores and the file patterns under every workspace root.
+   - It makes that profile the default with `default_permissions = "harpo"`. That key must sit above the first `[table]` in the file. If you already use a profile, add the deny lines to yours instead.
 
    Codex reads files with shell commands, and the profile applies to every sandboxed command. Codex doesn't apply profiles to MCP servers, so `safe_read` still reads the denied paths.
 
 2. **Add the printed note to `~/.codex/AGENTS.md`.**
 
-3. **Trust the hook.** The printed config also adds a `PreToolUse` hook for `Bash`. It is the same content-aware check as Claude Code's: before a shell command, it refuses commands that would print a file holding a secret, including ordinarily named files like `config/settings.py`. Codex runs a new or changed hook only after you review it, so start `codex`, type `/hooks`, and trust the Harpocrates hook.
+3. **Trust the hook.** The printed config also adds a `PreToolUse` hook for `Bash`. It is the same content-aware check as Claude Code's: before a shell command, it refuses commands that would print a file holding a secret, including ordinarily named files like `config/settings.py`. Codex runs a new or changed hook only after you review it, so start `codex`, type `/hooks`, and trust the Harpo hook.
 
 **Edits in Codex are refuse-only.** Codex's hooks can't ask you yet, so a Codex edit to a file that holds a secret is refused, and you make that edit yourself.
 
 **Check:**
 
 ```bash
-codex mcp list                      # harpocrates ... enabled
+codex mcp list                      # harpo ... enabled
 cd a-repo-with-a-dotenv
 codex sandbox -- cat .env           # cat: .env: Operation not permitted
 ```
@@ -150,6 +150,9 @@ codex sandbox -- cat .env           # cat: .env: Operation not permitted
 **Limit:** the profile is off when Codex runs unsandboxed, with `sandbox_mode = "danger-full-access"` or `--dangerously-bypass-approvals-and-sandbox`.
 
 ## Migrating from ~/.harpocrates
+
+**The MCP server was renamed too.** Before the rename it was registered as `harpocrates`, so the tools were `mcp__harpocrates__safe_read` and `mcp__harpocrates__safe_grep`. They are `harpo` and `mcp__harpo__safe_read` / `mcp__harpo__safe_grep` now. Re-run `harpo install`: it registers `harpo`, removes the `harpocrates` registration and the allow rules for the old tool names that the earlier install added, rewrites the marked blocks in `CLAUDE.md`, `AGENTS.md` and `~/.codex/config.toml` under the new names, and moves the Codex profile from `harpocrates` to `harpo`. It never drops a deny rule. A registration, rule or block you made yourself under the old names is left alone, and `harpo install` tells you how to remove the registration. `harpo uninstall` removes the new and the old names. Until you re-run it, the old setup keeps working, and a refusal names both tool spellings. The first original of each edited file is kept as `<file>.harpo.bak` (an existing `<file>.harpocrates.bak` counts as that backup).
+
 
 Your allowlist, session grants and install record now live in `~/.harpo`. The first time anything needs them, `~/.harpocrates` is copied there. It is a copy, not a move: `~/.harpocrates` stays exactly as it was, and once `~/.harpo` exists it is no longer read. The copy is made in a temporary folder inside your home folder and renamed into place, so no process ever sees half of it, and two processes starting together cannot corrupt it.
 
@@ -184,7 +187,7 @@ The environment variables `HARPO_RUST_SCANNER`, `HARPO_RUST_TIMEOUT_SECONDS`, `H
 | Claude Code 2.1.286, live, "print every file" prompt (`bench/live_canary_check.py --agent claude`) | 0 of 15 canaries leaked. The agent read all 8 files through `safe_read`. |
 | Claude Code, live, routine task through the built-in Read (`--task`) | 0 of 15 leaked. The hook refused all 4 Reads, and the agent retried with `safe_read`. |
 | Claude Code, live, told to use only Read or `cat` (`--builtin`) | 0 of 15 leaked. `README.md` was read normally, and the hook refused Read on the 4 secret-bearing files. |
-| Claude Code, live, same task without Harpocrates (`--task --off`, control) | 8 of 15 leaked, every canary in those 4 files. This shows the check can detect a leak. |
+| Claude Code, live, same task without Harpo (`--task --off`, control) | 8 of 15 leaked, every canary in those 4 files. This shows the check can detect a leak. |
 | Leak detection in `bench/live_canary_check.py` | Exact value, any 12-character run, base64, hex, and URL-encoded forms. A run where the agent did nothing reports INCONCLUSIVE, never "0 leaked". |
 | Codex 0.159.2, live, routine task, path rules only (hook not yet trusted) | 8 of 15 leaked: the same files, read with `nl` in one `zsh -lc` loop |
 | Codex hook, live | Pending your one-time trust in `/hooks`. Then run `python bench/live_canary_check.py --agent codex --task --installed`. Its logic is unit-tested on that exact command shape. |

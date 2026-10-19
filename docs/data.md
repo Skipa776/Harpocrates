@@ -1,6 +1,6 @@
 # Data provenance (DOC-02)
 
-Every dataset used to train, validate, or benchmark the Harpocrates detector. All secrets are fake, generated values; none are live credentials. Raw data files are git-ignored (`*.jsonl`) and not published; the scripts that build them are in the training pipeline at tag v1.3.0. The exception is `docs/samples/readme_examples.jsonl` (7 fake examples behind the README comparison).
+Every dataset used to train, validate, or benchmark the Harpo detector. All secrets are fake, generated values; none are live credentials. Raw data files are git-ignored (`*.jsonl`) and not published; the scripts that build them are in the training pipeline at tag v1.3.0. The exception is `docs/samples/readme_examples.jsonl` (7 fake examples behind the README comparison).
 
 ## Shipped model (v1.2, model v17)
 
@@ -8,7 +8,7 @@ Every dataset used to train, validate, or benchmark the Harpocrates detector. Al
 - 64 features, with the 10 variable-name features zeroed in training;
 - depth 7, 600 trees, monotonic constraints.
 
-`xgboost_model.json` is the same model (used by `--explain`). There is no native fallback: if the ONNX model cannot load, `harpocrates scan` exits 2. The previous shipped model (v1.1, model v16) is archived locally as `data/models/v16.json`.
+`xgboost_model.json` is the same model (used by `--explain`). There is no native fallback: if the ONNX model cannot load, `harpo scan` exits 2. The previous shipped model (v1.1, model v16) is archived locally as `data/models/v16.json`.
 
 **How it was trained:** `scripts/train_v11.py --pipeline-features` (training pipeline at tag v1.3.0) on **scanner candidates**. The scanner's own extraction runs over each record, and each candidate is labeled by overlap with the true secret. The training data is:
 - 94,183 candidate rows from the three training files below;
@@ -55,7 +55,7 @@ The earlier `positive_holdout_v4.jsonl` (300 records, about 37% mislabeled) is r
 
 ## Open-source corpus
 
-200 repos, 20 per language across Python, JavaScript, TypeScript, Go, Java, Ruby, PHP, Rust, C# and shell. Licenses: Apache-2.0 80, BSD-3-Clause 64, MIT 56. Each is pinned to a commit in `oss_repos.tsv` (at tag v1.3.0) and shallow-fetched into git-ignored `data/oss/`. No third-party code is committed. Repos are split train / val / test by a hash of their name (142 / 16 / 42), so no repo spans two splits (DATA-07). Real strings that gitleaks or Harpocrates' provider regexes flag are queued for review, never labeled as negatives.
+200 repos, 20 per language across Python, JavaScript, TypeScript, Go, Java, Ruby, PHP, Rust, C# and shell. Licenses: Apache-2.0 80, BSD-3-Clause 64, MIT 56. Each is pinned to a commit in `oss_repos.tsv` (at tag v1.3.0) and shallow-fetched into git-ignored `data/oss/`. No third-party code is committed. Repos are split train / val / test by a hash of their name (142 / 16 / 42), so no repo spans two splits (DATA-07). Real strings that gitleaks or Harpo's provider regexes flag are queued for review, never labeled as negatives.
 
 ## Rules (DATA-01..10) and known gaps
 
