@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 
-def test_fr_install_01_module_entry_runs_the_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fr_install_01_module_entry_runs_the_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                 child_python) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     done = subprocess.run(
-        [sys.executable, "-m", "Harpocrates.cli", "allow", "--list", "--json"],
+        child_python("Harpocrates.cli", "allow", "--list", "--json"),  # `python -m Harpocrates.cli`, home from $HOME
         capture_output=True, text=True, timeout=60, check=False,
     )
     assert done.returncode == 0, done.stderr

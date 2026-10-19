@@ -18,8 +18,10 @@ Migration (the first state_dir() call in a process finds ~/.harpo missing and ~/
     its copy and carries on. The copy always holds MIGRATION_NOTE, so the winner's folder is never empty, and rename
     only replaces an empty folder; the loser can never replace the winner's.
 
-No environment variable moves the state directory. HARPO_DIR and HARPOCRATES_DIR are not read: a project's settings
-can set environment variables, and a state directory the agent can write would replace the allowlist.
+No environment variable moves the state directory (SEC-08). The home folder is the one the password database names for
+the user running the process (home()), so neither $HOME nor HARPO_DIR nor HARPOCRATES_DIR is read for it: a project's
+settings can set environment variables, and a state directory the agent can write would replace the allowlist. The
+hook's guards also protect the $HOME-derived folders, in case a tool expands `~` from the environment.
 """
 from __future__ import annotations
 
@@ -30,6 +32,11 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+
+try:
+    import pwd
+except ImportError:  # pragma: no cover - no password database on Windows
+    pwd = None
 
 NEW_DIR = ".harpo"
 OLD_DIR = ".harpocrates"
@@ -48,6 +55,27 @@ class _RefusedError(Exception):
         None: the message says what was refused.
     Output: Raised by _copy_tree and _assert_plain_tree; state_dir() turns it into one stderr line and keeps ~/.harpocrates.
     """
+
+
+def home() -> Path:
+    """
+    Description: The user's home folder from the password database, never from $HOME (SEC-08): the environment of a hook
+        can be set by a project's settings, and a home folder the agent chose would move the state directory.
+    Parameters:
+        None: looked up on every call, so a test can fake the password database.
+    Output: The home folder's path. Raises RuntimeError when the password database has no entry for the user or names
+        an empty or relative folder; there is no fall back to $HOME. Without a password database (Windows) it is
+        Path.home().
+    """
+    if pwd is None:  # pragma: no cover - Windows
+        return Path.home()
+    try:
+        folder = pwd.getpwuid(os.getuid()).pw_dir
+    except KeyError as exc:
+        raise RuntimeError("no password database entry for this user, so no home folder") from exc
+    if not isinstance(folder, str) or not os.path.isabs(folder):
+        raise RuntimeError("the password database names no absolute home folder")
+    return Path(folder)
 
 
 def _plain_dir(path: Path) -> bool:
@@ -177,19 +205,19 @@ def state_dir() -> Path:
     Description: The folder that holds the user's allowlist, session grants and install record: ~/.harpo, after copying
         it once from ~/.harpocrates when only that exists. Fails closed to ~/.harpocrates (see the module docstring).
     Parameters:
-        None: the home folder is looked up on every call, so a test can move HOME.
+        None: the home folder is looked up on every call (home(): the password database, not $HOME).
     Output: The folder's path (it may not exist yet; writers create it). Side effects: the first call in a process may
         copy ~/.harpocrates to ~/.harpo; a refusal or failure prints one line to stderr. Raises nothing of its own;
-        only Path.home() can raise (RuntimeError), when no home folder can be determined.
+        only home() can raise (RuntimeError), when no home folder can be determined.
     """
-    home = Path.home()
-    new, old = home / NEW_DIR, home / OLD_DIR
+    base = home()
+    new, old = base / NEW_DIR, base / OLD_DIR
     if _plain_dir(new):
         return new
-    if str(home) in _failed:
+    if str(base) in _failed:
         return old
     if os.path.lexists(new):  # a symlink or a file: never trusted, never written through
-        _announce(home, f"~/{NEW_DIR} is not a plain folder")
+        _announce(base, f"~/{NEW_DIR} is not a plain folder")
         return old
     if not os.path.lexists(old):
         return new  # nothing to migrate
@@ -199,10 +227,10 @@ def state_dir() -> Path:
         try:
             _migrate(old, new)
         except _RefusedError as exc:
-            _announce(home, f"refused: {exc}")
+            _announce(base, f"refused: {exc}")
             return old
         except Exception as exc:  # noqa: BLE001 - any failure keeps the old folder in use
             reason = exc.strerror if isinstance(exc, OSError) and exc.strerror else type(exc).__name__
-            _announce(home, f"copy failed: {reason}")
+            _announce(base, f"copy failed: {reason}")
             return old
     return new

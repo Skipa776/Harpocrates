@@ -202,8 +202,9 @@ def test_fr_name_04_failed_copy_falls_back_to_old_dir(home: Path, capsys, monkey
 
 
 _CHILD = """
-import pathlib, sys, time
+import os, pathlib, sys, time
 from Harpocrates import paths
+paths.home = lambda: pathlib.Path(os.environ["HOME"])  # SEC-08: the real home comes from the password database
 go, ready = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 ready.touch()
 while not go.exists():

@@ -31,6 +31,7 @@ import unicodedata
 from pathlib import Path
 from typing import Optional
 
+from Harpocrates import paths
 from Harpocrates.harness import SENSITIVE_FILES, SENSITIVE_HOME_DIRS
 from Harpocrates.paths import STATE_DIR_NAMES, state_dir
 
@@ -234,7 +235,7 @@ def _facts() -> tuple[frozenset[str], frozenset[str], frozenset[tuple[int, int]]
     Output: Cached home facts; uses stamp zero when stat fails and may propagate home lookup or path
         resolution errors.
     """
-    home = Path.home()  # looked up per call so a test can move HOME
+    home = paths.home()  # the password database, looked up per call (SEC-08: never $HOME)
     try:
         stamp = os.stat(home).st_mtime_ns
     except OSError:
@@ -555,40 +556,57 @@ def _mentions_dir(command: str, norm: str) -> bool:
                 or (_DOTGLOB.search(norm) and re.search(r"[*?\[]", norm)))
 
 
+def _homes() -> list[Path]:
+    """
+    Description: The home folders whose state directories the guards protect: the one the password database names,
+        which holds the real state (paths.home), and the $HOME-derived one when it differs, in case a tool expands `~`
+        from the environment (SEC-08, belt and braces).
+    Parameters: None
+    Output: One or two paths, the password-database home first. Raises RuntimeError when no home folder can be
+        determined (callers treat that as a refusal).
+    """
+    homes = [paths.home()]
+    from_env = Path.home()
+    if from_env != homes[0]:
+        homes.append(from_env)
+    return homes
+
+
 def inside_state_dir(path: Optional[Path]) -> bool:
     """
     Description: Check whether a path lies in either state directory using resolved, folded names
         and file identities.
     Parameters:
         path: Absolute or relative path, possibly nonexistent; None means no path.
-    Output: True inside ~/.harpo or ~/.harpocrates, otherwise False; checks both names without
-        migration. Raises OSError or RuntimeError on resolution failure, which callers treat as
-        refusal.
+    Output: True inside ~/.harpo or ~/.harpocrates, otherwise False; checks both names, in the password-database home
+        and in the $HOME-derived one, without migration. Raises OSError or RuntimeError on resolution failure, which
+        callers treat as refusal.
     Notes: Whether path is ~/.harpo or ~/.harpocrates, or lies under either: links resolved, names
         compared     NFKC- and case-folded (the default macOS file system treats .HARPO as .harpo),
         and by file identity where     the folder exists. A command run there names its files
         without the directory, so for a shell command the     working directory is what shows it;
         for an Edit or Write tool call it is the target path. True when inside either folder, False
         when not or when path is None. Both names are checked whichever     one is in use, and the
-        migration is not run. Raises OSError or RuntimeError when the path cannot be     resolved;
+        migration is not run. Both homes are checked (SEC-08): the real one (paths.home) and the one $HOME names.
+        Raises OSError or RuntimeError when the path cannot be     resolved;
         callers treat that as a refusal.
     """
     if path is None:
         return False
     real = path.resolve()
-    home = Path.home()  # looked up per call so a test can move HOME
     folded = [_fold(part) for part in real.parts]
     ids = set()
-    for name in STATE_DIR_NAMES:
-        state = (home / name).resolve()
-        wanted = [_fold(part) for part in state.parts]
-        if folded[:len(wanted)] == wanted:
-            return True
-        try:
-            st = os.stat(state)
-        except OSError:
-            continue  # not there (yet): the name comparison above is all there is to check
-        ids.add((st.st_dev, st.st_ino))
+    for home in _homes():
+        for name in STATE_DIR_NAMES:
+            state = (home / name).resolve()
+            wanted = [_fold(part) for part in state.parts]
+            if folded[:len(wanted)] == wanted:
+                return True
+            try:
+                st = os.stat(state)
+            except OSError:
+                continue  # not there (yet): the name comparison above is all there is to check
+            ids.add((st.st_dev, st.st_ino))
     for ancestor in (real, *real.parents):
         try:
             st = os.stat(ancestor)

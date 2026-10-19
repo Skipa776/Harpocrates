@@ -188,9 +188,11 @@ def test_fr_install_01_pretooluse_hooks_fail_closed_when_the_interpreter_is_gone
 
 
 def test_fr_install_01_wrapped_hook_keeps_the_hooks_own_exit_code(tmp_path: Path) -> None:
-    """While the interpreter works the wrapper changes nothing: a benign Read passes (0), garbage is blocked (2)."""
+    """While the interpreter works the wrapper changes nothing: a benign call passes (0), garbage is blocked (2)."""
     pre = json.loads(json.dumps(claude_code_settings()))["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    benign = json.dumps({"tool_name": "Read", "tool_input": {"file_path": str(tmp_path / "nope.txt")},
+    # A tool the hook does not handle: it passes (0) without reading any state, and the hook runs against the real
+    # home folder (the password database, SEC-08), which a test must not touch.
+    benign = json.dumps({"tool_name": "Glob", "tool_input": {"pattern": "*"},
                          "session_id": "s", "cwd": str(tmp_path), "hook_event_name": "PreToolUse"}).encode()
     run = {"shell": True, "capture_output": True, "env": {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"}}
     assert subprocess.run(pre, input=benign, **run).returncode == 0

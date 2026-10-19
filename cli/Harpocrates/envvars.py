@@ -5,7 +5,8 @@ and REQUIRE_RUST (the last by the Rust parity test and CI); the Rust core reads 
 
 There is no DIR variable, on purpose: the state directory (paths.state_dir) cannot be moved by the environment,
 because a project's settings can set environment variables and a state directory the agent can write would replace
-the allowlist. Neither HARPO_DIR nor HARPOCRATES_DIR is read.
+the allowlist. Neither HARPO_DIR nor HARPOCRATES_DIR is read, and neither is HOME: the home folder that holds the
+state directory comes from the password database (paths.home, SEC-08).
 """
 from __future__ import annotations
 

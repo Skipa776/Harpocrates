@@ -6,6 +6,8 @@ holding a planted package that writes a marker file; the marker must not appear.
 from __future__ import annotations
 
 import json
+import os
+import pwd
 import shlex
 import subprocess
 import sys
@@ -37,7 +39,12 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PYTHONPATH", raising=False)
 
 
-EVENT = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": "x.txt"}})
+# An Edit of a file in the state directory: the real hook refuses it (a deny on stdout) without reading or writing
+# anything, because only the path is looked at. The hook uses the home folder from the password database (SEC-08), so
+# the path is built from it too and no test ever touches that folder.
+STATE_FILE = str(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".harpo" / "allow")
+EVENT = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                    "tool_input": {"file_path": STATE_FILE, "old_string": "a", "new_string": "b"}})
 
 
 def run_shell(command: str, cwd: Path) -> subprocess.CompletedProcess:
@@ -68,6 +75,8 @@ def test_sec_hijack_generated_hook_commands_ignore_a_planted_package(event: str,
     done = run_shell(command, project)
     assert not (project / "PLANTED").exists(), done.stderr
     assert "planted" not in done.stdout.lower()
+    if "Pre" in event:  # the real hook ran: it refused the state-directory edit
+        assert json.loads(done.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny", done.stdout
 
 
 def test_sec_hijack_the_generated_mcp_command_ignores_a_planted_package(project: Path) -> None:

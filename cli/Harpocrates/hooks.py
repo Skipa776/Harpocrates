@@ -566,11 +566,15 @@ def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
         grant; with no session_id or tool_use_id to record it under, or no human, it is refused
         (fail closed).
     """
-    from Harpocrates import allowlist, grants
+    from Harpocrates import allowlist, grants, paths
 
-    path = cwd / os.path.expanduser(args.get("file_path") or args["notebook_path"])
+    raw = args.get("file_path") or args["notebook_path"]
+    path = cwd / os.path.expanduser(raw)
+    spellings = [path]
+    if raw == "~" or raw.startswith("~/"):  # the tool may expand ~ from the password database, not from $HOME (SEC-08)
+        spellings.append(paths.home().joinpath(raw[2:]))
     try:
-        in_state_dir = allowlist.inside_state_dir(path)
+        in_state_dir = any(allowlist.inside_state_dir(target) for target in spellings)
     except (OSError, RuntimeError, ValueError):  # the target cannot be placed: fail closed
         in_state_dir = True
     if in_state_dir:

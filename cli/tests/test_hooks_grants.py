@@ -10,7 +10,6 @@ import json
 import os
 import stat
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -333,11 +332,12 @@ def test_fr_read_06_unreadable_grant_file_means_no_grants(proj: Path, home: Path
         _file(home).chmod(0o600)
 
 
-def test_fr_read_06_post_entry_point_is_silent_and_never_fails(proj: Path, home: Path, capsys) -> None:
+def test_fr_read_06_post_entry_point_is_silent_and_never_fails(proj: Path, home: Path, capsys,
+                                                               child_python) -> None:
     env = {**os.environ, "HOME": str(home)}
 
     def run(stdin: bytes) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, "-m", "Harpocrates.hooks", "--post"], input=stdin,
+        return subprocess.run(child_python("Harpocrates.hooks", "--post"), input=stdin,
                               capture_output=True, env=env)
 
     for junk in (b"\xff\xfe", b"", b"not json", b"[]", b'{"hook_event_name": "PostToolUse", "session_id": 5}'):

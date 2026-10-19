@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
-from Harpocrates import envvars
+from Harpocrates import envvars, paths
 from Harpocrates.core.classification import infer_category
 from Harpocrates.core.detector import (
     _apply_ml_verification,
@@ -36,6 +36,20 @@ _DIRECTORY_TIMEOUT_ENV = "RUST_TIMEOUT_SECONDS"  # likewise
 _DEFAULT_DIRECTORY_TIMEOUT_SECONDS = 300.0
 PROTOCOL_VERSION = 1
 _ML_BATCH_SIZE = 1024
+
+
+def _expand_home(text: str) -> Path:
+    """
+    Description: Expand a leading `~` in a configured path with the home folder from the password database, not $HOME
+        (SEC-08); `~user` still goes through the password database inside Path.expanduser.
+    Parameters:
+        text: the configured path, for example the HARPO_RUST_SCANNER value.
+    Output: The path with `~` or `~/` replaced by the home folder; any other text is returned as a Path unchanged.
+        Raises RuntimeError when no home folder can be determined. No filesystem access.
+    """
+    if text == "~" or text.startswith("~/"):
+        return paths.home().joinpath(text[2:])
+    return Path(text).expanduser()
 
 
 class RustScannerError(RuntimeError):
@@ -158,7 +172,7 @@ class RustScannerBackend:
         candidates: list[Path] = []
         configured = envvars.getenv(_BINARY_ENV)
         if configured:
-            candidates.append(Path(configured).expanduser())
+            candidates.append(_expand_home(configured))
 
         installed = shutil.which(_BINARY_NAME)
         if installed:
