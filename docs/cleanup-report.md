@@ -1,6 +1,6 @@
 # R0 cleanup report (FR-CLEAN-01)
 
-Oct 18, 2026 · branch `r0/cleanup` · status: **§1 and §2 approved and executed. §3 and §4 still await decisions.**
+Oct 18, 2026 · branch `r0/cleanup` · status: **§1–§3 approved and executed. §4 still awaits decisions.**
 
 Executed:
 - **§1, items 1–14:** commits `23434e1`..`0edec5a`.
@@ -78,9 +78,9 @@ Tests that only cover deleted training code are deleted with it. FR-CLEAN-02 the
 
 | # | Item | Evidence | Proposal |
 | --- | --- | --- | --- |
-| 23 | `design.md` "Developing with an AI assistant" section (kickoff prompts, target layout) | AI prompts | **cut** the prompts and keep the target layout under Architecture |
-| 24 | `AGENTS.md` and `CLAUDE.md` | They hold working rules 1–6 and are auto-loaded by Claude Code and Codex. `docs/setup.md` lines 28, 29, 75 and 136 link to them. The two files have drifted apart | ⚠ **keep**, and make `CLAUDE.md` a symlink to `AGENTS.md`, as `design.md` intended. Cutting them removes the rules every agent session follows |
-| 25 | Untracked `M0_PLAN.md`, `M2_PLAN.md`, `ML_PLAN.md`, `EDA_REPORT.md`, `allowed-models.txt` | Not in git. Deleting them is permanent | ⚠ Your call. Proposal: move them out of the repo folder, not delete. `M2_PLAN.md` may matter for M2 |
+| 23 | `design.md` "Developing with an AI assistant" section (kickoff prompts, target layout) | AI prompts | **done**: the section is cut and the target layout moved under Architecture. The removed working rules are all still in `AGENTS.md` |
+| 24 | `AGENTS.md` and `CLAUDE.md` | Correction: `CLAUDE.md` is already a symlink to `AGENTS.md` (since Sep 27). An earlier evidence pass wrongly said they had drifted | **keep**, no change needed |
+| 25 | Untracked `M0_PLAN.md`, `M2_PLAN.md`, `ML_PLAN.md`, `EDA_REPORT.md`, `allowed-models.txt` | Not in git. Deleting them is permanent | Josh: leave them alone. No change |
 
 ## 4. Not cuts: needs sign-off, consolidation or a fix
 
