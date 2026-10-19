@@ -111,6 +111,7 @@ enforce = [
     "cli/Harpocrates/detectors/entropy_detector.py",
     "cli/Harpocrates/detectors/path_tokens.py",
     "cli/Harpocrates/grants.py",
+    "cli/Harpocrates/harness.py",
     "cli/Harpocrates/mcp/server.py",
     "cli/Harpocrates/ml/context.py",
     "cli/Harpocrates/ml/explain.py",

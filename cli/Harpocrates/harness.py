@@ -45,6 +45,18 @@ GATE_AVAILABLE = False
 
 @dataclass(frozen=True)
 class Harness:
+    """
+    Description: Represent a supported coding harness, its detection hints, protection tier, and
+        remaining gaps.
+    Parameters:
+        name: Display name of the harness.
+        tier: Advertised support tier.
+        commands: Executable names to look for on PATH.
+        paths: Config paths under home or application paths under the applications directory.
+        gap: Protection limitations displayed after Not protected:.
+        setup: Setup guide identifier, or None when no guide exists.
+    Output: Immutable dataclass instances providing harness metadata for detection and reports.
+    """
     name: str
     tier: str
     commands: tuple[str, ...]  # on PATH
@@ -74,10 +86,27 @@ HARNESSES = (
 
 def detect(home: Optional[Path] = None, which: Callable[[str], Optional[str]] = shutil.which,
            apps: Path = Path("/Applications")) -> dict[str, bool]:
-    """Which harnesses look installed: a command on PATH, or a config or app directory."""
+    """
+    Description: Detect harness installations using executables, configuration paths, and
+        application directories.
+    Parameters:
+        home: Home directory to inspect, defaulting to Path.home().
+        which: Executable lookup callable, defaulting to shutil.which.
+        apps: Applications directory used for .app paths.
+    Output: Mapping of harness display names to installation booleans; home lookup, filesystem, and
+        lookup callable errors may propagate.
+    Notes: Which harnesses look installed: a command on PATH, or a config or app directory.
+    """
     home = home or Path.home()
 
     def present(rel: str) -> bool:
+        """
+        Description: Check a configured installation path under home or the applications directory.
+        Parameters:
+            rel: Relative installation path, possibly containing a glob.
+        Output: True if the path exists or its glob matches, otherwise False; filesystem lookup
+            errors may propagate.
+        """
         base = apps if rel.endswith(".app") else home
         return any(base.glob(rel)) if "*" in rel else (base / rel).exists()
 
@@ -85,7 +114,15 @@ def detect(home: Optional[Path] = None, which: Callable[[str], Optional[str]] = 
 
 
 def tier_report(found: dict[str, bool]) -> str:
-    """Support tier per detected harness, with what each tier leaves unprotected (FR-INSTALL-03)."""
+    """
+    Description: Describe detected harness support and remaining exposure for FR-INSTALL-03.
+    Parameters:
+        found: Mapping of harness names to detection booleans.
+    Output: Human-readable report including setup availability and the unreleased M2 gate
+        limitation, or a no-supported-harness message.
+    Notes: Support tier per detected harness, with what each tier leaves unprotected
+        (FR-INSTALL-03).
+    """
     rows = [h for h in HARNESSES if found.get(h.name)]
     if not rows:
         return "No supported harness detected (Claude Code, Codex CLI, OpenCode, Copilot, Cursor)."
@@ -105,31 +142,63 @@ def tier_report(found: dict[str, bool]) -> str:
 
 
 def python_flag() -> str:
-    """The interpreter flag every generated `python -m Harpocrates...` command carries. `python -m` puts the
-    current directory first on sys.path, and the current directory is the agent-controlled project, so a planted
-    `Harpocrates/` package there would run in place of ours (a hook that exits 0 is an allow). -P (3.11+) drops only
-    that entry and keeps user site-packages; older Pythons have no -P, so -I (isolated mode, which also drops the
-    user site and PYTHON* variables) is the closest."""
+    """
+    Description: Select an interpreter flag that prevents an agent-controlled working directory from
+        shadowing Harpocrates.
+    Parameters: None
+    Output: The -P flag on Python 3.11+, otherwise -I; no process is launched.
+    Notes: The interpreter flag every generated `python -m Harpocrates...` command carries. `python
+        -m` puts the current directory first on sys.path, and the current directory is the
+        agent-controlled project, so a planted `Harpocrates/` package there would run in place of
+        ours (a hook that exits 0 is an allow). -P (3.11+) drops only that entry and keeps user
+        site-packages; older Pythons have no -P, so -I (isolated mode, which also drops the user
+        site and PYTHON* variables) is the closest.
+    """
     return "-P" if sys.version_info >= (3, 11) else "-I"
 
 
 def mcp_server() -> tuple[str, list[str]]:
-    """This interpreter running the MCP server, so it works from any venv and from IDE-launched agents."""
+    """
+    Description: Build the MCP server invocation using this interpreter for virtual-environment and
+        IDE compatibility.
+    Parameters: None
+    Output: Tuple of interpreter path and argument list with the protective Python flag; does not
+        launch the server.
+    Notes: This interpreter running the MCP server, so it works from any venv and from IDE-launched
+        agents.
+    """
     return sys.executable, [python_flag(), "-m", "Harpocrates.mcp.server"]
 
 
 def guarded_hook(python: str, *flags: str) -> str:
-    """A PreToolUse hook command that fails closed. Harnesses read only exit 2 as a block, so a removed venv
-    (exit 127) or a crash (1) would let the call through. The hook itself exits 0 or 2, so `|| exit 2` changes
-    nothing else. The explicit `sh -c` works whether the harness runs the string in a shell or splits it into argv;
-    the python path travels as $0, so spaces and quotes in it are safe. --post hooks stay bare: they must never block."""
+    """
+    Description: Build a PreToolUse hook invocation that maps execution failures to a blocking exit
+        status.
+    Parameters:
+        python: Interpreter path passed safely as shell argument zero.
+        *flags: Additional hook flags inserted into the shell script.
+    Output: Shell command using sh -c and || exit 2 to fail closed; does not execute it. Post hooks
+        must remain bare because they must never block.
+    Notes: A PreToolUse hook command that fails closed. Harnesses read only exit 2 as a block, so a
+        removed venv (exit 127) or a crash (1) would let the call through. The hook itself exits 0
+        or 2, so `|| exit 2` changes nothing else. The explicit `sh -c` works whether the harness
+        runs the string in a shell or splits it into argv; the python path travels as $0, so spaces
+        and quotes in it are safe. --post hooks stay bare: they must never block.
+    """
     script = " ".join(['"$0"', python_flag(), "-m", "Harpocrates.hooks", *flags, "||", "exit", "2"])
     return shlex.join(["sh", "-c", script, python])
 
 
 def claude_code_settings() -> dict:
-    """Lines for ~/.claude/settings.json. `//**/` anchors at the filesystem root, so a rule in user
-    settings covers every project and any file outside the working directory."""
+    """
+    Description: Build Claude Code permissions and hooks that protect secret reads and
+        state-directory edits.
+    Parameters: None
+    Output: Settings dictionary for ~/.claude/settings.json containing root-anchored denies, allowed
+        MCP tools, a guarded asking PreToolUse hook, and bare post/session hooks; writes nothing.
+    Notes: Lines for ~/.claude/settings.json. `//**/` anchors at the filesystem root, so a rule in
+        user settings covers every project and any file outside the working directory.
+    """
     deny = [f"Read(//**/{name})" for name in SENSITIVE_FILES] + [f"Read({d}/**)" for d in SENSITIVE_HOME_DIRS]
     # only the user edits the allowlist; Edit rules cover Write too
     deny.extend(f"Edit({d}/**)" for d in STATE_DIRS)
@@ -148,9 +217,17 @@ def claude_code_settings() -> dict:
 
 
 def codex_config_parts() -> tuple[str, str]:
-    """Lines for ~/.codex/config.toml. The profile limits sandboxed shell commands; Codex doesn't apply
-    profiles to MCP servers, so safe_read still reads these paths. The PreToolUse hook is the same
-    content-aware check as Claude Code's: it refuses shell commands that would print a file holding a secret."""
+    """
+    Description: Build Codex MCP, sandbox, and content-aware hook configuration as separate root and
+        table sections.
+    Parameters: None
+    Output: Tuple of TOML root settings and tables for ~/.codex/config.toml; writes nothing.
+        Profiles limit sandboxed shell commands but do not restrict MCP reads through safe_read.
+    Notes: Lines for ~/.codex/config.toml. The profile limits sandboxed shell commands; Codex
+        doesn't apply profiles to MCP servers, so safe_read still reads these paths. The PreToolUse
+        hook is the same content-aware check as Claude Code's: it refuses shell commands that would
+        print a file holding a secret.
+    """
     command, args = mcp_server()
     files = "\n".join(f'"**/{name}" = "deny"' for name in SENSITIVE_FILES)
     dirs = "\n".join(f'"{d}" = "deny"' for d in (*SENSITIVE_HOME_DIRS, *STATE_DIRS))
@@ -183,13 +260,26 @@ statusMessage = "Harpocrates: checking files for secrets"
 
 
 def codex_config() -> str:
-    """The same lines in one piece, for `harpocrates setup codex`."""
+    """
+    Description: Combine Codex root settings and tables for the setup command.
+    Parameters: None
+    Output: Complete configuration string; writes no files.
+    Notes: The same lines in one piece, for `harpocrates setup codex`.
+    """
     root, tables = codex_config_parts()
     return f"{root}\n{tables}"
 
 
 def setup_instructions(harness: str) -> str:
-    """Copy-paste setup for one Full-tier harness (FR-READ-03)."""
+    """
+    Description: Generate copy-paste read-tool setup instructions for a Full-tier harness under
+        FR-READ-03.
+    Parameters:
+        harness: Case-insensitive guide identifier: claude-code or codex.
+    Output: Setup guide including validation steps and protection limitations; raises ValueError for
+        unsupported harnesses and writes nothing.
+    Notes: Copy-paste setup for one Full-tier harness (FR-READ-03).
+    """
     harness = harness.lower()
     command, args = mcp_server()
     if harness == "claude-code":
