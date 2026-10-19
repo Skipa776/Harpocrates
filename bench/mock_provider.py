@@ -19,11 +19,20 @@ Bad input never crashes it. A malformed, oversized (over 64 MiB) or wrongly enco
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import importlib
 import io
+import ipaddress
 import json
+import os
+import socket
+import threading
 import urllib.parse
 import zlib
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable, Iterable, NamedTuple, Optional
 
@@ -406,3 +415,479 @@ def turn_for(body: object, fmt: str, turns: list[dict]) -> dict:
     if not isinstance(body, dict) or not body.get("tools"):
         return {}
     return select_turn(turns, count_tool_results(body, fmt))
+
+
+# --- the server ------------------------------------------------------------------------------------------------
+
+READ_CHUNK = 1 << 20
+FAILED_BODY = ("too-large", "bad-encoding", "bad-length", "bad-chunking", "truncated")  # answered 400
+
+
+def ensure_loopback(host: str) -> str:
+    """
+    Description: Refuse any bind address that is not on the loopback interface, so the mock is never reachable from
+        another machine.
+    Parameters:
+        host: the address to bind: "localhost" or an IP literal.
+    Output: The address to bind ("localhost" becomes 127.0.0.1). Raises ValueError, naming loopback, for an empty host,
+        a wildcard (0.0.0.0, ::), a non-loopback address or a name that is not an address. No name lookup is made.
+    """
+    if host == "localhost":
+        return "127.0.0.1"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is None or not address.is_loopback:
+        raise ValueError(f"the mock provider binds a loopback address only (127.0.0.1 or ::1), not {host!r}")
+    return host
+
+
+@dataclass(frozen=True)
+class Config:
+    """
+    Description: The settings a running mock was started with.
+    Parameters:
+        turns: the scripted replies, one per model call (see load_script); empty means a short text reply every time.
+        max_body: the largest request body accepted, raw or decompressed, in bytes.
+        count_tokens_status: when set, /v1/messages/count_tokens answers this HTTP error status instead of a count.
+    Output: An immutable record read by every request handler.
+    """
+
+    turns: tuple = ()
+    max_body: int = MAX_BODY_BYTES
+    count_tokens_status: Optional[int] = None
+
+
+class RawBody(NamedTuple):
+    """
+    Description: A request body as read off the wire, before any decompression.
+    Parameters:
+        data: the bytes, or None when the body was over the cap, empty-and-failed or unreadable.
+        size: how many bytes arrived.
+        sha256: the hex SHA-256 of every byte that arrived (also of bytes not kept).
+        status: ok, empty, too-large, bad-length, bad-chunking or truncated.
+        chunked: whether the body used chunked transfer encoding.
+        content_length: the Content-Length header as an int, or None when absent or invalid.
+    Output: An immutable record used to build the recording line.
+    """
+
+    data: Optional[bytes]
+    size: int
+    sha256: str
+    status: str
+    chunked: bool
+    content_length: Optional[int]
+
+
+class _Reader:
+    """
+    Description: Accumulate the size, hash and (while under the cap) the bytes of a body as it is read in pieces.
+    Parameters:
+        cap: the most bytes kept; beyond it the pieces are hashed and counted but dropped.
+    Output: An object whose add() takes a piece and whose result() gives (data or None, size, sha256).
+    """
+
+    def __init__(self, cap: int) -> None:
+        """
+        Description: Start an empty accumulation.
+        Parameters:
+            cap: the most bytes to keep.
+        Output: None.
+        """
+        self.cap, self.size, self.hash, self.kept = cap, 0, hashlib.sha256(), bytearray()
+
+    def add(self, piece: bytes) -> None:
+        """
+        Description: Count and hash one piece, keeping it only while the total is within the cap.
+        Parameters:
+            piece: the bytes just read.
+        Output: None. Once the total passes the cap, the bytes kept so far are dropped.
+        """
+        self.hash.update(piece)
+        self.size += len(piece)
+        if self.size <= self.cap:
+            self.kept += piece
+        else:
+            self.kept = bytearray()
+
+    def result(self) -> tuple[Optional[bytes], int, str]:
+        """
+        Description: Report what was read.
+        Parameters: None
+        Output: (bytes or None when over the cap, total size, hex SHA-256).
+        """
+        return (bytes(self.kept) if self.size <= self.cap else None), self.size, self.hash.hexdigest()
+
+
+def _read_fixed(rfile: io.BufferedIOBase, length: int, cap: int) -> RawBody:
+    """
+    Description: Read a body of a known length in pieces, hashing all of it and keeping it only within the cap.
+    Parameters:
+        rfile: the connection's input stream.
+        length: the Content-Length value.
+        cap: the most bytes to keep.
+    Output: A RawBody with status ok, empty (length 0), too-large or truncated (the client sent fewer bytes).
+    """
+    reader = _Reader(cap)
+    remaining = length
+    while remaining > 0:
+        piece = rfile.read(min(remaining, READ_CHUNK))
+        if not piece:
+            data, size, digest = reader.result()
+            return RawBody(None, size, digest, "truncated", False, length)
+        reader.add(piece)
+        remaining -= len(piece)
+    data, size, digest = reader.result()
+    status = "empty" if length == 0 else "ok" if data is not None else "too-large"
+    return RawBody(data, size, digest, status, False, length)
+
+
+def _read_chunked(rfile: io.BufferedIOBase, cap: int) -> RawBody:
+    """
+    Description: Read a chunked body to its end, hashing all of it and keeping it only within the cap.
+    Parameters:
+        rfile: the connection's input stream.
+        cap: the most bytes to keep.
+    Output: A RawBody with status ok, empty (no data chunks), too-large, bad-chunking (a malformed size line or missing
+        CRLF) or truncated (the stream ended early); chunked is True.
+    """
+    reader = _Reader(cap)
+
+    def finish(status: str) -> RawBody:
+        """
+        Description: Build the result for the chunks read so far.
+        Parameters:
+            status: the status to report, replaced by too-large or empty when that applies to an ok read.
+        Output: A RawBody for the enclosing read.
+        """
+        data, size, digest = reader.result()
+        if status == "ok":
+            status = "empty" if size == 0 else "ok" if data is not None else "too-large"
+        return RawBody(data if status == "ok" else None, size, digest, status, True, None)
+
+    while True:
+        line = rfile.readline(65537)
+        if not line.endswith(b"\n"):
+            return finish("truncated" if not line else "bad-chunking")
+        try:
+            remaining = int(line.split(b";", 1)[0].strip(), 16)
+        except ValueError:
+            return finish("bad-chunking")
+        if remaining < 0:
+            return finish("bad-chunking")
+        if remaining == 0:
+            while True:  # trailers, up to the blank line
+                trailer = rfile.readline(65537)
+                if trailer in (b"\r\n", b"\n"):
+                    return finish("ok")
+                if not trailer.endswith(b"\n"):
+                    return finish("truncated" if not trailer else "bad-chunking")
+        while remaining > 0:
+            piece = rfile.read(min(remaining, READ_CHUNK))
+            if not piece:
+                return finish("truncated")
+            reader.add(piece)
+            remaining -= len(piece)
+        if rfile.read(2) != b"\r\n":
+            return finish("bad-chunking")
+
+
+def error_body(family: str, kind: str, message: str) -> dict:
+    """
+    Description: Build an error body in the shape a provider uses.
+    Parameters:
+        family: "anthropic" ({"type": "error", "error": {...}}) or anything else for the OpenAI shape ({"error": {...}}).
+        kind: the error type, such as invalid_request_error or not_found_error.
+        message: the human-readable message.
+    Output: The JSON-serializable error body. No side effects.
+    """
+    if family == "anthropic":
+        return {"type": "error", "error": {"type": kind, "message": message}, "request_id": "req_mock"}
+    return {"error": {"message": message, "type": kind, "param": None, "code": None}}
+
+
+ROUTES: dict[tuple[str, str], str] = {}  # (method, path) -> route name
+
+
+def classify(method: str, target: str, headers: dict[str, str]) -> str:
+    """
+    Description: Name the route a request is for.
+    Parameters:
+        method: the HTTP method.
+        target: the request target with its query string.
+        headers: the request headers, keys lower-cased.
+    Output: websocket-upgrade for a request that asks to upgrade to a WebSocket, otherwise the route name from ROUTES,
+        otherwise "unknown".
+    """
+    if "websocket" in headers.get("upgrade", "").lower():
+        return "websocket-upgrade"
+    return ROUTES.get((method, target.partition("?")[0]), "unknown")
+
+
+
+class _Httpd(ThreadingHTTPServer):
+    """
+    Description: The HTTP server: a thread per connection, with the recording state the handlers share.
+    Parameters:
+        address: (host, port) to bind, already checked to be loopback.
+        config: the Config the mock runs with.
+        record_dir: where requests.jsonl goes, or None to keep the recording in memory only.
+    Output: A server whose entries list and optional file hold one dict per request.
+    """
+
+    daemon_threads = True
+    request_queue_size = 64
+
+    def __init__(self, address: tuple[str, int], config: Config, record_dir: Optional[Path]) -> None:
+        """
+        Description: Bind the socket and open the recording file.
+        Parameters:
+            address: (host, port) to bind.
+            config: the Config the mock runs with.
+            record_dir: the folder for requests.jsonl, created here with mode 0700, or None.
+        Output: None. Raises OSError when the address cannot be bound.
+        """
+        self.address_family = socket.AF_INET6 if ":" in address[0] else socket.AF_INET
+        super().__init__(address, _Handler)
+        self.config, self.record_dir = config, record_dir
+        self.lock = threading.Lock()
+        self.entries: list[dict] = []
+        self.serial = 0
+        self.record_file = None
+        if record_dir is not None:
+            Path(record_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd = os.open(Path(record_dir) / "requests.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            self.record_file = os.fdopen(fd, "a", encoding="utf-8")
+
+    def record(self, entry: dict) -> dict:
+        """
+        Description: Number a request's entry and append it to the recording.
+        Parameters:
+            entry: the dict describing the request and its answer.
+        Output: The entry with its "index" and "time" set. Writes one flushed JSON line when a file is open.
+        """
+        with self.lock:
+            full = {"index": len(self.entries), "time": datetime.now(timezone.utc).isoformat(), **entry}
+            self.entries.append(full)
+            if self.record_file is not None:
+                self.record_file.write(json.dumps(full, separators=(",", ":")) + "\n")
+                self.record_file.flush()
+        return full
+
+    def next_serial(self) -> int:
+        """
+        Description: Hand out the next reply counter, which keeps reply ids unique.
+        Parameters: None
+        Output: 1 for the first call, then 2, 3, and so on. Thread-safe.
+        """
+        with self.lock:
+            self.serial += 1
+            return self.serial
+
+
+class _Handler(BaseHTTPRequestHandler):
+    """
+    Description: Handle one connection's requests: read the body, record the request, answer it.
+    Parameters:
+        request: the connected socket (set by the server).
+    Output: One recording line and one response per request. Never raises on bad input.
+    """
+
+    protocol_version = "HTTP/1.1"
+    server_version = "mock-provider"
+
+    def log_message(self, format: str, *args: object) -> None:
+        """
+        Description: Silence the default per-request log line, which would add noise and the request target.
+        Parameters:
+            format: the log format string (ignored).
+            *args: its arguments (ignored).
+        Output: None.
+        """
+
+    def _body(self) -> RawBody:
+        """
+        Description: Read this request's body, whichever way it was sent.
+        Parameters: None
+        Output: A RawBody; chunked transfer encoding is read chunk by chunk, otherwise Content-Length bytes, and a
+            request with neither has an empty body. A non-numeric or negative Content-Length is bad-length.
+        """
+        cap = self.server.config.max_body
+        if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+            return _read_chunked(self.rfile, cap)
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            return RawBody(b"", 0, hashlib.sha256(b"").hexdigest(), "empty", False, None)
+        try:
+            length = int(raw_length)
+            if length < 0:
+                raise ValueError
+        except ValueError:
+            return RawBody(None, 0, hashlib.sha256(b"").hexdigest(), "bad-length", False, None)
+        return _read_fixed(self.rfile, length, cap)
+
+    def _send(self, status: int, payload: Optional[dict] = None, extra: Optional[dict] = None) -> None:
+        """
+        Description: Send a JSON response (no body for HEAD) and ignore a client that has gone.
+        Parameters:
+            status: the HTTP status.
+            payload: the JSON body, or None for an empty one.
+            extra: additional response headers.
+        Output: None. Writes to the connection.
+        """
+        data = b"" if payload is None else json.dumps(payload).encode()
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            for name, value in (extra or {}).items():
+                self.send_header(name, value)
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+        except OSError:
+            self.close_connection = True
+
+    def _serve(self) -> None:
+        """
+        Description: Answer any request: read it, record it, reply.
+        Parameters: None
+        Output: None. A body that failed to read, decode or fit the cap is answered 400; a WebSocket upgrade 426; a route
+            the mock does not know 404.
+        """
+        headers = {k.lower(): v for k, v in self.headers.items()}
+        route = classify(self.command, self.path, headers)
+        raw = self._body()
+        body_text, body_status, raw_b64, decoded_ok = None, raw.status, None, False
+        if raw.status in ("ok", "empty"):
+            if raw.status == "empty":
+                body_text = ""
+            else:
+                decoded = decode_body(raw.data, headers.get("content-encoding"), self.server.config.max_body)
+                body_status = decoded.status
+                if decoded.status == "ok":
+                    decoded_ok = True
+                    try:
+                        body_text = decoded.body.decode("utf-8")
+                    except UnicodeDecodeError:
+                        body_text, body_status = decoded.body.decode("utf-8", errors="replace"), "not-utf8"
+                elif decoded.status in ("unsupported-encoding", "zstd-unavailable"):
+                    raw_b64 = base64.b64encode(raw.data).decode("ascii")
+        family = "anthropic" if self.path.startswith("/v1/messages") else "openai"
+        if body_status in FAILED_BODY:
+            status, reply = 400, error_body(family, "invalid_request_error", f"request body rejected: {body_status}")
+            self.close_connection = self.close_connection or raw.status in ("bad-length", "bad-chunking", "truncated")
+        elif route == "websocket-upgrade":
+            status, reply = 426, error_body(family, "upgrade_required", "WebSocket is not supported; use HTTP")
+        else:
+            status, reply = 404, error_body("anthropic", "not_found_error", "no such route in the mock provider")
+        entry = {"method": self.command, "path": redact_target(self.path), "http_version": self.request_version,
+                 "route": route, "headers": redact_headers(self.headers.items()),
+                 "content_length_header": raw.content_length, "transfer_encoding": "chunked" if raw.chunked else None,
+                 "chunked": raw.chunked, "content_encoding": headers.get("content-encoding"),
+                 "body_size": raw.size, "body_sha256": raw.sha256, "body_status": body_status, "body": body_text,
+                 "response_status": status}
+        if raw_b64 is not None:
+            entry["body_raw_b64"] = raw_b64
+        self.server.record(entry)
+        self._send(status, reply)
+
+    do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _serve  # noqa: N815 - http.server names
+
+
+class MockServer:
+    """
+    Description: A running mock provider and its recording.
+    Parameters:
+        httpd: the bound server.
+        thread: the thread serving it.
+    Output: An object with host, port, url, record_dir, records() and close(); usable as a context manager.
+    """
+
+    def __init__(self, httpd: _Httpd, thread: threading.Thread) -> None:
+        """
+        Description: Wrap a started server.
+        Parameters:
+            httpd: the bound server.
+            thread: the thread running serve_forever.
+        Output: None.
+        """
+        self.server, self.thread = httpd, thread
+        self.host, self.port = httpd.server_address[0], httpd.server_address[1]
+        self.record_dir = httpd.record_dir
+
+    @property
+    def url(self) -> str:
+        """
+        Description: The base URL an agent should be pointed at.
+        Parameters: None
+        Output: "http://HOST:PORT" (IPv6 hosts in brackets).
+        """
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        return f"http://{host}:{self.port}"
+
+    def records(self) -> list[dict]:
+        """
+        Description: Copy the requests recorded so far.
+        Parameters: None
+        Output: A list of entry dicts in arrival order.
+        """
+        with self.server.lock:
+            return list(self.server.entries)
+
+    def close(self) -> None:
+        """
+        Description: Stop serving, release the port and close the recording file.
+        Parameters: None
+        Output: None; safe to call twice.
+        """
+        if self.thread.is_alive():
+            self.server.shutdown()
+            self.thread.join(timeout=10)
+        self.server.server_close()
+        if self.server.record_file is not None and not self.server.record_file.closed:
+            self.server.record_file.close()
+
+    def __enter__(self) -> "MockServer":
+        """
+        Description: Enter the context manager.
+        Parameters: None
+        Output: This server.
+        """
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        """
+        Description: Leave the context manager, closing the server.
+        Parameters:
+            *exc: the exception information (ignored).
+        Output: None.
+        """
+        self.close()
+
+
+def start_server(host: str = "127.0.0.1", port: int = 0, record_dir: Optional[Path] = None,
+                 turns: Iterable[dict] = (), max_body: int = MAX_BODY_BYTES,
+                 count_tokens_status: Optional[int] = None) -> MockServer:
+    """
+    Description: Start the mock provider on a loopback address in a background thread.
+    Parameters:
+        host: the address to bind; must be loopback (see ensure_loopback).
+        port: the port, 0 to let the system choose one.
+        record_dir: the folder for requests.jsonl, or None to record in memory only.
+        turns: the scripted replies (see load_script).
+        max_body: the largest request body accepted, in bytes.
+        count_tokens_status: an HTTP error status for count_tokens, or None for a fixed count.
+    Output: The running MockServer. Raises ValueError for a non-loopback host before anything is created, OSError when
+        the port is taken.
+    """
+    bind = ensure_loopback(host)
+    config = Config(tuple(turns), max_body, count_tokens_status)
+    httpd = _Httpd((bind, port), config, record_dir)
+    if not ipaddress.ip_address(httpd.server_address[0]).is_loopback:  # belt and braces after the bind
+        httpd.server_close()
+        raise ValueError("the mock provider bound a non-loopback address; refusing to serve")
+    thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True)
+    thread.start()
+    return MockServer(httpd, thread)
