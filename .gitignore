@@ -51,7 +51,6 @@ cli/tests/test_string_literal_detection.py
 cli/tests/fixtures/fake_secrets.txt
 
 # Scripts with fake secret patterns
-scripts/evaluate_stress_tests.py
 scripts/validate_training_data.py
 
 # Type checking
@@ -80,9 +79,6 @@ cli/Harpocrates/ml/artifacts/
 cli/Harpocrates/training/data/*.pkl
 cli/Harpocrates/training/data/*.json
 data_validation_report.json
-
-# One-off training scripts
-train_simple.py
 
 # Environment and secrets
 .env
