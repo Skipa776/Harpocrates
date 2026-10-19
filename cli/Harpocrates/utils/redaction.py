@@ -15,10 +15,7 @@ The rules:
 """
 from __future__ import annotations
 
-from dataclasses import replace
-from typing import Iterable, List, Optional
-
-from Harpocrates.core.result import Finding
+from typing import Optional
 
 _MIN_SAFE_LEN = 8
 _SHORT_TOKEN_LEN = 8
@@ -61,23 +58,4 @@ def redact_token(token: Optional[str]) -> Optional[str]:
     return f"{token[:4]}{_ELLIPSIS}{token[-4:]}"
 
 
-def redact_finding(finding: Finding) -> Finding:
-    """
-    Return a new ``Finding`` whose ``token`` field is redacted.
-
-    The input ``finding`` is never mutated — callers get back a fresh
-    dataclass instance, so the original (with the raw token) stays
-    available for audit logging or other privileged sinks.
-
-    If the finding has no token the result is identical (but still a
-    new instance for consistency).
-    """
-    return replace(finding, token=redact_token(finding.token))
-
-
-def redact_findings(findings: Iterable[Finding]) -> List[Finding]:
-    """Apply :func:`redact_finding` to every finding in ``findings``."""
-    return [redact_finding(f) for f in findings]
-
-
-__all__ = ["redact_token", "redact_finding", "redact_findings"]
+__all__ = ["redact_token"]

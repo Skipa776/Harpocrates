@@ -4,11 +4,7 @@ from __future__ import annotations
 import pytest
 
 from Harpocrates.core.result import EvidenceType, Finding, Severity
-from Harpocrates.utils.redaction import (
-    redact_finding,
-    redact_findings,
-    redact_token,
-)
+from Harpocrates.utils.redaction import redact_token
 
 # ---------------------------------------------------------------------------
 # redact_token
@@ -71,7 +67,7 @@ def test_redact_token_preserves_pattern_for_very_long_tokens() -> None:
 
 
 # ---------------------------------------------------------------------------
-# redact_finding
+# Finding helper
 # ---------------------------------------------------------------------------
 
 
@@ -83,59 +79,6 @@ def _make_finding(token: str | None) -> Finding:
         severity=Severity.HIGH,
         token=token,
     )
-
-
-def test_redact_finding_returns_new_instance_with_redacted_token() -> None:
-    original = _make_finding("AKIAIOSFODNN7EXAMPLE")
-    redacted = redact_finding(original)
-
-    assert redacted is not original
-    assert redacted.token == "AKIA...MPLE"
-    # Original must not be mutated.
-    assert original.token == "AKIAIOSFODNN7EXAMPLE"
-
-
-def test_redact_finding_preserves_all_non_token_fields() -> None:
-    original = _make_finding("AKIAIOSFODNN7EXAMPLE")
-    redacted = redact_finding(original)
-
-    assert redacted.type == original.type
-    assert redacted.snippet == original.snippet
-    assert redacted.evidence == original.evidence
-    assert redacted.severity == original.severity
-
-
-def test_redact_finding_handles_missing_token() -> None:
-    original = _make_finding(None)
-    redacted = redact_finding(original)
-
-    assert redacted.token is None
-    assert redacted is not original
-
-
-# ---------------------------------------------------------------------------
-# redact_findings
-# ---------------------------------------------------------------------------
-
-
-def test_redact_findings_returns_list_in_order() -> None:
-    findings = [
-        _make_finding("abcdefgh"),
-        _make_finding(None),
-        _make_finding("AKIAIOSFODNN7EXAMPLE"),
-    ]
-
-    result = redact_findings(findings)
-
-    assert [f.token for f in result] == ["a...h", None, "AKIA...MPLE"]
-
-
-def test_redact_findings_accepts_any_iterable() -> None:
-    findings = (_make_finding("abcdefgh"), _make_finding("1234567890"))
-    result = redact_findings(iter(findings))
-
-    assert isinstance(result, list)
-    assert [f.token for f in result] == ["a...h", "12...90"]
 
 
 # ---------------------------------------------------------------------------
