@@ -113,6 +113,7 @@ enforce = [
     "cli/Harpocrates/detectors/path_tokens.py",
     "cli/Harpocrates/grants.py",
     "cli/Harpocrates/harness.py",
+    "cli/Harpocrates/hooks.py",
     "cli/Harpocrates/install.py",
     "cli/Harpocrates/mcp/server.py",
     "cli/Harpocrates/ml/context.py",
