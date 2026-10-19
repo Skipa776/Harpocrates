@@ -487,3 +487,56 @@ def test_sec_09_f7_changing_directory_elsewhere_still_passes(home: Path, capsys,
 def test_sec_09_f7_a_working_directory_inside_state_is_not_left_by_cd_unnoticed(home: Path) -> None:
     (home / ".harpo").mkdir()
     assert allowlist.touches("cd .. && echo x >> allow", home / ".harpo")
+
+
+# ---- F8a: every path key of an edit call is checked ----------------------------------------------------------------
+
+def _edit_with(tool: str, extra: dict, cwd: Path, capsys, primary: dict) -> tuple[int, str]:
+    event = {"tool_name": tool, "cwd": str(cwd), "permission_mode": "default", "session_id": "s1", "tool_use_id": "t1",
+             "tool_input": {**primary, **extra, "old_string": "a", "new_string": "b", "content": "b", "new_source": "b"}}
+    code = hooks.decide(json.dumps(event), ask=True)
+    out = capsys.readouterr().out
+    return code, (json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else "")
+
+
+@pytest.mark.parametrize("d", BOTH)
+@pytest.mark.parametrize("tool", ["Edit", "MultiEdit", "Write", "NotebookEdit"])
+@pytest.mark.parametrize("keys", [
+    ("file_path", "notebook_path"), ("notebook_path", "file_path"),  # the tool's own key is safe, the other is not
+    ("file_path", "path"), ("notebook_path", "filePath"), ("file_path", "target_file"), ("file_path", "directory"),
+])
+def test_sec_09_f8a_a_state_path_in_any_path_key_is_refused(home: Path, capsys, tool: str, keys: tuple, d: str) -> None:
+    _state_with_files(home)
+    safe, state = str(home / "work" / "notes.txt"), f"~/{d}/allow"
+    for first, second in ((keys[0], keys[1]), (keys[1], keys[0])):
+        assert _edit_with(tool, {second: state}, home, capsys, {first: safe}) == (0, "deny"), (first, second)
+        assert _edit_with(tool, {second: str(home / d / "grants" / "s1.json")}, home, capsys,
+                          {first: safe}) == (0, "deny")
+    nested = {"edits": [{"old_string": "a", "new_string": "b", "file_path": state}]}  # a path key inside a list
+    assert _edit_with(tool, nested, home, capsys, {"file_path": safe}) == (0, "deny")
+
+
+def test_sec_09_f8a_without_any_path_key_the_call_is_blocked(home: Path, capsys) -> None:
+    event = {"tool_name": "Edit", "cwd": str(home), "tool_input": {"old_string": "a", "new_string": "b"}}
+    assert hooks.decide(json.dumps(event), ask=True) == 2  # fail closed, as before
+
+
+def test_sec_09_f8a_one_file_named_twice_passes_and_two_files_are_refused(home: Path, capsys) -> None:
+    (home / "work").mkdir()
+    notes = str(home / "work" / "notes.txt")
+    same = {"notebook_path": "./work/../work/notes.txt"}
+    assert _edit_with("NotebookEdit", same, home, capsys, {"file_path": notes}) == (0, "")  # one file, two spellings
+    other = {"notebook_path": str(home / "work" / "other.txt")}
+    assert _edit_with("NotebookEdit", other, home, capsys, {"file_path": notes}) == (0, "deny")  # which one is written?
+    assert _edit_with("Edit", {}, home, capsys, {"file_path": notes}) == (0, "")  # the ordinary call is untouched
+    assert _edit_with("NotebookEdit", {}, home, capsys, {"notebook_path": notes}) == (0, "")
+
+
+def test_sec_09_f8a_a_secret_file_named_by_two_keys_is_still_asked_about(home: Path, capsys) -> None:
+    """Naming the same file under both keys changes nothing: it is scanned and asked about like any other."""
+    (home / "work").mkdir()
+    secret = home / "work" / "n.ipynb"
+    secret.write_text('TOKEN = "' + "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" + '"\n')  # a canary
+    same = {"file_path": str(secret)}
+    code, decision = _edit_with("NotebookEdit", same, home, capsys, {"notebook_path": str(secret)})
+    assert (code, decision) == (0, "ask")  # asked about the notebook, as for any secret-bearing file

@@ -544,6 +544,35 @@ def _adds_placeholder(tool: str, args: dict, path: Path) -> bool:
     return before is not None and bool(_placeholders(after) - _placeholders(before))
 
 
+_PATH_KEY = re.compile(r"path|file|dir", re.I)  # file_path, notebook_path, path, filePath, target_file, directory ...
+
+
+def _path_values(node: object, in_path_key: bool = False, depth: int = 0) -> list[str]:
+    """
+    Description: Collect every string held under a key whose name says it is a path, anywhere in a tool call's input
+        (SEC-09): the edit tools take file_path or notebook_path, but a call may carry others and the hook must not
+        guess which one the tool will write.
+    Parameters:
+        node: the tool input, or a part of it.
+        in_path_key: whether the enclosing key names a path (strings and lists of strings under it count).
+        depth: how deep the walk is; nothing below 6 levels is looked at.
+    Output: The distinct non-empty path strings in order of appearance. Keys such as old_string, new_string, content and
+        new_source never match, so edit content is not taken for a path. No side effects.
+    """
+    if depth > 6:
+        return []
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found += _path_values(value, in_path_key or bool(_PATH_KEY.search(str(key))), depth + 1)
+    elif isinstance(node, list):
+        for item in node:
+            found += _path_values(item, in_path_key, depth + 1)
+    elif isinstance(node, str) and in_path_key and node:
+        found.append(node)
+    return list(dict.fromkeys(found))
+
+
 def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
     """
     Description: Check state-directory protection, placeholder introduction, then secret exposure
@@ -561,7 +590,9 @@ def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
         (allowlist.inside_state_dir; any mode, with or without --ask, granted or not; a target that
         cannot be placed is refused too), or a hard link to a file in them
         (allowlist.links_to_state_file, SEC-09): only the user changes the allowlist, and a ~/.harpo the
-        agent made would replace the migrated one. Then deny an edit that would add a placeholder
+        agent made would replace the migrated one. Every path-valued key of the call is checked, not only
+        the tool's own (_path_values; SEC-09), and a call that names two different files is refused because the
+        hook cannot know which one the tool writes. Then deny an edit that would add a placeholder
         (_adds_placeholder; any mode, granted or not). Then a secret-bearing file asks the user when
         a human can answer, after recording the call as pending so `--post` can turn Yes into a
         grant; with no session_id or tool_use_id to record it under, or no human, it is refused
@@ -569,18 +600,25 @@ def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
     """
     from Harpocrates import allowlist, grants, paths
 
-    raw = args.get("file_path") or args["notebook_path"]
+    own, other = ("notebook_path", "file_path") if tool == "NotebookEdit" else ("file_path", "notebook_path")
+    raw = args.get(own) or args[other]  # the key the tool itself uses first; KeyError (blocked) when neither is there
     path = cwd / os.path.expanduser(raw)
-    spellings = [path]
-    if raw == "~" or raw.startswith("~/"):  # the tool may expand ~ from the password database, not from $HOME (SEC-08)
-        spellings.append(paths.home().joinpath(raw[2:]))
+    named = _path_values(args)  # every path-valued key, whatever its name (SEC-09): not only the two the tools use
     try:
-        in_state_dir = any(allowlist.inside_state_dir(target) or allowlist.links_to_state_file(target)
-                           for target in spellings)
+        in_state_dir = False
+        for value in named:
+            spellings = [cwd / os.path.expanduser(value)]
+            if value == "~" or value.startswith("~/"):  # the tool may expand ~ from the password database (SEC-08)
+                spellings.append(paths.home().joinpath(value[2:]))
+            in_state_dir = in_state_dir or any(allowlist.inside_state_dir(target) or allowlist.links_to_state_file(target)
+                                               for target in spellings)
+        several = len({str((cwd / os.path.expanduser(value)).resolve()) for value in named}) > 1
     except (OSError, RuntimeError, ValueError):  # the target cannot be placed: fail closed
-        in_state_dir = True
+        in_state_dir, several = True, False
     if in_state_dir:
         return _deny(STATE_REFUSAL)
+    if several:  # which of the files the tool writes is not for the hook to guess
+        return _deny("That edit names more than one file. Ask the user to make it, or edit one file at a time.")
     if _adds_placeholder(tool, args, path):
         return _deny("That edit would write a Harpocrates placeholder into the file, replacing a real secret with a "
                      "fake value. Edit around the secret, or ask the user to change it.")
