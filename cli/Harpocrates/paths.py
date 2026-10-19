@@ -12,6 +12,9 @@ Migration (the first state_dir() call in a process finds ~/.harpo missing and ~/
     prints one line to stderr, with no file contents: ~/.harpocrates or anything inside it is a symlink or not a
     plain file or folder, ~/.harpo exists but is a symlink or a file, or a copy, fsync or rename step failed. After a
     failure the process does not retry or repeat the line.
+  * The walk is made with directory descriptors: ~/.harpocrates is opened with O_NOFOLLOW, every entry is opened relative
+    to its folder's descriptor with O_NOFOLLOW, and what was actually opened is judged by fstat and copied from its
+    descriptor. A folder or file swapped for a link after it was looked at is refused, never followed (SEC-09).
   * The copy is made in a fresh temp folder inside the home folder (same file system), fsynced, then os.rename-d
     to ~/.harpo, which is atomic: other processes see no ~/.harpo or the complete one. Two processes starting at once
     each copy to their own temp folder; the rename of the first wins and the other, finding ~/.harpo there, discards
@@ -25,6 +28,7 @@ hook's guards also protect the $HOME-derived folders, in case a tool expands `~`
 """
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import stat
@@ -105,28 +109,92 @@ def _fsync(path: Path) -> None:
         os.close(fd)
 
 
+# Whether this platform can open a folder's entries relative to its descriptor and refuse links (decided at import).
+_SAFE_WALK = (hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd
+              and os.stat in os.supports_dir_fd and os.scandir in os.supports_fd)
+_LINK_ERRNOS = (errno.ELOOP, errno.ENOTDIR, getattr(errno, "EMLINK", errno.ELOOP))  # what O_NOFOLLOW says about a link
+
+
+def _copy_file_fd(src_fd: int, target: Path, st: os.stat_result) -> None:
+    """
+    Description: Copy the bytes of an already opened regular file into a new file, with its mode and times.
+    Parameters:
+        src_fd: an open read-only descriptor of the source file (left open for the caller to close).
+        target: the new file's path, which must not exist (inside the migration's own temp folder).
+        st: the fstat of src_fd, for the mode and times.
+    Output: None. Raises OSError on a read, write or metadata failure. The source is only read, through src_fd.
+    """
+    out = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(os.dup(src_fd), "rb") as fsrc, os.fdopen(out, "wb") as fdst:
+        shutil.copyfileobj(fsrc, fdst)
+        fdst.flush()
+        os.fchmod(fdst.fileno(), stat.S_IMODE(st.st_mode))
+        os.utime(fdst.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def _copy_dir_fd(dir_fd: int, dst: Path) -> None:
+    """
+    Description: Copy the plain files and folders of an open source folder into the existing folder dst, one at a time.
+        Every entry is opened relative to the folder's descriptor with O_NOFOLLOW and judged by fstat of what was
+        actually opened, so a folder or file swapped for a link after it was looked at is never followed (SEC-09).
+    Parameters:
+        dir_fd: an open descriptor of the source folder (left open for the caller to close).
+        dst: an existing folder to fill.
+    Output: None. Raises _RefusedError on a symlink or a special file in the source, OSError on a copy failure. Writes
+        only under dst.
+    """
+    with os.scandir(dir_fd) as scan:
+        names = sorted(entry.name for entry in scan)
+    for name in names:
+        target = dst / name
+        looked = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        if stat.S_ISLNK(looked.st_mode):
+            raise _RefusedError(f"{name} is a symlink")
+        if not (stat.S_ISDIR(looked.st_mode) or stat.S_ISREG(looked.st_mode)):
+            raise _RefusedError(f"{name} is not a plain file or folder")
+        try:  # O_NONBLOCK: a file swapped for a pipe must not block the open
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+        except OSError as exc:
+            if exc.errno in _LINK_ERRNOS:
+                raise _RefusedError(f"{name} is a symlink") from exc
+            raise
+        try:
+            opened = os.fstat(fd)
+            if stat.S_ISDIR(opened.st_mode):
+                target.mkdir(mode=0o700)
+                _copy_dir_fd(fd, target)
+                os.chmod(target, stat.S_IMODE(opened.st_mode))  # after the children: a read-only folder is filled first
+                os.utime(target, ns=(opened.st_atime_ns, opened.st_mtime_ns))
+            elif stat.S_ISREG(opened.st_mode):
+                _copy_file_fd(fd, target, opened)
+            else:
+                raise _RefusedError(f"{name} is not a plain file or folder")
+        finally:
+            os.close(fd)
+
+
 def _copy_tree(src: Path, dst: Path) -> None:
     """
-    Description: Copy the plain files and folders under src into the existing folder dst, with modes and times, one at a time.
+    Description: Copy the plain files and folders under src into the existing folder dst, with modes and times, walking
+        with directory descriptors and O_NOFOLLOW so that nothing swapped for a link while the copy runs is followed.
     Parameters:
         src: the folder to read (only read).
         dst: an existing folder to fill.
-    Output: None. Raises _RefusedError on a symlink or a special file in src, OSError on a copy failure. Writes only under dst.
+    Output: None. Raises _RefusedError on a symlink or a special file in src, or when the platform cannot walk this way
+        (fail closed), OSError on a copy failure. Writes only under dst.
     """
-    with os.scandir(src) as scan:
-        entries = sorted(scan, key=lambda e: e.name)
-    for entry in entries:
-        target = dst / entry.name
-        if entry.is_symlink():
-            raise _RefusedError(f"{entry.name} is a symlink")
-        if entry.is_dir(follow_symlinks=False):
-            target.mkdir(mode=0o700)
-            _copy_tree(Path(entry.path), target)
-            shutil.copystat(entry.path, target)
-        elif entry.is_file(follow_symlinks=False):
-            shutil.copy2(entry.path, target, follow_symlinks=False)
-        else:
-            raise _RefusedError(f"{entry.name} is not a plain file or folder")
+    if not _SAFE_WALK:  # pragma: no cover - not POSIX
+        raise _RefusedError("this platform cannot walk a folder without following links")
+    try:
+        fd = os.open(src, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        if exc.errno in _LINK_ERRNOS:
+            raise _RefusedError(f"{src.name} is a symlink or not a folder") from exc
+        raise
+    try:
+        _copy_dir_fd(fd, dst)
+    finally:
+        os.close(fd)
 
 
 def _assert_plain_tree(root: Path) -> None:

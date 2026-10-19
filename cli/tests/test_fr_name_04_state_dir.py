@@ -182,7 +182,7 @@ def test_fr_name_04_symlinked_target_refused(home: Path, capsys, target: str, ol
         assert _snap(old) == before
 
 
-@pytest.mark.parametrize("failing", ["shutil.copy2", "os.rename", "os.fsync"])
+@pytest.mark.parametrize("failing", ["shutil.copyfileobj", "os.rename", "os.fsync"])
 def test_fr_name_04_failed_copy_falls_back_to_old_dir(home: Path, capsys, monkeypatch, failing: str) -> None:
     old = _make_old(home)
     before = _snap(old)
