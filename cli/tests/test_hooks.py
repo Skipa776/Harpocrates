@@ -129,7 +129,7 @@ def test_fr_read_03_hook_bash_review_cases(repo, capsys) -> None:
     root, _ = repo
     blocked = ["sudo bash -c 'cat .env'", "env bash -c 'cat .env'", "timeout 5 bash -c 'cat .env'",
                'echo "$(cat .env)"', "cat `echo .env`", "cd config && cat settings.py", "cat config/*",
-               "cat ~/../../" + str(root).lstrip("/") + "/.env", "git show HEAD:config/settings.py",
+               "cat ~/" + "../" * (len(Path.home().parts) - 1) + str(root).lstrip("/") + "/.env", "git show HEAD:config/settings.py",
                "dd if=.env", "cp .env /dev/stdout", "xargs -a .env echo", "rg -m 7 TOKEN .",
                "rg -t py TOKEN .", "rg -g '*.py' TOKEN"]
     for cmd in blocked:
@@ -146,6 +146,9 @@ def test_fr_read_03_hook_environment(repo, capsys, monkeypatch: pytest.MonkeyPat
     for cmd in ("env", "printenv", "echo $GITHUB_TOKEN", "echo ${GITHUB_TOKEN}", "cat /proc/self/environ"):
         code, out = _run(_bash(root, cmd), capsys)
         assert code == 0 and _denied(out) and token not in out, cmd
+    # An ordinary home path is not a secret. The fixture home sits under a random-looking temp folder on macOS,
+    # which the entropy detector rightly flags, so pin an ordinary value for this one check.
+    monkeypatch.setenv("HOME", "/home/dev")
     assert _run(_bash(root, "echo $HOME"), capsys) == (0, "")
 
 
@@ -967,6 +970,9 @@ def test_fr_read_03_hook_env_assignment_in_code_is_not_an_environment_dump(repo,
                 "ps eww", "ps auxe", "ps e", "echo env", "grep -n env README.md"):
         code, out = _run(_bash(root, cmd), capsys)
         assert code == 0 and _denied(out) and token not in out, cmd
+    # An ordinary home path is not a secret. The fixture home sits under a random-looking temp folder on macOS,
+    # which the entropy detector rightly flags, so pin an ordinary value for this one check.
+    monkeypatch.setenv("HOME", "/home/dev")
     assert _run(_bash(root, "echo $HOME"), capsys) == (0, "")
 
 
