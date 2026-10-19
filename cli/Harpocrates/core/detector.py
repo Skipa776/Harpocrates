@@ -1,5 +1,5 @@
 """
-Core detection engine for Harpocrates.
+Core detection engine for Harpo.
 
 Three-phase pipeline per line:
   1. CRITICAL regex  → Finding(CRITICAL, confidence=0.99) — skips ML

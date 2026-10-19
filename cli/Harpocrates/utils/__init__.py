@@ -1,1 +1,1 @@
-"""Harpocrates utilities: line reading and token redaction."""
+"""Harpo utilities: line reading and token redaction."""

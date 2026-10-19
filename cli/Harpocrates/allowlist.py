@@ -722,7 +722,7 @@ def _edits_module(text: str) -> bool:
 
 def _glob_runs_allow(command: str) -> bool:
     """
-    Description: Detect a glob in the program word that the shell would expand to a Harpocrates program, followed by
+    Description: Detect a glob in the program word that the shell would expand to a Harpo program, followed by
         `allow` in the same command.
     Parameters:
         command: Shell command text to inspect.

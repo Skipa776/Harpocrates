@@ -20,7 +20,7 @@ def _no_old_command(text: str, *, what: str) -> None:
 
 def test_fr_name_02_state_refusal_tells_the_user_to_run_harpo_allow() -> None:
     assert hooks.STATE_REFUSAL == (
-        "Only the user can change the Harpocrates allowlist. Ask them to run `harpo allow <path>` in their own terminal.")
+        "Only the user can change the Harpo allowlist. Ask them to run `harpo allow <path>` in their own terminal.")
 
 
 def test_fr_name_02_a_refused_allow_command_shows_that_text(tmp_path: Path, capsys: pytest.CaptureFixture,

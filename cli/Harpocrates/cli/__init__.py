@@ -1,5 +1,5 @@
 """
-Command-line interface for Harpocrates secrets detection.
+Command-line interface for Harpo secrets detection.
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from Harpocrates.core.scanner import ScanEngine, scan_directory, scan_file, scan
 from Harpocrates.paths import StateDirUnusableError
 
 app = typer.Typer(
-    name="harpocrates",
-    help="Harpocrates - Secrets detection for code repositories",
+    name="harpo",
+    help="Harpo - Secrets detection for code repositories",
     add_completion=False,
 )
 console = Console()
@@ -123,12 +123,12 @@ def _version_callback(value: bool) -> None:
     if value:
         from Harpocrates import __version__
 
-        typer.echo(f"harpocrates {__version__}")
+        typer.echo(f"harpo {__version__}")
         raise typer.Exit(code=0)
 
 
 @app.callback(help=(
-    'Harpocrates - Secrets detection for code repositories'
+    'Harpo - Secrets detection for code repositories'
 ))
 def _main(
     version: bool = typer.Option(
@@ -137,11 +137,11 @@ def _main(
     ),
 ) -> None:
     """
-    Description: Provide the root CLI callback for Harpocrates secret detection.
+    Description: Provide the root CLI callback for Harpo secret detection.
     Parameters:
         version: Eager version flag handled by _version_callback.
     Output: None; the callback body has no side effects.
-    Notes: Harpocrates - Secrets detection for code repositories.
+    Notes: Harpo - Secrets detection for code repositories.
     """
 
 
@@ -155,37 +155,37 @@ def _main(
     '    Examples:\n'
     '\n'
     '        # Scan a single file\n'
-    '        harpocrates scan config.env\n'
+    '        harpo scan config.env\n'
     '\n'
     '        # Scan a directory recursively\n'
-    '        harpocrates scan ./my_project\n'
+    '        harpo scan ./my_project\n'
     '\n'
     '        # Output as JSON\n'
-    '        harpocrates scan ./my_project --json\n'
+    '        harpo scan ./my_project --json\n'
     '\n'
     '        # Ignore specific patterns\n'
-    '        harpocrates scan ./my_project --ignore "*.test.js,test_*"\n'
+    '        harpo scan ./my_project --ignore "*.test.js,test_*"\n'
     '\n'
     '        # Fewer, higher-confidence findings\n'
-    '        harpocrates scan ./my_project --ml-threshold 0.7\n'
+    '        harpo scan ./my_project --ml-threshold 0.7\n'
     '\n'
     '        # Require the native regex/entropy scanner; ML still runs in Python\n'
-    '        harpocrates scan ./my_project --engine rust\n'
+    '        harpo scan ./my_project --engine rust\n'
     '\n'
     '        # Display full token values (NOT recommended outside local debugging)\n'
-    '        harpocrates scan config.env --show-secrets\n'
+    '        harpo scan config.env --show-secrets\n'
     '\n'
     '        # Scan every commit in git history (finds secrets deleted from disk)\n'
-    '        harpocrates scan . --history\n'
+    '        harpo scan . --history\n'
     '\n'
     '        # Only fail CI on high or critical findings\n'
-    '        harpocrates scan ./my_project --fail-on high\n'
+    '        harpo scan ./my_project --fail-on high\n'
     '\n'
     '        # Report findings but never return a non-zero exit code\n'
-    '        harpocrates scan ./my_project --fail-on none\n'
+    '        harpo scan ./my_project --fail-on none\n'
     '\n'
     '        # XAI: emit JSON with per-feature SHAP contributions\n'
-    '        harpocrates scan ./my_project --explain | jq '
+    '        harpo scan ./my_project --explain | jq '
     "'.findings[0].explanation.top_positive'\n"
     '    '
 ))
@@ -261,12 +261,12 @@ def scan(
     Notes: By default, detected secret tokens are redacted in both table and JSON output. Pass
         --show-secrets to display full tokens (use with caution).
     Notes: Examples:
-    Notes:     # Scan a single file     harpocrates scan config.env
-    Notes:     # Scan a directory recursively     harpocrates scan ./my_project
-    Notes:     # Output as JSON     harpocrates scan ./my_project --json
-    Notes:     # Ignore specific patterns     harpocrates scan ./my_project --ignore
+    Notes:     # Scan a single file     harpo scan config.env
+    Notes:     # Scan a directory recursively     harpo scan ./my_project
+    Notes:     # Output as JSON     harpo scan ./my_project --json
+    Notes:     # Ignore specific patterns     harpo scan ./my_project --ignore
         "*.test.js,test_*"
-    Notes:     # Fewer, higher-confidence findings     harpocrates scan ./my_project --ml-threshold
+    Notes:     # Fewer, higher-confidence findings     harpo scan ./my_project --ml-threshold
         0.7
     Notes:     # Require the native regex/entropy scanner; ML still runs in Python     harpocrates
         scan ./my_project --engine rust
@@ -274,11 +274,11 @@ def scan(
         scan config.env --show-secrets
     Notes:     # Scan every commit in git history (finds secrets deleted from disk)     harpocrates
         scan . --history
-    Notes:     # Only fail CI on high or critical findings     harpocrates scan ./my_project
+    Notes:     # Only fail CI on high or critical findings     harpo scan ./my_project
         --fail-on high
-    Notes:     # Report findings but never return a non-zero exit code     harpocrates scan
+    Notes:     # Report findings but never return a non-zero exit code     harpo scan
         ./my_project --fail-on none
-    Notes:     # XAI: emit JSON with per-feature SHAP contributions     harpocrates scan
+    Notes:     # XAI: emit JSON with per-feature SHAP contributions     harpo scan
         ./my_project --explain | jq '.findings[0].explanation.top_positive'
     """
     # Zero-file early return — pre-commit passes no files when nothing is staged.
@@ -486,13 +486,13 @@ def scan(
 ))
 def version() -> None:
     """
-    Description: Display the installed Harpocrates distribution version.
+    Description: Display the installed Harpo distribution version.
     Parameters: None
     Output: None; prints version information and propagates metadata lookup or output errors.
     Notes: Display version information.
     """
     from importlib.metadata import version as _version
-    console.print(f"Harpocrates version {_version('harpocrates')}")
+    console.print(f"Harpo version {_version('harpocrates')}")
 
 
 @app.command(help=(
@@ -576,7 +576,7 @@ def install_cmd(
 
 
 @app.command("uninstall", help=(
-    'Remove exactly what `harpocrates install` added; everything else and '
+    'Remove exactly what `harpo install` added; everything else and '
     'the backups stay.'
 ))
 def uninstall_cmd(
@@ -585,7 +585,7 @@ def uninstall_cmd(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write and run nothing."),
 ) -> None:
     """
-    Description: Remove configuration owned by Harpocrates installation while retaining other
+    Description: Remove configuration owned by Harpo installation while retaining other
         settings and backups.
     Parameters:
         claude_code: Whether to explicitly select Claude Code.
@@ -594,7 +594,7 @@ def uninstall_cmd(
     Output: None on success; prints reports, may remove owned configuration and MCP registration,
         and raises typer.Exit with code 1 for missing targets or failed reports. Removal errors may
         propagate.
-    Notes: Remove exactly what `harpocrates install` added; everything else and the backups stay.
+    Notes: Remove exactly what `harpo install` added; everything else and the backups stay.
     """
     _install_run(True, claude_code, codex, dry_run)
 
@@ -609,7 +609,7 @@ def _interactive() -> bool:
 
 
 @app.command(help=(
-    'Let agents read a path that Harpocrates would otherwise flag '
+    'Let agents read a path that Harpo would otherwise flag '
     '(FR-READ-05). Every use is logged.\n'
     '\n'
     '    Exit code 0 ok, 1 refused or error, 3 a broad name needs '
@@ -639,7 +639,7 @@ def allow(
         for refusal or handled error, or 3 when a broad name requires confirmation. May update the
         allowlist or prompt interactively; uses are logged by the hook. Unhandled filesystem or
         confirmation errors propagate.
-    Notes: Let agents read a path that Harpocrates would otherwise flag (FR-READ-05). Every use is
+    Notes: Let agents read a path that Harpo would otherwise flag (FR-READ-05). Every use is
         logged.
     Notes: Exit code 0 ok, 1 refused or error, 3 a broad name needs confirmation (--yes).
     """

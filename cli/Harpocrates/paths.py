@@ -1,4 +1,4 @@
-"""Where Harpocrates keeps the user's data (FR-NAME-04): ~/.harpo, copied once from ~/.harpocrates.
+"""Where Harpo keeps the user's data (FR-NAME-04): ~/.harpo, copied once from ~/.harpocrates.
 
 state_dir() is the one place that knows. The allowlist, the session grants and the install record all go through it,
 so a process never mixes the two folders.
@@ -305,7 +305,7 @@ def _announce(home: Path, reason: str) -> None:
     """
     _failed.add(str(home))
     try:
-        print(f"harpocrates: could not move to ~/{NEW_DIR} ({reason}); keeping ~/{OLD_DIR}", file=sys.stderr)
+        print(f"harpo: could not move to ~/{NEW_DIR} ({reason}); keeping ~/{OLD_DIR}", file=sys.stderr)
     except OSError:
         pass
 
@@ -321,7 +321,7 @@ def _announce_unusable(home_folder: Path) -> None:
         return
     _unusable_announced.add(str(home_folder))
     try:
-        print(f"harpocrates: ~/{NEW_DIR} is not a plain folder (a symlink or a file); its allowlist counts as empty "
+        print(f"harpo: ~/{NEW_DIR} is not a plain folder (a symlink or a file); its allowlist counts as empty "
               "and nothing is written there", file=sys.stderr)
     except OSError:
         pass

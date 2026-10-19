@@ -1,5 +1,5 @@
 """
-Heuristic violation classification for Harpocrates findings.
+Heuristic violation classification for Harpo findings.
 
 Provides ViolationCategory (WHAT was leaked) and CategoryInference (WHY the
 category was chosen), distinct from EvidenceType (HOW it was found).

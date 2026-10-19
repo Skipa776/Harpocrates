@@ -194,7 +194,7 @@ def test_sec_09_f4_an_unusable_harpo_never_falls_back_to_the_old_folder(home: Pa
     assert grants.granted(SID) == frozenset()  # the old folder's grant is not back either
     assert [("path", "/etc")] != allowlist.listing()  # and a planted list behind the link is not read
     err = capsys.readouterr().err
-    assert err.count("\n") == 1 and err.startswith("harpocrates: ") and "~/.harpo " in err
+    assert err.count("\n") == 1 and err.startswith("harpo: ") and "~/.harpo " in err
     assert (home / ".harpocrates" / "allow").read_bytes() == old_text  # the old folder was not touched
 
 

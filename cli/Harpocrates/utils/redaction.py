@@ -1,7 +1,7 @@
 """
 Secret redaction utilities.
 
-Single source of truth for how Harpocrates renders secret tokens in any
+Single source of truth for how Harpo renders secret tokens in any
 user-facing output (CLI tables, JSON responses, API payloads, logs).
 Keeping this logic in one place guarantees that every surface stays in
 lockstep with the redaction contract.

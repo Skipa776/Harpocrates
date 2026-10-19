@@ -16,7 +16,7 @@ def _command_name(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatc
 def test_version_flag_prints_and_exits_zero() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert result.stdout.strip() == f"harpocrates {__version__}"
+    assert result.stdout.strip() == f"harpo {__version__}"  # FR-NAME-01: both command names print the new name
 
 
 def test_version_subcommand_still_works() -> None:

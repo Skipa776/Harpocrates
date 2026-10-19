@@ -1,4 +1,4 @@
-"""Python boundary for the native Harpocrates scanning engine.
+"""Python boundary for the native Harpo scanning engine.
 
 Rust owns deterministic regex matching, entropy calculation, and candidate
 generation. Python remains authoritative for category inference and optional

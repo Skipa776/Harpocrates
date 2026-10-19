@@ -78,7 +78,7 @@ def _names(folder: Path) -> list[str]:
 
 
 def _one_line(err: str) -> None:
-    assert err.count("\n") == 1 and err.startswith("harpocrates: ") and ".harpocrates" in err, err
+    assert err.count("\n") == 1 and err.startswith("harpo: ") and ".harpocrates" in err, err
     assert "canary" not in err  # file contents never reach the message
 
 
@@ -179,7 +179,7 @@ def test_fr_name_04_symlinked_target_refused(home: Path, capsys, target: str, ol
     assert allowlist.entries() == [] and allowlist.names() == []  # unusable: an empty allowlist, old list or not
     assert grants.granted(SID) == frozenset()
     err = capsys.readouterr().err
-    assert err.count("\n") == 1 and err.startswith("harpocrates: ") and "~/.harpo " in err
+    assert err.count("\n") == 1 and err.startswith("harpo: ") and "~/.harpo " in err
     assert paths.state_dir() == home / ".harpo" and capsys.readouterr().err == ""  # announced once per process
     if old_exists:
         assert _snap(old) == before
@@ -524,7 +524,7 @@ def test_fr_name_04_install_writes_the_deny_rules_for_both_dirs(home: Path) -> N
     deny = json.loads((home / ".claude" / "settings.json").read_text())["permissions"]["deny"]
     assert "Edit(~/.harpo/**)" in deny and "Edit(~/.harpocrates/**)" in deny
     cfg = tomllib.loads((home / ".codex" / "config.toml").read_text())
-    filesystem = cfg["permissions"]["harpocrates"]["filesystem"]
+    filesystem = cfg["permissions"]["harpo"]["filesystem"]
     assert filesystem["~/.harpo"] == "deny" and filesystem["~/.harpocrates"] == "deny"
 
 
@@ -661,4 +661,4 @@ def test_fr_name_04_hook_refuses_when_the_target_cannot_be_placed(home: Path, ca
 def test_fr_name_04_hook_refusal_text_points_to_the_user(home: Path, capsys) -> None:
     hooks.decide(json.dumps(_edit_event("Write", "~/.harpo/allow", home)), ask=True)
     reason = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecisionReason"]
-    assert reason.startswith("Only the user can change the Harpocrates allowlist")
+    assert reason.startswith("Only the user can change the Harpo allowlist")

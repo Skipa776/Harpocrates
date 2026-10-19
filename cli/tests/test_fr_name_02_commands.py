@@ -105,7 +105,7 @@ def test_fr_name_02_new_commands_no_notice(monkeypatch: pytest.MonkeyPatch, caps
     from Harpocrates.mcp import server
 
     code, out, err = _run(main, ["harpo", "--version"], monkeypatch, capsys)
-    assert (code, out, err) == (0, f"harpocrates {__version__}\n", "")
+    assert (code, out, err) == (0, f"harpo {__version__}\n", "")  # FR-NAME-01: the version line says Harpo
 
     monkeypatch.setattr(server.mcp, "run", lambda **kwargs: None)
     assert _run(server.main, ["harpo-mcp"], monkeypatch, capsys) == (0, "", "")

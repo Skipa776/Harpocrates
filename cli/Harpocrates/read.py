@@ -225,7 +225,7 @@ class Redactor:
                     out.append(f"{rel}:{n}:{line}")
                     if len(out) >= max_matches:
                         body = "\n".join(out)
-                        return body + f"\n[harpocrates: stopped at {max_matches} matches]" + _footer(body)
+                        return body + f"\n[harpo: stopped at {max_matches} matches]" + _footer(body)
         body = "\n".join(out)
         return body + _footer(body)
 
@@ -260,5 +260,5 @@ def _footer(body: str) -> str:
     found = sorted(set(_PLACEHOLDER.findall(body)))
     if not found:
         return ""
-    return (f"\n[harpocrates: {len(found)} secret(s) redacted as <<HARPO:type:hash>>. "
+    return (f"\n[harpo: {len(found)} secret(s) redacted as <<HARPO:type:hash>>. "
             "They are not the real values; reference the variable or config key instead of copying them.]")
