@@ -327,6 +327,21 @@ def _announce_unusable(home_folder: Path) -> None:
         pass
 
 
+def peek_state_dir() -> Path:
+    """
+    Description: What state_dir() would return right now, without doing anything it does: no copy of the old folder,
+        no line on stderr, nothing created (SEC-09 F8c; a dry run must have no side effects).
+    Parameters:
+        None: the home folder is looked up on every call (home(): the password database, not $HOME).
+    Output: ~/.harpo when it exists in any form or when ~/.harpocrates is not there; ~/.harpocrates when only that exists
+        (state_dir() would copy it to ~/.harpo first, so a dry run reads it where it is). Raises RuntimeError only when
+        no home folder can be determined.
+    """
+    base = home()
+    new, old = base / NEW_DIR, base / OLD_DIR
+    return new if os.path.lexists(new) or not os.path.lexists(old) else old
+
+
 def state_dir() -> Path:
     """
     Description: The folder that holds the user's allowlist, session grants and install record: ~/.harpo, after copying

@@ -540,3 +540,55 @@ def test_sec_09_f8a_a_secret_file_named_by_two_keys_is_still_asked_about(home: P
     same = {"file_path": str(secret)}
     code, decision = _edit_with("NotebookEdit", same, home, capsys, {"notebook_path": str(secret)})
     assert (code, decision) == (0, "ask")  # asked about the notebook, as for any secret-bearing file
+
+
+# ---- F8c: a dry run has no side effects --------------------------------------------------------------------------
+
+def _everything(root: Path) -> dict:
+    """Kind, mode, size, mtime and content of everything under root (nothing followed), root's own mtime too."""
+    out: dict = {".": root.lstat().st_mtime_ns}
+    for p in sorted(root.rglob("*")):
+        st = p.lstat()
+        out[str(p.relative_to(root))] = (stat.S_IFMT(st.st_mode), stat.S_IMODE(st.st_mode), st.st_size, st.st_mtime_ns,
+                                         p.read_bytes() if p.is_file() and not p.is_symlink() else None)
+    return out
+
+
+@pytest.mark.parametrize("remove", [False, True])
+@pytest.mark.parametrize("via", ["api", "cli"])
+def test_sec_09_f8c_a_dry_run_does_not_migrate_or_write_anything(home: Path, remove: bool, via: str) -> None:
+    old = _make_old(home)
+    before = _everything(home)
+    if via == "api":
+        run = install.uninstall_harnesses if remove else install.install_harnesses
+        reports = run(["codex"], dry_run=True)
+        assert not install.failed(reports) and not any(r.refused for r in reports)
+    else:
+        from typer.testing import CliRunner
+
+        from Harpocrates.cli import app
+
+        done = CliRunner().invoke(app, ["uninstall" if remove else "install", "--codex", "--dry-run"])
+        assert done.exit_code == 0 and "dry run" in done.output.lower(), done.output
+    assert not os.path.lexists(home / ".harpo")  # no migration
+    assert _names(home) == [".harpocrates"] and _everything(home) == before  # and nothing else written either
+    assert old.is_dir()
+    assert paths.peek_state_dir() == old and not os.path.lexists(home / ".harpo")
+
+
+def test_sec_09_f8c_peek_answers_what_state_dir_would_without_doing_it(home: Path) -> None:
+    assert paths.peek_state_dir() == home / ".harpo"  # nothing at all: where a writer would create it
+    assert _names(home) == []
+    old = _make_old(home)
+    assert paths.peek_state_dir() == old and not os.path.lexists(home / ".harpo")  # state_dir() would copy it first
+    assert paths.state_dir() == home / ".harpo"  # the real thing does
+    assert paths.peek_state_dir() == home / ".harpo"
+    shutil.rmtree(home / ".harpo")
+    os.symlink(_foreign(home), home / ".harpo")
+    assert paths.peek_state_dir() == home / ".harpo"  # a link counts as existing, as in state_dir()
+
+
+def test_sec_09_f8c_a_dry_run_with_an_unusable_harpo_refuses_like_the_real_run(home: Path) -> None:
+    os.symlink(_foreign(home), home / ".harpo")
+    reports = install.install_harnesses(["codex"], dry_run=True)
+    assert reports[0].refused and "~/.harpo" in reports[0].refused

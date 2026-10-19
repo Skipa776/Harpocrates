@@ -798,14 +798,15 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
         dry_run: Whether to preview edits without applying them or invoking Claude.
         remove: Whether to remove installed configuration.
     Output: List of reports containing outcomes and refusals; may write harness files, backups, MCP
-        registration, and private install state. State lookup may migrate legacy state; unhandled
-        filesystem or data-shape errors propagate.
+        registration, and private install state. The state lookup may copy the old state folder to the new
+        one, except in a dry run, which has no side effects (SEC-09); unhandled filesystem or data-shape
+        errors propagate.
     Notes: The install record (RECORD) says what install added, so uninstall removes only that and
         leaves the user's own identical rules, hooks and MCP registration. It is written last, after
         the files it describes.
     """
     home = Path.home()
-    state = state_dir()
+    state = paths.peek_state_dir() if dry_run else state_dir()  # a dry run looks at the state folder, it never moves it
     reports = [Report(t) for t in targets]
     try:
         paths.require_usable(state)  # a symlink or a file where ~/.harpo should be: no record read, none written
