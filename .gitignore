@@ -155,3 +155,5 @@ docs/assets/divider-how-it-scans.png
 docs/assets/divider-installation.png
 docs/assets/divider-license.png
 docs/assets/divider-usage.png
+bench/build_model_improvement_nb.py
+bench/model_improvement.ipynb

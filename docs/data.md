@@ -18,7 +18,7 @@ Every dataset used to train, validate, or benchmark the Harpocrates detector. Al
 - `commit` 0.5559: the CLI default, precision-first;
 - `gate` 0.1904: read tool and egress gate, recall-first.
 
-Each is set so the model raises v1.1's ML alarm rate on the val-split OSS repos (14.9 and 56.8 per 1,000 files). Measured results are in `model_config.json` and the README; the full log is in `bench/model_improvement.ipynb`.
+Each is set so the model raises v1.1's ML alarm rate on the val-split OSS repos (14.9 and 56.8 per 1,000 files). Measured results are in `model_config.json` and the README; the full improvement log is in the training pipeline at tag v1.3.0.
 
 ## Training data
 
@@ -28,7 +28,7 @@ Each is set so the model raises v1.1's ML alarm rate on the val-split OSS repos 
 | `data/eval/train_v5.jsonl` | 30,000 | 15,000 / 15,000 | Fake secrets inserted into real files from 142 train-split repos; lookalike negatives; real scanner candidates from the same code as negatives | `scripts/fetch_oss_corpus.py`, `scripts/build_eval_set.py --split train` | Project (generators); inserted into code from the OSS corpus below |
 | `data/eval/llm_train_v5.jsonl` | 23,937 | 11,655 / 12,282 | Code written by LLMs with typed `{{SECRET:kind}}` / `{{NONSECRET:kind}}` slots, filled with generated fake values | `scripts/generate_llm_slots.py`, `scripts/build_slot_set.py` | Project (values); LLM-written code, see below |
 
-**Round 2 (model v17, shipped as v1.2; `bench/model_improvement.ipynb` round 2):**
+**Round 2 (model v17, shipped as v1.2; round 2 of the improvement log at tag v1.3.0):**
 - `synthetic_v4_clean.jsonl` is rebuilt with three more `clean_v4.py` rules:
   - word paths (`application/json`, `actions/checkout`) relabeled: 241
   - function names in call position relabeled: 96
