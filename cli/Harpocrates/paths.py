@@ -10,8 +10,13 @@ Migration (the first state_dir() call in a process finds ~/.harpo missing and ~/
     Edit deny rules) covers both folders for that reason.
   * It fails closed. Anything doubtful keeps ~/.harpocrates in use (never an empty allowlist that lost its grants) and
     prints one line to stderr, with no file contents: ~/.harpocrates or anything inside it is a symlink or not a
-    plain file or folder, ~/.harpo exists but is a symlink or a file, or a copy, fsync or rename step failed. After a
-    failure the process does not retry or repeat the line.
+    plain file or folder, or a copy, fsync or rename step failed. After a failure the process does not retry or
+    repeat the line. This fallback holds only while ~/.harpo does not exist at all.
+  * Once ~/.harpo exists in any form, ~/.harpocrates is never used again (SEC-09). A ~/.harpo that is a symlink or a
+    file is unusable: state_dir() still returns it, every reader treats it as empty (no allowlist entry, no grant, no
+    install record) and every writer refuses with StateDirUnusableError rather than write through it, so removing an
+    allowlist entry cannot be undone by swapping ~/.harpo for a link and letting an older list come back. One line
+    on stderr says so, once per process. The same holds for a ~/.harpocrates that is a link, when it is the one in use.
   * The walk is made with directory descriptors: ~/.harpocrates is opened with O_NOFOLLOW, every entry is opened relative
     to its folder's descriptor with O_NOFOLLOW, and what was actually opened is judged by fstat and copied from its
     descriptor. A folder or file swapped for a link after it was looked at is refused, never followed (SEC-09).
@@ -50,6 +55,7 @@ _NOTE_TEXT = "Copied from ~/.harpocrates when Harpo moved here. That folder was 
 
 _lock = threading.Lock()
 _failed: set[str] = set()  # home folders whose migration failed in this process: not retried, announced once
+_unusable_announced: set[str] = set()  # home folders whose unusable ~/.harpo was announced in this process
 
 
 class _RefusedError(Exception):
@@ -82,6 +88,16 @@ def home() -> Path:
     return Path(folder)
 
 
+class StateDirUnusableError(OSError, ValueError):
+    """
+    Description: A writer was asked to write into a state directory that is a symlink or a file (SEC-09).
+    Parameters:
+        None: the message says which folder and what to do.
+    Output: Raised by require_usable and the writers that call it. It is both an OSError and a ValueError, so the CLI's
+        existing handlers report it as a refusal with this message.
+    """
+
+
 def _plain_dir(path: Path) -> bool:
     """
     Description: Whether path is a real directory and not a symlink to one (nothing is followed).
@@ -93,6 +109,32 @@ def _plain_dir(path: Path) -> bool:
         return stat.S_ISDIR(os.lstat(path).st_mode)
     except OSError:
         return False
+
+
+def unusable(state: Path) -> bool:
+    """
+    Description: Whether a state directory exists in a form Harpo will not use: a symlink (even a dangling one), a file or
+        anything else that is not a plain folder (SEC-09).
+    Parameters:
+        state: the folder state_dir() returned.
+    Output: True when something is there that is not a plain directory; False for a plain directory and for nothing at
+        all (a state directory that does not exist yet is normal: writers create it). No side effects, nothing followed.
+    """
+    return os.path.lexists(state) and not _plain_dir(state)
+
+
+def require_usable(state: Path) -> None:
+    """
+    Description: Refuse to write into a state directory that is a symlink or a file.
+    Parameters:
+        state: the folder state_dir() returned.
+    Output: None for a plain folder or a missing one. Raises StateDirUnusableError, with a message that names the folder
+        and says what to do, when unusable(state).
+    """
+    if unusable(state):
+        raise StateDirUnusableError(
+            f"~/{state.name} is not a plain folder (it is a symlink or a file), so Harpo reads its allowlist as empty "
+            "and writes nothing there. Move or remove it, then try again.")
 
 
 def _fsync(path: Path) -> None:
@@ -268,10 +310,28 @@ def _announce(home: Path, reason: str) -> None:
         pass
 
 
+def _announce_unusable(home_folder: Path) -> None:
+    """
+    Description: Print one line to stderr, once per process, saying ~/.harpo is a symlink or a file and so counts as empty.
+    Parameters:
+        home_folder: the home folder, as the key that stops a second line.
+    Output: None. Adds the folder to the announced set and writes one line to stderr (a closed stderr is ignored).
+    """
+    if str(home_folder) in _unusable_announced:
+        return
+    _unusable_announced.add(str(home_folder))
+    try:
+        print(f"harpocrates: ~/{NEW_DIR} is not a plain folder (a symlink or a file); its allowlist counts as empty "
+              "and nothing is written there", file=sys.stderr)
+    except OSError:
+        pass
+
+
 def state_dir() -> Path:
     """
     Description: The folder that holds the user's allowlist, session grants and install record: ~/.harpo, after copying
-        it once from ~/.harpocrates when only that exists. Fails closed to ~/.harpocrates (see the module docstring).
+        it once from ~/.harpocrates when only that exists. Fails closed to ~/.harpocrates (see the module docstring) only
+        while ~/.harpo does not exist at all; a ~/.harpo that is a symlink or a file is returned too, as unusable().
     Parameters:
         None: the home folder is looked up on every call (home(): the password database, not $HOME).
     Output: The folder's path (it may not exist yet; writers create it). Side effects: the first call in a process may
@@ -280,18 +340,17 @@ def state_dir() -> Path:
     """
     base = home()
     new, old = base / NEW_DIR, base / OLD_DIR
-    if _plain_dir(new):
+    if os.path.lexists(new):  # in any form: ~/.harpocrates is never used again (SEC-09)
+        if not _plain_dir(new):  # a symlink or a file: unusable, read as empty and never written through
+            _announce_unusable(base)
         return new
     if str(base) in _failed:
-        return old
-    if os.path.lexists(new):  # a symlink or a file: never trusted, never written through
-        _announce(base, f"~/{NEW_DIR} is not a plain folder")
         return old
     if not os.path.lexists(old):
         return new  # nothing to migrate
     with _lock:
-        if _plain_dir(new):  # another thread of this process finished while this one waited
-            return new
+        if os.path.lexists(new):  # another thread of this process (or process) got there while this one waited
+            return state_dir()
         try:
             _migrate(old, new)
         except _RefusedError as exc:

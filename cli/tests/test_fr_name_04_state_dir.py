@@ -162,6 +162,7 @@ def test_fr_name_04_symlinked_source_refused(home: Path, capsys, kind: str) -> N
 @pytest.mark.parametrize("old_exists", [True, False])
 @pytest.mark.parametrize("target", ["real-dir", "dangling"])
 def test_fr_name_04_symlinked_target_refused(home: Path, capsys, target: str, old_exists: bool) -> None:
+    """SEC-09 F4: a ~/.harpo that is a link is unusable, and ~/.harpocrates is not used in its place."""
     planted = home.parent / "planted"
     if target == "real-dir":
         planted.mkdir()
@@ -169,15 +170,17 @@ def test_fr_name_04_symlinked_target_refused(home: Path, capsys, target: str, ol
     (home / ".harpo").symlink_to(planted, target_is_directory=True)
     old = _make_old(home) if old_exists else home / ".harpocrates"
     before = _snap(old) if old_exists else None
-    assert paths.state_dir() == home / ".harpocrates"  # the link is never used, never written through
+    assert paths.state_dir() == home / ".harpo"  # the link itself: never copied through, never written through
     assert (home / ".harpo").is_symlink()
     if target == "real-dir":
         assert _names(planted) == ["allow"]  # nothing was copied through the link
     else:
         assert not planted.exists()  # and the dangling target was not created
-    assert allowlist.entries() == ([home / "proj" / "keep"] if old_exists else [])
-    assert grants.granted(SID) == (frozenset({CANARY_PATH}) if old_exists else frozenset())
-    _one_line(capsys.readouterr().err)
+    assert allowlist.entries() == [] and allowlist.names() == []  # unusable: an empty allowlist, old list or not
+    assert grants.granted(SID) == frozenset()
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1 and err.startswith("harpocrates: ") and "~/.harpo " in err
+    assert paths.state_dir() == home / ".harpo" and capsys.readouterr().err == ""  # announced once per process
     if old_exists:
         assert _snap(old) == before
 

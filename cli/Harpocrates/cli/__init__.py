@@ -14,6 +14,7 @@ from rich.table import Table
 
 from Harpocrates.core.result import ScanResult, Severity
 from Harpocrates.core.scanner import ScanEngine, scan_directory, scan_file, scan_git_history
+from Harpocrates.paths import StateDirUnusableError
 
 app = typer.Typer(
     name="harpocrates",
@@ -705,7 +706,10 @@ def allow(
                     fail(f"{exc}. Re-run with --yes to allow it.", 3, True)
                 if not typer.confirm(f"{exc}. Allow it anyway?", default=False):
                     fail("Not allowed.")
-                allowlist.add_name(name, confirmed=True)
+                try:
+                    allowlist.add_name(name, confirmed=True)
+                except ValueError as exc2:
+                    fail(str(exc2))
             except ValueError as exc:
                 fail(str(exc))
         value, what = name, f"the name {name} in every project"
@@ -714,6 +718,8 @@ def allow(
         existed = target.resolve() in allowlist.entries()
         try:
             value = str(allowlist.add(target))
+        except StateDirUnusableError as exc:
+            fail(str(exc))
         except OSError as exc:
             fail(f"{target}: {exc.strerror or 'not found'}")
         what = allowlist.printable(value)

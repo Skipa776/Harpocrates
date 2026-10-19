@@ -137,13 +137,26 @@ def _lines() -> list[str]:
     """
     Description: Read allowlist lines for parsing or rewriting.
     Parameters: None
-    Output: List of lines, or an empty list if the file is absent; read and decoding errors
-        propagate.
+    Output: List of lines, or an empty list if the file is absent or the state directory is unusable (a symlink or a
+        file: fail closed, SEC-09); read and decoding errors propagate.
     """
     path = allow_file()
+    if ALLOW_FILE is None and paths.unusable(path.parent):
+        return []
     if not path.exists():
         return []
     return path.read_text(encoding="utf-8").splitlines()
+
+
+def _require_usable() -> None:
+    """
+    Description: Refuse a write when the allowlist would be written into a state directory that is a symlink or a file.
+    Parameters: None
+    Output: None when the allowlist is a test override or the state directory is a plain folder or missing. Raises
+        paths.StateDirUnusableError otherwise (SEC-09).
+    """
+    if ALLOW_FILE is None:
+        paths.require_usable(state_dir())
 
 
 def _write(lines: list[str]) -> None:
@@ -158,6 +171,7 @@ def _write(lines: list[str]) -> None:
         reader never sees a half-written list, and a file hand-edited without a final newline can't
         glue the next entry onto its line.
     """
+    _require_usable()
     target = allow_file()
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".allow.")
@@ -402,9 +416,10 @@ def _drop(match) -> None:
     Description: Remove matching allowlist lines while preserving the order of retained lines.
     Parameters:
         match: Predicate receiving each stripped line and selecting lines to remove.
-    Output: None; rewrites the list or raises ValueError if nothing matches. Read, write, decoding,
-        and predicate errors propagate.
+    Output: None; rewrites the list or raises ValueError if nothing matches. Raises StateDirUnusableError when the
+        state directory is a symlink or a file. Read, write, decoding, and predicate errors propagate.
     """
+    _require_usable()
     lines = _lines()
     kept = [line for line in lines if not match(line.strip())]
     if len(kept) == len(lines):
@@ -452,6 +467,8 @@ def log_use(path: Path, tool: str) -> None:
     Output: None; creates the log directory and appends local time, tool, and printable resolved
         path. Filesystem and resolution errors propagate.
     """
+    if LOG_FILE is None:
+        paths.require_usable(state_dir())
     target = log_file()
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("a", encoding="utf-8") as f:

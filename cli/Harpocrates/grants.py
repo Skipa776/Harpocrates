@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from Harpocrates import paths
 from Harpocrates.paths import state_dir
 
 TTL = 24 * 3600  # seconds a pending or granted entry stays valid
@@ -78,6 +79,8 @@ def _load(path: Path, now: float) -> dict:
     Notes: {"pending": ..., "granted": ...} with every malformed or expired entry dropped.
     """
     try:
+        if paths.unusable(state_dir()):  # a symlink or a file where the folder should be: no grants (SEC-09)
+            raise OSError("the state directory is not a plain folder")
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):  # missing, unreadable or corrupt: no grants
         raw = None
@@ -100,8 +103,10 @@ def _save(path: Path, data: dict) -> None:
         data: Grant state to serialize as JSON.
     Output: None; creates or chmods the parent to 0o700, writes a new 0o600 temporary file, and
         replaces the destination. On failure removes the temporary file and re-raises; filesystem
-        and serialization errors propagate.
+        and serialization errors propagate. Raises paths.StateDirUnusableError (an OSError) when the state
+        directory is a symlink or a file.
     """
+    paths.require_usable(state_dir())  # never write through a symlink or into a file (SEC-09)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)  # also when it already existed, or the umask narrowed the mode
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -124,6 +129,8 @@ def _sweep(now: float) -> None:
     Notes: Delete grant files nothing has touched for TTL (a session that ended without a
         SessionEnd).
     """
+    if paths.unusable(state_dir()):
+        return
     try:
         for f in _dir().iterdir():
             try:
@@ -213,5 +220,5 @@ def clear(session_id: object) -> None:
     Notes: SessionEnd: forget the session's grants.
     """
     file = _file(session_id)
-    if file is not None:
+    if file is not None and not paths.unusable(state_dir()):
         file.unlink(missing_ok=True)

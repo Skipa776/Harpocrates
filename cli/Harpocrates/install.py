@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
-from Harpocrates import harness
+from Harpocrates import harness, paths
 from Harpocrates.paths import state_dir
 
 try:  # stdlib from 3.11; the package supports 3.10
@@ -805,9 +805,16 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
         the files it describes.
     """
     home = Path.home()
-    rpath = state_dir() / "install.json"
-    rtext, record, problem = _load_record(rpath)
+    state = state_dir()
     reports = [Report(t) for t in targets]
+    try:
+        paths.require_usable(state)  # a symlink or a file where ~/.harpo should be: no record read, none written
+    except paths.StateDirUnusableError as exc:
+        for report in reports:
+            report.refused = str(exc)
+        return reports
+    rpath = state / "install.json"
+    rtext, record, problem = _load_record(rpath)
     if problem and not remove:  # without it a later uninstall couldn't tell ours from theirs
         for report in reports:
             report.refused = f"Install record unreadable: {problem} Fix or delete {_tilde(rpath)}, then re-run."
