@@ -8,14 +8,17 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
 
-from Harpocrates.gate.body_encoding import Zstd, decode_body, load_zstd
+from Harpocrates.gate.body_encoding import Zstd, decode_body, encode_body, load_zstd
 from Harpocrates.gate.body_read import read_body
 from Harpocrates.gate.config import BIND_HOST, GateConfig
-from Harpocrates.gate.errors import error_response
+from Harpocrates.gate.errors import UPSTREAM_FAILED, error_response
+from Harpocrates.gate.headers import upstream_request_headers
+from Harpocrates.gate.relay import relay_response
 from Harpocrates.gate.request_log import RequestLog
 from Harpocrates.gate.routes import Route, classify
 from Harpocrates.gate.scan import Block, ScanStep, default_scan_step, run_scan
 from Harpocrates.gate.session_token import TOKEN_HEADER, check_token
+from Harpocrates.gate.upstream import UpstreamError, open_upstream
 
 _BODY_CODES = {"too-large": "HARPO-BLOCK-BODY-TOO-LARGE", "bad-framing": "HARPO-BLOCK-BODY-FRAMING",
                "truncated": "HARPO-BLOCK-BODY-TRUNCATED"}
@@ -146,6 +149,31 @@ class GateHandler(BaseHTTPRequestHandler):
         if body_unread:
             self._discard_pending()
 
+    def _forward(self, route: Route, body: bytes, encoding: str) -> None:
+        """
+        Description: Send a scanned request to the provider and stream the reply back to the agent.
+        Parameters:
+            route: the route of the request, which picks the upstream.
+            body: the scanned body, already in the encoding the request arrived in.
+            encoding: "identity", "gzip" or "zstd".
+        Output: None. The agent gets the provider's reply unchanged; if the provider cannot be reached or does not answer
+            in time it gets 502. A reply that breaks off mid-stream closes the agent's connection.
+        """
+        config = self.server.config
+        has_body = route.action != "pass"
+        headers = upstream_request_headers(list(self.headers.items()), encoding, len(body) if has_body else None)
+        try:
+            connection, response = open_upstream(config.upstream_for(route.provider), config, self.command, self.path,
+                                                 headers, body if has_body else None)
+        except UpstreamError:
+            return self._refuse(route, UPSTREAM_FAILED, body_unread=False)
+        try:
+            relayed = relay_response(response, self.wfile, self.request_version == "HTTP/1.0")
+        finally:
+            connection.close()
+        if relayed.ended != "complete":
+            self.close_connection = True
+
     def _serve(self) -> None:
         """
         Description: Answer one request.
@@ -156,8 +184,7 @@ class GateHandler(BaseHTTPRequestHandler):
             a body over the cap and a body cut short get 400. Then the body is decoded (identity, gzip, zstd): any other
             Content-Encoding, a corrupt stream and a body that passes the cap once decoded get 400. Then the scan
             step runs on the decoded body (on every route, an empty body included): an error, a timeout or a Block
-            from it gets 400 (FR-GATE-03). At this stage nothing after the scan step exists yet, so a body the step
-            lets through is blocked as well.
+            from it gets 400 (FR-GATE-03). What the step lets through goes to the provider and the reply streams back.
         """
         lowered = {name.lower(): value for name, value in self.headers.items()}
         route = classify(self.command, self.path, lowered)
@@ -178,7 +205,7 @@ class GateHandler(BaseHTTPRequestHandler):
         outcome = run_scan(self.server.scan_step, decoded.body, route, self.server.config.scan_timeout)
         if isinstance(outcome, Block):
             return self._refuse(route, outcome.reason, body_unread=False)
-        self._refuse(route, "HARPO-BLOCK-INTERNAL", body_unread=False)
+        self._forward(route, encode_body(outcome.body, decoded.encoding, self.server.zstd), decoded.encoding)
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _serve  # noqa: N815 - http.server names
 

@@ -3,6 +3,7 @@ that talks to the gate. Nothing here contacts a real provider."""
 from __future__ import annotations
 
 import http.client
+import json
 import socket
 from contextlib import contextmanager
 from typing import Iterable, Iterator, NamedTuple, Optional
@@ -82,10 +83,23 @@ def running_rig(scan_step=default_scan_step, mock_kwargs: Optional[dict] = None,
     raises); a test that wants requests to go through passes passthrough_scan."""
     upstream = mock.start_server(**(mock_kwargs or {}))
     token, log_lines = new_token(), []
-    settings = GateConfig(anthropic_upstream=upstream.url, openai_upstream=upstream.url, **config)
+    settings = GateConfig(**{"anthropic_upstream": upstream.url, "openai_upstream": upstream.url, **config})
     gate = start_gate(settings, token, scan_step=scan_step, log_sink=log_lines.append)
     try:
         yield Rig(upstream, gate, token, log_lines)
     finally:
         gate.close()
         upstream.close()
+
+
+# --- request bodies and header sets shared by the end-to-end tests ---
+
+JSON = {"Content-Type": "application/json"}
+MESSAGES = json.dumps({"model": "m", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}).encode()
+RESPONSES = json.dumps({"model": "m", "input": "hi"}).encode()
+RECOVERY_PHRASES = ("thinking", "signature", "bound to a different conversation", "extra inputs are not permitted",
+                    "prompt is too long")
+STREAM_MESSAGES = json.dumps({"model": "m", "max_tokens": 1, "stream": True,
+                              "messages": [{"role": "user", "content": "hi"}]}).encode()
+STREAM_RESPONSES = json.dumps({"model": "m", "input": "hi", "stream": True}).encode()
+ANTHROPIC = {"anthropic-version": "2023-06-01"}

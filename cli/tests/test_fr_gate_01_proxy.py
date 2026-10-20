@@ -12,7 +12,16 @@ import time
 
 import pytest
 import zstandard
-from gate_rig import passthrough_scan, running_rig  # noqa: F401
+from gate_rig import (
+    JSON,
+    MESSAGES,
+    RECOVERY_PHRASES,
+    RESPONSES,
+    STREAM_MESSAGES,
+    STREAM_RESPONSES,
+    passthrough_scan,
+    running_rig,
+)
 
 import Harpocrates.gate.server as gate_server
 from Harpocrates.gate.config import GateConfig
@@ -46,9 +55,6 @@ def test_fr_gate_01_binds_loopback_only() -> None:
 
 # --- SEC-03: the gate token --------------------------------------------------------------------------------------
 
-JSON = {"Content-Type": "application/json"}
-MESSAGES = json.dumps({"model": "m", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]}).encode()
-RESPONSES = json.dumps({"model": "m", "input": "hi"}).encode()
 ROUTES = [  # (method, target, body, extra headers)
     ("POST", "/v1/messages", MESSAGES, {"anthropic-version": "2023-06-01"}),
     ("POST", "/v1/messages/count_tokens", MESSAGES, {"anthropic-version": "2023-06-01"}),
@@ -97,10 +103,6 @@ def test_sec_03_a_rejected_request_with_a_large_body_still_gets_its_answer() -> 
 
 
 # --- routes ------------------------------------------------------------------------------------------------------
-
-RECOVERY_PHRASES = ("thinking", "signature", "bound to a different conversation", "extra inputs are not permitted",
-                    "prompt is too long")
-
 
 @pytest.mark.parametrize("method,target", [
     ("POST", "/v1/chat/completions"), ("POST", "/v1/images/generations"), ("POST", "/v1/realtime/calls"),
@@ -253,9 +255,6 @@ def test_fr_install_04_a_compression_bomb_is_blocked_at_the_cap() -> None:
 
 # --- FR-GATE-03: the scan step -----------------------------------------------------------------------------------
 
-STREAM_MESSAGES = json.dumps({"model": "m", "max_tokens": 1, "stream": True,
-                              "messages": [{"role": "user", "content": "hi"}]}).encode()
-STREAM_RESPONSES = json.dumps({"model": "m", "input": "hi", "stream": True}).encode()
 EVERY_KIND = [  # (method, target, body, headers): each way a request can reach the gate
     ("POST", "/v1/messages?beta=true", MESSAGES, {"anthropic-version": "2023-06-01"}),
     ("POST", "/v1/messages", STREAM_MESSAGES, {"anthropic-version": "2023-06-01"}),
