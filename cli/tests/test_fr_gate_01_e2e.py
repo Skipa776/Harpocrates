@@ -113,3 +113,55 @@ def test_fr_gate_03_e2e_real_agents_behind_a_gate_that_blocks_everything(tmp_pat
     if "claude" in present:
         assert by_label["claude-sec10-match"]["sec10_refusals"] == 0 and by_label["claude-sec10-match"]["tool_results_seen"] == 3
         assert by_label["claude-sec10-mismatch"]["sec10_refusals"] == 3 and by_label["claude-sec10-mismatch"]["exit_code"] == 0
+
+
+def test_fr_gate_04_e2e_counts_the_tool_results_that_carry_a_placeholder() -> None:
+    def anthropic(texts: list) -> dict:
+        blocks = [{"type": "tool_result", "tool_use_id": f"t{i}", "content": text} for i, text in enumerate(texts)]
+        return {"route": "anthropic.messages", "body": json.dumps({"messages": [{"role": "user", "content": blocks}]})}
+
+    def responses(texts: list) -> dict:
+        items = [{"type": "function_call_output", "call_id": f"c{i}", "output": text} for i, text in enumerate(texts)]
+        return {"route": "openai.responses", "body": json.dumps({"input": [{"type": "message", "role": "user", "content": "x"}] + items})}
+
+    placeholder = "key <<HARPO:api_token:ab12>>"
+    assert e2e.tool_results_with_placeholder([anthropic(["a"]), anthropic([placeholder, "plain", [{"type": "text", "text": placeholder}]])]) == (2, 3)
+    assert e2e.tool_results_with_placeholder([responses([placeholder, "plain"])]) == (1, 2)
+    assert e2e.tool_results_with_placeholder([]) == (0, 0)
+    assert e2e.tool_results_with_placeholder([{"route": "unknown", "body": placeholder}]) == (0, 0)
+
+
+def test_fr_gate_04_e2e_the_g4_suite_has_gate_only_gate_and_hook_and_gate_off_controls() -> None:
+    by_label = {sc.label: sc for sc in e2e.SUITES["g4"]}
+    for agent in ("claude", "codex"):
+        assert by_label[f"{agent}-gate-only"].scan == "default" and not by_label[f"{agent}-gate-only"].hook
+        assert by_label[f"{agent}-gate-and-hook"].scan == "default" and by_label[f"{agent}-gate-and-hook"].hook
+        assert by_label[f"{agent}-gate-off-control"].scan == "passthrough" and not by_label[f"{agent}-gate-off-control"].hook
+
+
+@pytest.mark.integration
+def test_fr_gate_04_e2e_real_agents_through_the_scanner_zero_known_format_canaries(tmp_path: Path) -> None:
+    """AGENTS.md rule 7 for G4: scripted reads of the seeded canary repo (Read .env, cat, grep) by real claude -p and codex exec
+    through the gate to the mock. No known-format canary reaches the mock, placeholders stand where they were, every session
+    completes its script; with the gate off the same reads do leak (the counter works). The real home must not change."""
+    present = [name for name in ("claude", "codex") if shutil.which(name)]
+    if not present:
+        pytest.skip("neither claude nor codex is installed")
+    data, path = e2e.run_suite("g4", 0, tmp_path, "unit-gate-e2e-g4")
+    assert data["isolation"]["real_home_changed"] == [] and path.is_file()
+    text = path.read_text()
+    assert not any(c in text for c in ("github_token=", "ghp_"))  # counts only
+    for s in data["scenarios"]:
+        if s["agent"] not in present:
+            assert s["status"] == "skipped"
+            continue
+        assert s["status"] == "ok" and s["exit_code"] == 0 and s["tool_results_seen"] == 3 and s["mock_model_requests"] >= 4, s["scenario"]
+        assert s["planted"]["total"] == 15
+        if s["scan"] == "default":
+            assert s["received"]["known_format"] == 0, s["scenario"]
+            assert s["gate_log"]["by_decision"] == {"forwarded": s["gate_log"]["lines"]}
+            assert s["placeholders"]["total"] >= 1
+            if not s["hook_installed"]:  # only the gate stands between the files and the provider
+                assert s["tool_results_with_placeholder"] == s["tool_results_seen"] == 3 and s["placeholders"]["total"] >= 8
+        else:  # the gate is off: the counter must see the leak
+            assert s["received"]["known_format"] >= 5, s["scenario"]

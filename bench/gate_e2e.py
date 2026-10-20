@@ -14,8 +14,9 @@ g3  The gate with the G3 scan step, which blocked everything (reproduced here as
     longer ships one): both agents must show the gate's 400 message and the mock must record nothing. Then two Claude Code variants with a test-only pass-through scan step, so the mock can
     script tool calls: the install record says the gate is on the port Claude Code uses (SEC-10 stays quiet) and on another
     port (SEC-10 refuses every tool call).
-g4  The gate with its real scanner, in front of the scripted reads (Read .env, cat, grep): with and without Harpo's read
-    hook installed. The mock's recording is searched for the planted canaries and for placeholders.
+g4  The gate with its real scanner, in front of the scripted reads (Read .env, cat, grep): alone, and with Harpo's read hook
+    installed too; plus a control with the gate off (a pass-through step), which must leak, to show the counter works. The
+    mock's recording is searched for the planted canaries and for placeholders.
 
 Output: bench/results/proof/<run>.json holds counts only (checked for canary values). The mock's recording, which holds
 request bodies, goes to bench/results/mock/<run>/ and is never committed.
@@ -83,7 +84,9 @@ SUITES: dict[str, list[Scenario]] = {
     "g4": [Scenario("claude-gate-only", "claude", "default", False, "none"),
            Scenario("codex-gate-only", "codex", "default", False, "none"),
            Scenario("claude-gate-and-hook", "claude", "default", True, "match"),
-           Scenario("codex-gate-and-hook", "codex", "default", True, "none")],
+           Scenario("codex-gate-and-hook", "codex", "default", True, "none"),
+           Scenario("claude-gate-off-control", "claude", "passthrough", False, "none"),
+           Scenario("codex-gate-off-control", "codex", "passthrough", False, "none")],
 }
 
 
@@ -195,6 +198,26 @@ def placeholder_counts(records: Iterable[dict]) -> dict:
     return {"total": len(found), "by_type": dict(sorted(by_type.items()))}
 
 
+def tool_results_with_placeholder(records: Iterable[dict]) -> tuple[int, int]:
+    """
+    Description: Count the tool results in the last model request that carry a placeholder, out of all tool results in it.
+    Parameters:
+        records: the mock's recording entries.
+    Output: (results with a <<HARPO:type:hash4>> placeholder, results). A result is a tool_result block of a Messages request
+        or a function_call_output item of a Responses request, in the last model request (the whole conversation). (0, 0) when
+        there is no model request.
+    """
+    bodies = [r["body"] for r in records if r.get("route") in runner.MODEL_ROUTES and isinstance(r.get("body"), str)]
+    if not bodies:
+        return 0, 0
+    body = json.loads(bodies[-1])
+    results = [json.dumps(block.get("content")) for message in body.get("messages", []) if isinstance(message.get("content"), list)
+               for block in message["content"] if block.get("type") == "tool_result"]
+    results += [json.dumps(item.get("output")) for item in body.get("input", []) if isinstance(item, dict)
+                and item.get("type") == "function_call_output"]
+    return sum(bool(PLACEHOLDER.search(text)) for text in results), len(results)
+
+
 def gate_log_summary(lines: list[str]) -> dict:
     """
     Description: Summarise the gate's request log without any content.
@@ -294,7 +317,8 @@ def run_scenario(sc: Scenario, seed: int, out_root: Path, run_id: str, timeout: 
         "block_message_shown": bool(shown) if sc.capture else None, "block_reason_shown": shown.group(1) if shown else None,
         "tool_results_seen": seen, "sec10_refusals": sec10_refusals(records),
         "planted": report.counts(canaries), "received": report.received_counts(canaries, findings),
-        "placeholders": placeholder_counts(records), "_canaries": canaries})
+        "placeholders": placeholder_counts(records), "tool_results_with_placeholder": tool_results_with_placeholder(records)[0],
+        "_canaries": canaries})
     return out
 
 
