@@ -10,6 +10,7 @@ from typing import Callable, Iterator
 
 from Harpocrates.gate.walk_common import (
     NO_SKIP,
+    OPAQUE,
     Drop,
     Op,
     fields,
@@ -105,7 +106,7 @@ def _text(block: dict, path: tuple) -> Iterator[Op]:
     Output: Operations.
     """
     yield from fields(block, path, skip=frozenset({"type"}),
-                      special={"citations": lambda v, p: strings(v, p, skip=frozenset({"type"}))})
+                      special={"citations": lambda v, p: strings(v, p, skip=frozenset({"type"}), deep=OPAQUE)})
 
 
 def _tool_call(block: dict, path: tuple) -> Iterator[Op]:
@@ -141,7 +142,7 @@ def _web_search_result(block: dict, path: tuple) -> Iterator[Op]:
     Output: Leaf operations of class S; ciphertext, page age and error codes are not scanned.
     """
     skip = frozenset({"type", "page_age", "error_code"})
-    yield from fields(block, path, skip=IDS, cls="S", special={"content": lambda v, p: strings(v, p, "S", skip=skip)})
+    yield from fields(block, path, skip=IDS, cls="S", special={"content": lambda v, p: strings(v, p, "S", skip=skip, deep=OPAQUE)})
 
 
 def _tool_output(block: dict, path: tuple) -> Iterator[Op]:
@@ -153,7 +154,7 @@ def _tool_output(block: dict, path: tuple) -> Iterator[Op]:
     Output: Operations; file ids, types and return codes are not scanned.
     """
     skip = frozenset({"type", "file_id", "file_type", "return_code", "encrypted_stdout"})
-    yield from fields(block, path, skip=IDS, special={"content": lambda v, p: strings(v, p, skip=skip)})
+    yield from fields(block, path, skip=IDS, special={"content": lambda v, p: strings(v, p, skip=skip, deep=OPAQUE)})
 
 
 def _nothing(block: dict, path: tuple) -> Iterator[Op]:

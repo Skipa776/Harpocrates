@@ -11,8 +11,10 @@ from typing import Callable, Iterator, NamedTuple, Optional, Union
 
 from Harpocrates.gate.blocks import PARSE, UNKNOWN_TYPE, RefusalError
 
-# Never scanned at any depth: signatures and ciphertext (class O), and cache markers (class I).
+# Signatures and ciphertext (class O) and cache markers (class I). A block that carries them says so (deep=OPAQUE); a field
+# the user fills (metadata, tool arguments, schemas) may use the same words as keys and is scanned in full.
 OPAQUE = frozenset({"signature", "encrypted_content", "encrypted_index", "encrypted_stdout", "cache_control"})
+CACHE = frozenset({"cache_control"})
 NO_SKIP: frozenset = frozenset()
 
 
@@ -104,7 +106,7 @@ def leaf(path: tuple, text: str, cls: str = "R", as_json: bool = False) -> Itera
 
 
 def strings(node: object, path: tuple, cls: str = "R", skip: frozenset = NO_SKIP, keys: bool = False,
-            deep: frozenset = OPAQUE) -> Iterator[Op]:
+            deep: frozenset = CACHE) -> Iterator[Op]:
     """
     Description: Yield every string under a JSON value (the open field list: a string field the tables do not name is
         scanned like its neighbours).
@@ -115,7 +117,8 @@ def strings(node: object, path: tuple, cls: str = "R", skip: frozenset = NO_SKIP
         skip: member names not to enter in the first object reached (an array passes this on to its elements; objects
             below start with none), for the identifier fields of one block.
         keys: also yield each object key as a KeyText (free-form names, such as tool-call arguments).
-        deep: member names not to enter at any depth (default: signatures, ciphertext and cache markers).
+        deep: member names not to enter at any depth (default: cache markers; pass OPAQUE inside a provider block that
+            carries signatures or ciphertext).
     Output: Leaf and KeyText operations in document order.
     """
     if isinstance(node, str):

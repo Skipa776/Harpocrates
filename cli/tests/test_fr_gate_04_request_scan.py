@@ -261,3 +261,19 @@ def test_fr_gate_02_a_secret_the_oracle_names_in_every_kind_of_field_is_replaced
     out = forwarded(run(scanner([GITHUB]), body)).decode()
     assert GITHUB not in out and len(PLACEHOLDER.findall(out)) == 4
     assert len(set(PLACEHOLDER.findall(out))) == 1
+
+
+def test_fr_gate_02_free_form_fields_named_like_ciphertext_are_still_scanned() -> None:
+    """Only the block types the spec names carry a signature or ciphertext. A user's own metadata, or a tool's arguments, may
+    use the same words as keys, and a secret there must not slip through."""
+    for key in ("signature", "encrypted_content", "encrypted_index", "encrypted_stdout"):
+        body = {"model": "m", "max_tokens": 1, "metadata": {key: f"v {GITHUB}"}, "messages": [{"role": "user", "content": "x"}]}
+        out = forwarded(run(real(), body)).decode()
+        assert GITHUB not in out and PLACEHOLDER.search(out), key
+        responses = {"model": "m", "input": "x", "client_metadata": {key: f"v {GITHUB}"}, "prompt": {"id": "p", "variables": {key: GITHUB}}}
+        out = forwarded(run(real(), responses, RESPONSES)).decode()
+        assert GITHUB not in out and PLACEHOLDER.search(out), key
+    cipher = {"type": "web_search_tool_result", "tool_use_id": "s", "content": [{"type": "web_search_result", "title": "t",
+                                                                                 "url": "https://x.test", "encrypted_content": "gAAAA" + "x" * 90}]}
+    data = json.dumps({"model": "m", "max_tokens": 1, "messages": [{"role": "assistant", "content": [cipher]}]}).encode()
+    assert forwarded(run(real(), data)) == data  # while the ciphertext inside a provider block is left alone
