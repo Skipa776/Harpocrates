@@ -182,7 +182,7 @@ def test_fr_gate_03_detector_error_blocks() -> None:
     assert result == Block("HARPO-BLOCK-SCAN-ERROR")  # the exception text, which holds a secret, goes nowhere
 
 
-def test_fr_gate_03_scan_timeout_blocks() -> None:
+def test_fr_gate_03_timeout_blocks() -> None:
     def slow(text: str) -> list:
         time.sleep(3)
         return []
