@@ -67,3 +67,8 @@ def head_for(route_target: str, *headers: tuple[str, str]) -> RequestHead:
 def route_of(method: str, target: str, **headers: str) -> Route:
     """The route the gate would choose."""
     return classify(method, target, {k.lower(): v for k, v in headers.items()})
+
+
+def passthrough(body: bytes, route: object, head: object) -> Forward:
+    """A scan step that forwards everything, to show a harness notices a leak. Only tests use it."""
+    return Forward(body)

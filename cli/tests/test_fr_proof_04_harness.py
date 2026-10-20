@@ -88,9 +88,9 @@ def test_fr_proof_04_harness_cli_writes_the_report_and_exits_with_the_verdict(tm
     assert "planted" in out and "received" in out
 
 
-def test_fr_proof_04_harness_cli_refuses_a_target_that_does_not_exist_yet(tmp_path: Path, capsys) -> None:
+def test_fr_proof_04_harness_cli_refuses_a_target_that_does_not_exist(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit) as stop:
-        harness.main(["--mode", "direct", "--target", "gate", "--out-dir", str(tmp_path)])
+        harness.main(["--mode", "direct", "--target", "nowhere", "--out-dir", str(tmp_path)])
     assert stop.value.code == 2
     assert not list(tmp_path.glob("**/*.json"))
 
