@@ -132,3 +132,9 @@ def test_fr_proof_04_corpus_marks_the_cases_a_recorded_agent_session_confirmed()
     assert by_id["anthropic_system_role_string"].source == "captured"  # sent by Claude Code, absent from the spec table
     assert by_id["anthropic_thinking"].source == "captured" and by_id["anthropic_compaction"].source == "spec"
     assert corpus.CAPTURED_RUN.endswith("-g2")
+
+
+def test_fr_proof_04_corpus_builds_for_many_seeds_including_those_with_short_passwords() -> None:
+    for seed in range(2, 14):
+        built = corpus.build_corpus(seed)
+        assert all(match.locate(json.dumps(c.body), c.canary_value) for c in built if c.canary_value), seed

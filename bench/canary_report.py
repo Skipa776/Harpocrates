@@ -41,6 +41,15 @@ class Canary:
     value: str = field(repr=False)
     agent: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        """
+        Description: Refuse a canary too short for the matcher to count, so a leak of it can never go unseen.
+        Parameters: None
+        Output: None. Raises ValueError naming the canary's ident (never its value) when it is under canary_match.MIN_LEN.
+        """
+        if len(self.value) < match.MIN_LEN:
+            raise ValueError(f"canary {self.ident} is too short to be counted (under {match.MIN_LEN} characters)")
+
     @property
     def cls(self) -> str:
         """

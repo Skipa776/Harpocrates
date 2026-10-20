@@ -102,3 +102,9 @@ def test_fr_proof_04_report_leak_check_covers_one_line_of_a_multiline_value(tmp_
     line = pem.value.splitlines()[2]
     with pytest.raises(report.ReportLeakError):
         report.write_report(tmp_path / "r.json", {"x": line}, [pem])
+
+
+def test_fr_proof_04_report_a_canary_too_short_to_be_counted_is_refused_not_silently_missed() -> None:
+    with pytest.raises(ValueError, match="too short"):
+        report.Canary("x:short", "postgres_password", "abc12")
+    assert report.Canary("x:ok", "postgres_password", "Admin-").cls == "ml-only"

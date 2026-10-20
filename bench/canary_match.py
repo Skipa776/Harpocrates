@@ -21,7 +21,7 @@ KNOWN_FORMAT_KINDS = frozenset({
     "npm_token", "jwt", "private_key", "db_url",
 })
 ML_ONLY_KINDS = frozenset({"aws_secret_access_key", "twilio_auth_token", "db_password", "postgres_password"})
-MIN_LEN = 8  # a shorter value is too likely to appear by chance
+MIN_LEN = 6  # a shorter value is too likely to appear by chance; the shortest generated canary (a human-style password) has 6
 MIN_LINE = 16  # a line of a multi-line value counts as a leak when it is this long and is not armor
 MAX_JSON_DEPTH = 3  # JSON inside a JSON string, inside a string, is followed this deep
 _SAFE_KEY = re.compile(r"^[A-Za-z0-9_.\-]{1,48}$")
@@ -62,7 +62,7 @@ def needles(value: str) -> list[tuple[str, str]]:
     Parameters:
         value: the canary value.
     Output: (form, text) pairs: plain; for a multi-line value each non-armor line of at least 16 characters (line);
-        base64, hex and URL-encoded spellings when they differ from plain. Empty for a value under 8 characters.
+        base64, hex and URL-encoded spellings when they differ from plain. Empty for a value under 6 characters.
     """
     if len(value) < MIN_LEN:
         return []
@@ -149,7 +149,7 @@ def locate(body_text: str, value: str) -> list[Hit]:
         value: the canary value; never returned or logged.
     Output: A Hit per place and form. A body that is not a JSON object or array is searched as text and reports one
         (unparsed body) hit per form. A value found in the raw text but in no string (an unusual escape) reports a
-        (body text) hit, so nothing is undercounted. Empty when the value is under 8 characters or absent.
+        (body text) hit, so nothing is undercounted. Empty when the value is under 6 characters or absent.
     """
     if len(value) < MIN_LEN:
         return []

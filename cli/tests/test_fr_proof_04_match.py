@@ -87,7 +87,18 @@ def test_fr_proof_04_match_a_value_in_a_body_that_is_not_json_is_still_found() -
 
 def test_fr_proof_04_match_a_short_or_empty_value_never_matches() -> None:
     assert match.locate(json.dumps({"a": "xx"}), "") == []
-    assert match.locate(json.dumps({"a": "xx"}), "xx") == []  # under the 8-character floor: too likely to be chance
+    assert match.locate(json.dumps({"a": "xxxxx"}), "xxxxx") == []  # under the 6-character floor: too likely to be chance
+
+
+def test_fr_proof_04_match_every_generated_canary_is_long_enough_to_be_counted() -> None:
+    """Human-style passwords come as short as 6 characters; a floor above that would let a leaked one go uncounted."""
+    shortest = {}
+    for seed in range(400):
+        random.seed(seed)
+        for kind, value in canary_repo._canaries().items():
+            shortest[kind] = min(len(value), shortest.get(kind, 99))
+            assert match.locate(json.dumps({"text": f"x {value} y"}), value), (seed, kind, len(value))
+    assert min(shortest.values()) >= match.MIN_LEN and shortest["postgres_password"] == 6
 
 
 def test_fr_proof_04_match_a_value_split_by_redaction_is_not_found() -> None:
