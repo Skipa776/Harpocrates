@@ -1,0 +1,104 @@
+"""The scan step (FR-GATE-02, FR-GATE-03, FR-GATE-04, FR-GATE-05, FR-GATE-10): parse a request, find the secrets in every
+string the model will see, and forward it with only those strings rewritten.
+
+Steps: scan the headers, path and query (a finding blocks); parse the body strictly; walk it by its format's tables;
+drop thinking blocks; scan each string (class R is rewritten, class S blocks on a finding, an object key blocks);
+splice the new strings and the cuts into the original text. A request with nothing to change is forwarded as the same bytes.
+"""
+from __future__ import annotations
+
+from typing import Optional, Union
+
+from Harpocrates.gate import walk_anthropic, walk_responses
+from Harpocrates.gate.blocks import KEY_SECRET, PARSE, PROVIDER_TEXT, RefusalError
+from Harpocrates.gate.finder import Finder
+from Harpocrates.gate.header_scan import scan_head
+from Harpocrates.gate.jsonlocate import locate
+from Harpocrates.gate.jsonspan import BodyParseError, apply_edits, encode_literal, parse_strict
+from Harpocrates.gate.jsonstring import redact_json_string
+from Harpocrates.gate.routes import Route
+from Harpocrates.gate.scan import Block, Forward, RequestHead
+from Harpocrates.gate.walk_common import Drop, KeyText, Leaf
+
+
+class RequestScanner:
+    """
+    Description: The real scan step of the gate: one instance per gate session, with its own finder (and so its own key
+        and cache).
+    Parameters:
+        finder: the Finder to use, or None for a new one.
+    Output: A callable (body, route, head) -> Forward | Block, usable as a ScanStep.
+    """
+
+    def __init__(self, finder: Optional[Finder] = None) -> None:
+        """
+        Description: Keep or make the finder.
+        Parameters:
+            finder: the Finder, or None for a new one (a new session key, an empty cache).
+        Output: None.
+        """
+        self.finder = finder if finder is not None else Finder()
+
+    def __call__(self, body: bytes, route: Route, head: RequestHead) -> Union[Forward, Block]:
+        """
+        Description: Decide what happens to one request.
+        Parameters:
+            body: the decoded request body (empty on a route that takes none).
+            route: the route.
+            head: the headers, path and query.
+        Output: Forward with the bytes to send (the very same bytes when nothing needed to change), or Block with a reason
+            code. A detector error propagates; run_scan turns it into a block.
+        """
+        try:
+            return self._scan(body, route, head)
+        except RefusalError as refusal:
+            return Block(refusal.code)
+        except BodyParseError:
+            return Block(PARSE)
+
+    def _scan(self, body: bytes, route: Route, head: RequestHead) -> Forward:
+        """
+        Description: Scan the head, then the body, and build what to forward.
+        Parameters:
+            body: the decoded request body.
+            route: the route.
+            head: the headers, path and query.
+        Output: A Forward. Raises RefusalError or BodyParseError for a request that must be blocked.
+        """
+        scan_head(head, self.finder)
+        if route.action == "pass":
+            return Forward(body)
+        text, tree = parse_strict(body)
+        walk = walk_anthropic.walk if route.name.startswith("anthropic.") else walk_responses.walk
+        replacements: dict[tuple, str] = {}
+        drops: list[tuple] = []
+        for op in walk(tree):
+            if isinstance(op, Drop):
+                drops.append(op.path)
+            elif isinstance(op, KeyText):
+                if self.finder.has_secret(op.text, "K"):
+                    raise RefusalError(KEY_SECRET)
+            elif op.cls == "S":
+                if self.finder.has_secret(op.text, "S"):
+                    raise RefusalError(PROVIDER_TEXT)
+            else:
+                new = self._rewrite(op)
+                if new is not None:
+                    replacements[op.path] = new
+        if not replacements and not drops:
+            return Forward(body)
+        found, cuts = locate(text, list(replacements), drops)
+        edits = [(*found[path], encode_literal(new)) for path, new in replacements.items()]
+        edits += [(start, end, "") for start, end in cuts]
+        return Forward(apply_edits(text, edits).encode("utf-8"))
+
+    def _rewrite(self, leaf: Leaf) -> Optional[str]:
+        """
+        Description: Redact one class R string.
+        Parameters:
+            leaf: the string and how to read it.
+        Output: The new text, or None when it holds no secret. A string that holds JSON is redacted leaf by leaf.
+        """
+        if leaf.as_json:
+            return redact_json_string(leaf.text, self.finder)
+        return self.finder.redact(leaf.text, "R")

@@ -25,6 +25,9 @@ _MAX_CODE_LENGTH = 48
 # Phrases Claude Code matches in an error to start its own recovery (C1). Checked on the code with hyphens as spaces.
 _RECOVERY_PHRASES = ("thinking", "signature", "bound to a different conversation", "extra inputs are not permitted",
                      "prompt is too long")
+# One extra sentence for the codes where the user has something to do (FR-GATE-10: a secret the gate cannot rewrite).
+_ADVICE = {"HARPO-BLOCK-PROVIDER-TEXT": "The conversation holds a secret in text that only the provider can rewrite. "
+                                        "Start a new session. "}
 _KINDS = {
     "anthropic": {400: "invalid_request_error", 401: "authentication_error", 426: "invalid_request_error",
                   502: "api_error"},
@@ -52,14 +55,16 @@ def block_message(code: str) -> str:
     Description: Write the plain message a block shows the user.
     Parameters:
         code: a reason code for which is_block_code is true or that is listed in REASONS.
-    Output: One sentence naming the code, then a pointer to `harpo doctor`. It holds no text taken from the request.
-        Raises ValueError for any other code.
+    Output: One sentence naming the code, a line of advice for the few codes that have one (a secret in provider-signed
+        text: start a new session), then a pointer to `harpo doctor`. It holds no text taken from the request. Raises
+        ValueError for any other code.
     """
     if code not in REASONS and not is_block_code(code):
         raise ValueError("not a reason code")
     if code == UPSTREAM_FAILED:
         return f"Harpo could not get a reply from the provider (reason {code})."
-    return f"Harpo blocked this request before it left your machine (reason {code}). Run `harpo doctor` for details."
+    return (f"Harpo blocked this request before it left your machine (reason {code}). {_ADVICE.get(code, '')}"
+            "Run `harpo doctor` for details.")
 
 
 def error_response(provider: str, code: str) -> tuple[int, bytes]:
