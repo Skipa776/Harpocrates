@@ -219,6 +219,45 @@ class GateHandler(BaseHTTPRequestHandler):
             return self._refuse(route, outcome.reason, body_unread=False)
         self._forward(route, encode_body(outcome.body, decoded.encoding, self.server.zstd), decoded.encoding)
 
+    def parse_request(self) -> bool:
+        """
+        Description: Parse the request line and headers, forgetting the previous request's headers first so a refusal
+            never takes its error shape from them.
+        Parameters: None
+        Output: True when the request parsed; False when it was refused (send_error has already answered).
+        """
+        self.headers = None
+        return super().parse_request()
+
+    def send_error(self, code: int, message: Optional[str] = None, explain: Optional[str] = None) -> None:
+        """
+        Description: Answer a request the HTTP parser itself refused (a bad request line, an oversize line or header
+            block, an unsupported version, a method the gate has no handler for) with the gate's own error instead of
+            the standard library's HTML page.
+        Parameters:
+            code: the status the parser chose (ignored except that 501 means an unknown method).
+            message: the parser's short message (ignored: it can echo request text).
+            explain: the parser's long message (ignored).
+        Output: None. Writes 400 (with a status line even when the request line did not parse) in the caller's error
+            shape with HARPO-BLOCK-ROUTE (unknown method) or HARPO-BLOCK-REQUEST (anything else), logs one line, and
+            closes the connection.
+        """
+        started = time.monotonic()
+        self._responded = False
+        self._drain = False
+        self._facts = {"method": self.command or "", "route": "unknown"}
+        headers = getattr(self, "headers", None)  # missing when the request line was too long to parse
+        caller = "anthropic" if headers is not None and "anthropic-version" in headers else "openai"
+        self.request_version = "HTTP/1.1"  # the parser leaves HTTP/0.9 here, which would send no status line
+        try:
+            self._refuse(Route("unknown", caller, "block"),
+                         "HARPO-BLOCK-ROUTE" if code == 501 else "HARPO-BLOCK-REQUEST", body_unread=True)
+        finally:
+            self._facts["ms_total"] = (time.monotonic() - started) * 1000
+            self.server.log.write(self._facts)
+            if self._drain:
+                self._discard_pending()
+
     def _serve(self) -> None:
         """
         Description: Answer one request, and log it.
