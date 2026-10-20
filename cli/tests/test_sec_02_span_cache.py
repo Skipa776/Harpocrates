@@ -20,31 +20,31 @@ def test_fr_gate_05_the_default_bounds_are_the_specified_ones() -> None:
     assert (cache.max_entries, cache.max_bytes, len(cache), cache.size_bytes) == (MAX_ENTRIES, MAX_BYTES, 0, 0)
 
 
-def test_sec_02_cache_key_is_a_digest_of_class_hint_and_text_that_tells_them_apart() -> None:
-    key = cache_key("R", "cmd", "echo hi")
+def test_sec_02_cache_key_is_a_digest_of_class_and_text_that_tells_them_apart() -> None:
+    key = cache_key("R", "echo hi")
     assert isinstance(key, bytes) and len(key) == 32
-    assert key == cache_key("R", "cmd", "echo hi")
-    assert len({key, cache_key("S", "cmd", "echo hi"), cache_key("R", "other", "echo hi"), cache_key("R", None, "echo hi"),
-                cache_key("R", "cmd", "echo hi "), cache_key("R", "cmd", "echo  hi")}) == 6
-    assert cache_key("R", "a", "bc") != cache_key("R", "ab", "c")  # the parts cannot slide into one another
+    assert key == cache_key("R", "echo hi")
+    assert len({key, cache_key("S", "echo hi"), cache_key("R", "echo hi "), cache_key("R", "echo  hi"),
+                cache_key("R", "")}) == 5
     assert b"echo hi" not in key
+    assert len(cache_key("R", "a\ud800b")) == 32  # a lone surrogate (from a \ud800 escape) is still hashable
 
 
 def test_fr_gate_05_a_miss_is_none_and_a_hit_returns_the_same_spans() -> None:
     cache = SpanCache()
-    key = cache_key("R", None, "x")
+    key = cache_key("R", "x")
     assert cache.get(key) is None
     spans = (Span(3, 9, "api_token"),)
     cache.put(key, spans)
     assert cache.get(key) == spans
-    cache.put(cache_key("R", None, "clean"), ())  # a clean leaf is worth remembering too
-    assert cache.get(cache_key("R", None, "clean")) == ()
-    assert cache.get(cache_key("R", None, "clean")) is not None
+    cache.put(cache_key("R", "clean"), ())  # a clean leaf is worth remembering too
+    assert cache.get(cache_key("R", "clean")) == ()
+    assert cache.get(cache_key("R", "clean")) is not None
 
 
 def test_fr_gate_05_least_recently_used_entry_is_evicted_first() -> None:
     cache = SpanCache(max_entries=3)
-    keys = [cache_key("R", None, str(i)) for i in range(4)]
+    keys = [cache_key("R", str(i)) for i in range(4)]
     for key in keys[:3]:
         cache.put(key, ())
     cache.get(keys[0])  # keys[1] is now the oldest
@@ -57,7 +57,7 @@ def test_fr_gate_05_the_byte_bound_evicts_too_and_an_entry_that_alone_is_too_big
     many = tuple(Span(i, i + 1, "generic") for i in range(10))
     cost = ENTRY_BASE_COST + 10 * 100
     cache = SpanCache(max_bytes=cost * 2 + 1)
-    first, second, third = (cache_key("R", None, n) for n in "abc")
+    first, second, third = (cache_key("R", n) for n in "abc")
     for key in (first, second, third):
         cache.put(key, many)
     assert len(cache) == 2 and cache.get(first) is None and cache.size_bytes <= cost * 2 + 1
@@ -68,7 +68,7 @@ def test_fr_gate_05_the_byte_bound_evicts_too_and_an_entry_that_alone_is_too_big
 
 def test_fr_gate_05_replacing_an_entry_keeps_the_size_exact_and_clear_empties_the_cache() -> None:
     cache = SpanCache()
-    key = cache_key("R", None, "k")
+    key = cache_key("R", "k")
     cache.put(key, (Span(0, 1, "generic"),) * 3)
     cache.put(key, ())
     assert len(cache) == 1 and cache.size_bytes == ENTRY_BASE_COST
@@ -81,7 +81,7 @@ def test_fr_gate_05_the_cache_survives_many_threads() -> None:
 
     def work(offset: int) -> None:
         for i in range(2000):
-            key = cache_key("R", None, str((i + offset) % 300))
+            key = cache_key("R", str((i + offset) % 300))
             if cache.get(key) is None:
                 cache.put(key, (Span(0, 1, "generic"),))
 

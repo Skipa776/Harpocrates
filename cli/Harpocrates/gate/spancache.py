@@ -1,8 +1,8 @@
 """The per-session cache of findings (G4 spec, "Performance"; SEC-02).
 
 The agent resends the whole history every turn, so most of what the scan step sees was seen a turn ago. Redaction is a
-pure function of a leaf, so the spans found in it can be remembered. The cache is keyed by a hash of (field class, key
-hint, text) and holds spans only, so it never holds a raw value; it is bounded in entries and bytes, evicts the least
+pure function of a leaf, so the spans found in it can be remembered. The cache is keyed by a hash of (field class,
+text) and holds spans only, so it never holds a raw value; it is bounded in entries and bytes, evicts the least
 recently used entry first, lives in memory and is dropped with the gate.
 """
 from __future__ import annotations
@@ -33,25 +33,15 @@ class Span(NamedTuple):
     kind: str
 
 
-def cache_key(field_class: str, hint: Optional[str], text: str) -> bytes:
+def cache_key(field_class: str, text: str) -> bytes:
     """
     Description: Hash a leaf into the key under which its findings are kept.
     Parameters:
         field_class: "R" (rewrite), "S" (scan only), "K" (object key) or "H" (header, path or query).
-        hint: the name of the field the text sits in, or None.
         text: the leaf text.
-    Output: A 32-byte SHA-256 digest of the three parts, each delimited so they cannot run into one another. The text
-        itself is not recoverable from it.
+    Output: A 32-byte SHA-256 digest of the class and the text. The text itself is not recoverable from it.
     """
-    digest = hashlib.sha256()
-    digest.update(field_class.encode("ascii") + b"|")
-    if hint is None:
-        digest.update(b"-")
-    else:
-        raw_hint = hint.encode("utf-8", "surrogatepass")
-        digest.update(b"+%d:" % len(raw_hint) + raw_hint)
-    digest.update(b"|" + text.encode("utf-8", "surrogatepass"))
-    return digest.digest()
+    return hashlib.sha256(field_class.encode("ascii") + b"|" + text.encode("utf-8", "surrogatepass")).digest()
 
 
 class SpanCache:
