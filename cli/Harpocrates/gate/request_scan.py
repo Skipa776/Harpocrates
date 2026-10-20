@@ -10,15 +10,16 @@ from __future__ import annotations
 from typing import Optional, Union
 
 from Harpocrates.gate import walk_anthropic, walk_responses
-from Harpocrates.gate.blocks import KEY_SECRET, PARSE, PROVIDER_TEXT, RefusalError
+from Harpocrates.gate.blocks import KEY_SECRET, MEDIA_SECRET, PARSE, PROVIDER_TEXT, RefusalError
 from Harpocrates.gate.finder import Finder
 from Harpocrates.gate.header_scan import scan_head
 from Harpocrates.gate.jsonlocate import locate
 from Harpocrates.gate.jsonspan import BodyParseError, apply_edits, encode_literal, parse_strict
 from Harpocrates.gate.jsonstring import redact_json_string
+from Harpocrates.gate.media import MediaNote, binary_kind, decode_strict, readings
 from Harpocrates.gate.routes import Route
 from Harpocrates.gate.scan import Block, Forward, RequestHead
-from Harpocrates.gate.walk_common import Drop, KeyText, Leaf
+from Harpocrates.gate.walk_common import Drop, KeyText, Leaf, Media
 
 
 class RequestScanner:
@@ -72,8 +73,13 @@ class RequestScanner:
         walk = walk_anthropic.walk if route.name.startswith("anthropic.") else walk_responses.walk
         replacements: dict[tuple, str] = {}
         drops: list[tuple] = []
+        notes: list[MediaNote] = []
         for op in walk(tree):
-            if isinstance(op, Drop):
+            if isinstance(op, Media):
+                note = self._media(op)
+                if note is not None:
+                    notes.append(note)
+            elif isinstance(op, Drop):
                 drops.append(op.path)
             elif isinstance(op, KeyText):
                 if self.finder.has_secret(op.text, "K"):
@@ -86,11 +92,28 @@ class RequestScanner:
                 if new is not None:
                     replacements[op.path] = new
         if not replacements and not drops:
-            return Forward(body)
+            return Forward(body, tuple(notes))
         found, cuts = locate(text, list(replacements), drops)
         edits = [(*found[path], encode_literal(new)) for path, new in replacements.items()]
         edits += [(start, end, "") for start, end in cuts]
-        return Forward(apply_edits(text, edits).encode("utf-8"))
+        return Forward(apply_edits(text, edits).encode("utf-8"), tuple(notes))
+
+    def _media(self, item: Media) -> Optional[MediaNote]:
+        """
+        Description: Check one media payload (FR-GATE-07).
+        Parameters:
+            item: the payload.
+        Output: A MediaNote for a payload with a known binary signature, which passes unscanned; None for any other
+            payload, which was read as text and holds no secret. Raises RefusalError(MEDIA_MALFORMED) for a payload that is
+            not strict base64 and RefusalError(MEDIA_SECRET) for one that holds a secret (base64 is not rewritten in v1).
+        """
+        data = decode_strict(item.payload)
+        kind = binary_kind(data)
+        if kind is not None:
+            return MediaNote(kind, len(data))
+        if any(self.finder.has_secret(text, "S") for text in readings(data)):
+            raise RefusalError(MEDIA_SECRET)
+        return None
 
     def _rewrite(self, leaf: Leaf) -> Optional[str]:
         """

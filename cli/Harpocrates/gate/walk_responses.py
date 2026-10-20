@@ -14,6 +14,8 @@ from Harpocrates.gate.walk_common import (
     Op,
     fields,
     leaf,
+    media,
+    media_url,
     refuse_shape,
     refuse_type,
     strings,
@@ -76,9 +78,9 @@ _PARTS: dict[str, Callable[[dict, tuple], Iterator[Op]]] = {
     "output_text": lambda p, w: fields(p, w, skip=TYPE, special={
         "annotations": lambda v, q: strings(v, q, skip=TYPE), "logprobs": lambda v, q: strings(v, q, deep=NO_SKIP)}),
     "refusal": lambda p, w: fields(p, w, skip=TYPE),
-    "input_image": lambda p, w: fields(p, w, skip=frozenset({"type", "file_id", "detail"})),
-    "input_file": lambda p, w: fields(p, w, skip=frozenset({"type", "file_id", "file_data"})),
-    "input_audio": lambda p, w: fields(p, w, skip=frozenset({"type", "data", "format"})),
+    "input_image": lambda p, w: fields(p, w, skip=frozenset({"type", "file_id", "detail"}), special={"image_url": media_url}),
+    "input_file": lambda p, w: fields(p, w, skip=frozenset({"type", "file_id"}), special={"file_data": media}),
+    "input_audio": lambda p, w: fields(p, w, skip=frozenset({"type", "format"}), special={"data": media}),
 }
 
 
@@ -141,6 +143,20 @@ def _tools(value: object, path: tuple) -> Iterator[Op]:
             raise refuse_type()
 
 
+def _screenshot(value: object, path: tuple) -> Iterator[Op]:
+    """
+    Description: Walk a computer call's output: its image_url is media when it is a base64 data URL (FR-GATE-07).
+    Parameters:
+        value: the output.
+        path: its path.
+    Output: Operations; the type and file id are identifiers. A value that is not an object is scanned as is.
+    """
+    if isinstance(value, dict):
+        yield from fields(value, path, skip=frozenset({"type", "file_id"}), special={"image_url": media_url})
+    else:
+        yield from strings(value, path)
+
+
 def _simple(skip: frozenset = IDS, **special: Callable[[object, tuple], Iterator[Op]]) -> Callable[[dict, tuple], Iterator[Op]]:
     """
     Description: Build the rule for an item whose members are scanned generically, with a few given their own rule.
@@ -164,11 +180,11 @@ _ITEMS: dict[str, Callable[[dict, tuple], Iterator[Op]]] = {
     "shell_call_output": _simple(),
     "apply_patch_call": _simple(operation=lambda v, q: strings(v, q, skip=TYPE)), "apply_patch_call_output": _simple(),
     "computer_call": _simple(action=lambda v, q: strings(v, q, skip=TYPE)),
-    "computer_call_output": _simple(output=lambda v, q: strings(v, q, skip=frozenset({"type", "file_id"}))),
+    "computer_call_output": _simple(output=_screenshot),
     "web_search_call": _simple(action=lambda v, q: strings(v, q, skip=TYPE)),
     "file_search_call": _simple(results=lambda v, q: strings(v, q, skip=frozenset({"file_id"}))),
     "code_interpreter_call": _simple(skip=IDS | {"container_id"}, outputs=lambda v, q: strings(v, q, skip=TYPE)),
-    "image_generation_call": _simple(skip=IDS | {"result"}),
+    "image_generation_call": _simple(result=media),
     "mcp_call": lambda i, p: fields(i, p, skip=IDS, json_keys=ARGUMENTS),
     "mcp_list_tools": _simple(tools=lambda v, q: strings(v, q, skip=frozenset({"name"}), deep=NO_SKIP)),
     "mcp_approval_request": lambda i, p: fields(i, p, skip=IDS, json_keys=ARGUMENTS),
@@ -208,8 +224,8 @@ def walk(body: object) -> Iterator[Op]:
     Description: Walk a whole Responses request.
     Parameters:
         body: the parsed request (must be an object).
-    Output: Operations in document order. Identifiers, ciphertext (reasoning and compaction items), base64 media and mcp
-        credentials are not yielded; every other string member of the body is. Raises RefusalError(HISTORY) for a
+    Output: Operations in document order. Identifiers, ciphertext (reasoning and compaction items) and mcp credentials
+        are not yielded, base64 media is yielded as Media; every other string member of the body is. Raises RefusalError(HISTORY) for a
         previous_response_id or conversation, RefusalError(PARSE) for a wrong shape and RefusalError(UNKNOWN_TYPE) for
         an unlisted item, part or tool type.
     """

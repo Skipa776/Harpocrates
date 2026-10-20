@@ -228,6 +228,8 @@ class GateHandler(BaseHTTPRequestHandler):
         self._facts["ms_scan"] = (time.monotonic() - scan_started) * 1000
         if isinstance(outcome, Block):
             return self._refuse(route, outcome.reason, body_unread=False)
+        if outcome.media:
+            self._facts["media"] = [{"kind": note.kind, "bytes": note.size} for note in outcome.media]
         self._forward(route, encode_body(outcome.body, decoded.encoding, self.server.zstd), decoded.encoding)
 
     def parse_request(self) -> bool:

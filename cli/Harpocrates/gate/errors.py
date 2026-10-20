@@ -27,7 +27,9 @@ _RECOVERY_PHRASES = ("thinking", "signature", "bound to a different conversation
                      "prompt is too long")
 # One extra sentence for the codes where the user has something to do (FR-GATE-10: a secret the gate cannot rewrite).
 _ADVICE = {"HARPO-BLOCK-PROVIDER-TEXT": "The conversation holds a secret in text that only the provider can rewrite. "
-                                        "Start a new session. "}
+                                        "Start a new session. ",
+           "HARPO-BLOCK-MEDIA-SECRET": "A file sent as base64 holds a secret. Send the file as text instead, so Harpo "
+                                       "can redact it. "}
 _KINDS = {
     "anthropic": {400: "invalid_request_error", 401: "authentication_error", 426: "invalid_request_error",
                   502: "api_error"},

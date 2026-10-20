@@ -10,6 +10,8 @@ PROVIDER_TEXT = "HARPO-BLOCK-PROVIDER-TEXT"  # a secret in text only the provide
 KEY_SECRET = "HARPO-BLOCK-KEY-SECRET"  # a secret in an object key, which two keys could collapse into one placeholder
 HEADER_SECRET = "HARPO-BLOCK-HEADER-SECRET"  # a secret in a header value, the path or the query: none can be rewritten
 HISTORY = "HARPO-BLOCK-HISTORY"  # server-side history the gate cannot see (previous_response_id, conversation)
+MEDIA_MALFORMED = "HARPO-BLOCK-MEDIA-MALFORMED"  # a media field that is not strict base64 to its end (FR-GATE-07)
+MEDIA_SECRET = "HARPO-BLOCK-MEDIA-SECRET"  # a secret in a text file sent as base64, which is not rewritten in v1
 JSON_ARGS = "HARPO-BLOCK-JSON-ARGS"  # tool-call arguments that parsed before redaction but not after
 
 

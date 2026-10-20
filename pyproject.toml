@@ -129,6 +129,7 @@ enforce = [
     "cli/Harpocrates/gate/jsonlocate.py",
     "cli/Harpocrates/gate/jsonstring.py",
     "cli/Harpocrates/gate/jsonspan.py",
+    "cli/Harpocrates/gate/media.py",
     "cli/Harpocrates/gate/relay.py",
     "cli/Harpocrates/gate/request_log.py",
     "cli/Harpocrates/gate/request_scan.py",

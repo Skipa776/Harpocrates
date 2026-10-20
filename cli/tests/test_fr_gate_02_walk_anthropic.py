@@ -36,10 +36,12 @@ def test_fr_gate_02_plain_strings_are_leaves_and_identifiers_are_not() -> None:
     assert sorted(texts(body)) == ["MARK-stop", "MARK-system", "MARK-uid", "MARK-user"]
 
 
-def test_fr_gate_02_leaves_know_their_path_and_empty_strings_and_media_urls_are_not_leaves() -> None:
+def test_fr_gate_02_leaves_know_their_path_and_empty_strings_are_not_leaves_but_data_urls_in_text_are() -> None:
+    """Media is decided by the field, not the content (FR-GATE-07): a data URL in message text is scanned."""
     body = req(user({"type": "text", "text": "MARK-a"}, {"type": "text", "text": ""}),
                {"role": "user", "content": "data:image/png;base64,AAAA"})
-    assert [(op.path, op.text) for op in ops(body)] == [(("messages", 0, "content", 0, "text"), "MARK-a")]
+    assert [(op.path, op.text) for op in ops(body)] == [(("messages", 0, "content", 0, "text"), "MARK-a"),
+                                                        (("messages", 1, "content"), "data:image/png;base64,AAAA")]
 
 
 def test_fr_gate_02_system_blocks_are_text_blocks_and_any_other_type_blocks() -> None:

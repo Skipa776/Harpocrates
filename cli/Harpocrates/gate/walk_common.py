@@ -2,8 +2,8 @@
 
 A walker looks at a parsed request and yields operations; it never looks for secrets. Leaf is a string to scan (class R:
 rewrite it; class S: scan only, a finding blocks), KeyText an object key to scan (a finding blocks), Drop an array element to
-cut out. Anything a walker does not yield is not scanned: identifiers (I), ciphertext and signatures (O), media (M) and
-connector credentials (K). A walker raises RefusalError for a shape or type the parser spec does not list.
+cut out, Media a base64 payload in a field the tables mark M (FR-GATE-07). Anything a walker does not yield is not
+scanned: identifiers (I), ciphertext and signatures (O) and connector credentials (K). A walker raises RefusalError for a shape or type the parser spec does not list.
 """
 from __future__ import annotations
 
@@ -59,10 +59,6 @@ class Drop(NamedTuple):
     path: tuple
 
 
-Op = Union[Leaf, KeyText, Drop]
-Special = dict[str, Callable[[object, tuple], Iterator[Op]]]
-
-
 def refuse_type() -> RefusalError:
     """
     Description: Make the error for a block, item, tool or source type the parser spec does not list.
@@ -81,19 +77,57 @@ def refuse_shape() -> RefusalError:
     return RefusalError(PARSE)
 
 
-def is_media(text: str) -> bool:
+class Media(NamedTuple):
     """
-    Description: Tell whether a string is a base64 data URL (class M): not text, and not worth scanning.
+    Description: A base64 payload in a field the parser tables mark M (FR-GATE-07): checked, and scanned when it is text.
     Parameters:
-        text: the string.
-    Output: True for "data:...;base64,...".
+        path: where it is in the request.
+        payload: the base64 text, without any data URL prefix.
+    Output: An immutable record.
     """
-    return text.startswith("data:") and ";base64," in text[:200]
+
+    path: tuple
+    payload: str
+
+
+Op = Union[Leaf, KeyText, Drop, Media]
+Special = dict[str, Callable[[object, tuple], Iterator[Op]]]
+
+
+def media(value: object, path: tuple) -> Iterator[Op]:
+    """
+    Description: Walk a media field. A data URL gives its payload after ";base64,"; a plain string is the payload.
+    Parameters:
+        value: the field's value.
+        path: the field's path.
+    Output: One Media for a string; a value of another type is scanned like any other (strings()), so nothing in it
+        escapes the scan.
+    """
+    if not isinstance(value, str):
+        yield from strings(value, path)
+        return
+    _, marker, payload = value.partition(";base64,")
+    yield Media(path, payload if value.startswith("data:") and marker else value)
+
+
+def media_url(value: object, path: tuple) -> Iterator[Op]:
+    """
+    Description: Walk an image URL field: a base64 data URL is media, any other URL is text (it may hold a token).
+    Parameters:
+        value: the field's value.
+        path: its path.
+    Output: One Media for "data:...;base64,...", otherwise what strings() yields.
+    """
+    if isinstance(value, str) and value.startswith("data:") and ";base64," in value:
+        yield from media(value, path)
+    else:
+        yield from strings(value, path)
 
 
 def leaf(path: tuple, text: str, cls: str = "R", as_json: bool = False) -> Iterator[Op]:
     """
-    Description: Yield one string as a Leaf unless it is empty or media.
+    Description: Yield one string as a Leaf unless it is empty. A string that looks like a data URL is text here too: media
+        is decided by the field (media()), not by the content (FR-GATE-07).
     Parameters:
         path: its path.
         text: the string.
@@ -101,7 +135,7 @@ def leaf(path: tuple, text: str, cls: str = "R", as_json: bool = False) -> Itera
         as_json: whether it holds JSON to parse.
     Output: Zero or one Leaf.
     """
-    if text and not is_media(text):
+    if text:
         yield Leaf(path, text, cls, as_json)
 
 

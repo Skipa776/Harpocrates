@@ -6,6 +6,7 @@ import threading
 from typing import Callable, NamedTuple, Union
 
 from Harpocrates.gate.errors import is_block_code
+from Harpocrates.gate.media import MediaNote
 from Harpocrates.gate.routes import Route
 
 SCAN_ERROR = "HARPO-BLOCK-SCAN-ERROR"
@@ -17,10 +18,12 @@ class Forward(NamedTuple):
     Description: A scan step's answer that the request may go on.
     Parameters:
         body: the exact bytes to forward (decoded, possibly rewritten).
+        media: one warning per binary payload that passed unscanned, in document order (FR-GATE-07).
     Output: An immutable record.
     """
 
     body: bytes
+    media: tuple[MediaNote, ...] = ()
 
 
 class Block(NamedTuple):

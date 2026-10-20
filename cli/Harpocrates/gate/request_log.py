@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Callable, Mapping, Optional
 
 from Harpocrates.gate.errors import REASONS, is_block_code
+from Harpocrates.gate.media import KINDS
 
 _METHODS = frozenset({"GET", "POST", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"})
 ROUTE_NAMES = frozenset({"anthropic.messages", "anthropic.count_tokens", "openai.responses", "anthropic.models",
@@ -40,10 +41,11 @@ def format_entry(entry: Mapping[str, object]) -> str:
     Description: Turn one request's facts into a log line, keeping only fields that cannot carry request content.
     Parameters:
         entry: facts about the request. Read: time, method, route, status, decision, reason, bytes_in, bytes_out,
-            bytes_back, ms_scan, ms_upstream, ms_total. Every other key is ignored.
+            bytes_back, ms_scan, ms_upstream, ms_total, media. Every other key is ignored.
     Output: One compact JSON object ending in a newline, fields in that order. A method outside the usual seven
         is logged as "OTHER". A route, decision or reason outside the gate's fixed vocabulary, a status outside 100 to 599,
-        and a bad number are left out. No side effects.
+        and a bad number are left out. media (FR-GATE-07) keeps only {"kind", "bytes"} pairs with a kind from the fixed list
+        and a count, and is left out when none remain. No side effects.
     """
     method, route = entry.get("method"), entry.get("route")
     status, decision, reason = entry.get("status"), entry.get("decision"), entry.get("reason")
@@ -66,6 +68,11 @@ def format_entry(entry: Mapping[str, object]) -> str:
             value = _number(entry.get(name), integer)
             if value is not None:
                 fields[name] = value
+    media = entry.get("media")
+    notes = [{"kind": item["kind"], "bytes": item["bytes"]} for item in media if isinstance(item, dict)
+             and item.get("kind") in KINDS and _number(item.get("bytes"), True) is not None] if isinstance(media, list) else []
+    if notes:
+        fields["media"] = notes
     return json.dumps(fields, separators=(",", ":")) + "\n"
 
 

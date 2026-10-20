@@ -15,6 +15,8 @@ from Harpocrates.gate.walk_common import (
     Op,
     fields,
     leaf,
+    media,
+    media_url,
     refuse_shape,
     refuse_type,
     strings,
@@ -71,8 +73,9 @@ def _source(url_key: str, kinds: dict) -> Callable[[object, tuple], Iterator[Op]
     Description: Build the rule for an image or document `source` member.
     Parameters:
         url_key: the member that holds a URL ("url").
-        kinds: source type -> "skip" (media or a provider file id), "url" (scan the URL), "text" (scan the text fields) or
-            "blocks" (nested content blocks).
+        kinds: source type -> "media" (base64 data, FR-GATE-07; members other than the type are scanned), "skip" (a provider file
+            id), "url" (scan the URL; a base64 data URL is media), "text" (scan the text fields) or "blocks" (nested
+            content blocks).
     Output: A function(value, path) for fields(special=...). An unlisted source type raises RefusalError(UNKNOWN_TYPE).
     """
     def walk_source(value: object, path: tuple) -> Iterator[Op]:
@@ -88,8 +91,10 @@ def _source(url_key: str, kinds: dict) -> Callable[[object, tuple], Iterator[Op]
         how = kinds.get(value.get("type")) if isinstance(value.get("type"), str) else None
         if how is None:
             raise refuse_type()
-        if how == "url" and isinstance(value.get(url_key), str):
-            yield from leaf(path + (url_key,), value[url_key])
+        if how == "media":
+            yield from fields(value, path, skip=frozenset({"type", "media_type"}), special={"data": media})
+        elif how == "url" and url_key in value:
+            yield from media_url(value[url_key], path + (url_key,))
         elif how == "text":
             yield from fields(value, path, skip=frozenset({"type", "media_type"}))
         elif how == "blocks":
@@ -182,8 +187,8 @@ def _tool_definition(tool: object, path: tuple) -> Iterator[Op]:
     yield from fields(tool, path, skip=frozenset({"type", "name"}), special={"input_schema": free, "input_examples": free})
 
 
-_IMAGE = _source("url", {"base64": "skip", "file": "skip", "url": "url"})
-_DOCUMENT = _source("url", {"base64": "skip", "file": "skip", "url": "url", "text": "text", "content": "blocks"})
+_IMAGE = _source("url", {"base64": "media", "file": "skip", "url": "url"})
+_DOCUMENT = _source("url", {"base64": "media", "file": "skip", "url": "url", "text": "text", "content": "blocks"})
 _BLOCKS: dict[str, Callable[[dict, tuple], Iterator[Op]]] = {
     "text": _text,
     "image": lambda b, p: fields(b, p, skip=frozenset({"type"}), special={"source": _IMAGE}),

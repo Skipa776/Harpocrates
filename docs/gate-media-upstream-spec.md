@@ -24,7 +24,7 @@ Response streaming (the rest of FR-GATE-06) already shipped in G3 and is covered
    Everywhere else a `data:` string is ordinary text and is scanned. `is_media` is removed from `leaf()`.
 2. **The payload must be strict base64.** An M value must be `[A-Za-z0-9+/]*={0,2}` to its end, after the `data:<type>;base64,` prefix if there is one. Otherwise the request blocks with a new reason, `MEDIA_MALFORMED`. Base64 can't hide a readable tail, so a strict payload can't smuggle text past the gate.
 3. **Images, PDFs and audio pass with a warning (the v1 default).** The bytes are forwarded unchanged and aren't decoded or scanned. The warning is a request-log field, `media`, holding a list of `{kind, bytes}`:
-   - `kind` comes from a fixed list: `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf`, `audio`, `other`. It never holds the raw media type string.
+   - `kind` comes from a fixed list: `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf`, `audio`. It never holds the raw media type string (see the implementation notes: the kind is read from the payload's signature).
    - `bytes` is the decoded size.
 
    This gives the warning no path for content. OCR stays cut (design doc cut order, item 3).
@@ -39,6 +39,16 @@ Response streaming (the rest of FR-GATE-06) already shipped in G3 and is covered
 - Rule 4 blocks text files that hold a secret, where today they pass unscanned.
 
 Both choices fail closed.
+
+**Implementation notes (Oct 20, 2026, after review):** the code decides "binary or text" by content, not by label. This is stricter than rule 4 as written.
+- **Binary means a known signature.** A payload passes unscanned only when its first bytes are a known format: PNG, JPEG, GIF, WEBP, PDF, or audio (WAV, MP3, Ogg, FLAC). Its kind in the log comes from those bytes, never from the request's label, so no request text can reach the note. The list therefore has no `other`.
+- **Everything else is read as text and scanned.** That includes a text file with any label, UTF-16 (read both ways when the bytes hold a NUL), text with a stray NUL or invalid byte, and an unknown binary format. A secret in any reading blocks with `MEDIA_SECRET`. The security review found that the first version let UTF-16 text and text with one bad byte through as "binary", which this closes.
+- **Trade-off (rule 4):** an unknown binary format, such as a zip or a `.docx`, is scanned as replaced text, and a false positive blocks it. A payload that starts with a real image signature and has text appended still passes unscanned. That is accepted for v1, like the rest of an image's content.
+- **Because the content decides,** there is no filename-extension rule and no list of text media types.
+- **Caching.** Decoded text is scanned through the finder's existing per-session cache. The cache is keyed by SHA-256 of the text, so an unchanged file is not rescanned on every turn.
+- **No separate size check.** Decoded base64 is always smaller than the base64 text, and that text is already inside the capped body.
+- **Other members of an Anthropic base64 source,** apart from `type`, `media_type` and `data`, are scanned as text. Before G5 the whole source was skipped.
+- **A base64 data URL in a `url`-type source** is media. Any other URL there is scanned as text.
 
 ## Part 2: the ChatGPT-login upstream
 
