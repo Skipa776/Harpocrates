@@ -5,14 +5,18 @@ from __future__ import annotations
 
 import dataclasses
 import gzip
+import inspect
 import json
 import socket
+import time
 
 import pytest
+import zstandard
 from gate_rig import passthrough_scan, running_rig  # noqa: F401
 
 import Harpocrates.gate.server as gate_server
 from Harpocrates.gate.config import GateConfig
+from Harpocrates.gate.scan import Block, Forward, default_scan_step
 from Harpocrates.gate.server import start_gate
 from Harpocrates.gate.session_token import TOKEN_HEADER, new_token
 
@@ -245,3 +249,82 @@ def test_fr_install_04_a_compression_bomb_is_blocked_at_the_cap() -> None:
         reply = rig.call("POST", "/v1/messages", bomb, {**JSON, "Content-Encoding": "gzip"})
         assert reply.status == 400 and "HARPO-BLOCK-BODY-TOO-LARGE" in reply.body.decode()
         assert rig.mock.records() == []
+
+
+# --- FR-GATE-03: the scan step -----------------------------------------------------------------------------------
+
+STREAM_MESSAGES = json.dumps({"model": "m", "max_tokens": 1, "stream": True,
+                              "messages": [{"role": "user", "content": "hi"}]}).encode()
+STREAM_RESPONSES = json.dumps({"model": "m", "input": "hi", "stream": True}).encode()
+EVERY_KIND = [  # (method, target, body, headers): each way a request can reach the gate
+    ("POST", "/v1/messages?beta=true", MESSAGES, {"anthropic-version": "2023-06-01"}),
+    ("POST", "/v1/messages", STREAM_MESSAGES, {"anthropic-version": "2023-06-01"}),
+    ("POST", "/v1/messages/count_tokens", MESSAGES, {"anthropic-version": "2023-06-01"}),
+    ("POST", "/v1/responses", RESPONSES, {}),
+    ("POST", "/v1/responses", STREAM_RESPONSES, {}),
+    ("POST", "/v1/messages", gzip.compress(MESSAGES), {"Content-Encoding": "gzip", "anthropic-version": "x"}),
+    ("POST", "/v1/responses", zstandard.ZstdCompressor().compress(RESPONSES), {"Content-Encoding": "zstd"}),
+    ("POST", "/v1/messages", b"", {"anthropic-version": "2023-06-01"}),
+    ("GET", "/v1/models", None, {}),
+    ("GET", "/v1/models?limit=1000", None, {"anthropic-version": "2023-06-01"}),
+]
+
+
+def test_fr_gate_03_scan_stub_blocks_everything() -> None:
+    """The default state: no scan step is given, so nothing may leave. This is what G3 alone does."""
+    assert inspect.signature(start_gate).parameters["scan_step"].default is default_scan_step
+    with running_rig() as rig:
+        for method, target, body, headers in EVERY_KIND:
+            reply = rig.call(method, target, body, {**JSON, **headers})
+            assert reply.status == 400, (method, target)
+            assert "HARPO-BLOCK-SCAN-ERROR" in reply.body.decode(), (method, target)
+        assert rig.mock.records() == []  # not one request reached the provider
+
+
+def test_fr_gate_03_scan_error_and_timeout_block() -> None:
+    def explode(body: bytes, route: object) -> Forward:
+        raise RuntimeError("scanner crashed with FAKE-SECRET-IN-MESSAGE")
+
+    def hang(body: bytes, route: object) -> Forward:
+        time.sleep(30)
+        return Forward(body)
+
+    with running_rig(scan_step=explode) as rig:
+        for method, target, body, headers in EVERY_KIND[:5]:
+            reply = rig.call(method, target, body, {**JSON, **headers})
+            assert reply.status == 400 and "HARPO-BLOCK-SCAN-ERROR" in reply.body.decode()
+            assert "FAKE-SECRET" not in reply.body.decode()  # the exception text never reaches the agent
+        assert rig.mock.records() == []
+    with running_rig(scan_step=hang, scan_timeout=0.3) as rig:
+        started = time.monotonic()
+        reply = rig.call("POST", "/v1/messages", MESSAGES, {**JSON, "anthropic-version": "2023-06-01"})
+        assert reply.status == 400 and "HARPO-BLOCK-SCAN-TIMEOUT" in reply.body.decode()
+        assert time.monotonic() - started < 5
+        assert rig.mock.records() == []
+
+
+def test_fr_gate_03_a_step_that_answers_with_garbage_or_blocks_is_obeyed_as_a_block() -> None:
+    with running_rig(scan_step=lambda body, route: "yes") as rig:
+        reply = rig.call("POST", "/v1/messages", MESSAGES, JSON)
+        assert reply.status == 400 and "HARPO-BLOCK-SCAN-ERROR" in reply.body.decode()
+    with running_rig(scan_step=lambda body, route: Block("HARPO-BLOCK-UNKNOWN-TYPE")) as rig:
+        reply = rig.call("POST", "/v1/messages", MESSAGES, {**JSON, "anthropic-version": "2023-06-01"})
+        assert reply.status == 400 and "HARPO-BLOCK-UNKNOWN-TYPE" in reply.body.decode()
+        assert rig.mock.records() == []
+
+
+def test_fr_install_04_gzip_decoded() -> None:
+    """The scan step sees the decoded JSON, whatever encoding the body arrived in."""
+    seen: list[tuple[bytes, str]] = []
+
+    def capture(body: bytes, route) -> Block:
+        seen.append((body, route.name))
+        return Block("HARPO-BLOCK-CAPTURED")
+
+    with running_rig(scan_step=capture) as rig:
+        rig.call("POST", "/v1/messages", gzip.compress(MESSAGES), {**JSON, "Content-Encoding": "gzip"})
+        rig.call("POST", "/v1/messages", gzip.compress(MESSAGES), {**JSON, "Content-Encoding": "GZIP"})
+        rig.call("POST", "/v1/messages", MESSAGES, JSON)
+        rig.call("POST", "/v1/responses", zstandard.ZstdCompressor().compress(RESPONSES),
+                 {**JSON, "Content-Encoding": "zstd"})
+    assert seen == [(MESSAGES, "anthropic.messages")] * 3 + [(RESPONSES, "openai.responses")]
