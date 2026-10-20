@@ -148,6 +148,28 @@ class Redactor:
             logger.warning("ML verifier unavailable, redacting all candidates: %s", type(exc).__name__)
             return findings
 
+    def secret_values(self, text: str, findings: Optional[List[Finding]] = None) -> dict:
+        """
+        Description: List every secret value in a text with its coarse type, the one place that turns findings into
+            values to replace (the read tool and the egress gate both use it).
+        Parameters:
+            text: Text whose secret values should be found.
+            findings: Findings already collected for this text, or None to collect them with the recall-first rules of
+                _findings. A caller that must fail on a verifier error passes its own.
+        Output: {value: secret type}, longest values first. Whole private-key blocks (an unterminated block runs to the
+            end of the text) are one value; an entropy token on a NAME=value line is cut down to the value (unless that
+            would leave under 8 characters). Detection errors propagate.
+        """
+        spans = {m.group(0): "private_key" for m in _PEM_BLOCK.finditer(text)}
+        for f in self._findings(text) if findings is None else findings:
+            value = f.token or ""
+            stripped = _NAME_PREFIX.sub("", value, count=1)
+            if len(stripped) >= 8:  # never shrink a token like "abcd==" to "=", which would rewrite every "="
+                value = stripped
+            if value.strip():
+                spans.setdefault(value, secret_type(f.category))
+        return {value: spans[value] for value in sorted(spans, key=len, reverse=True)}  # a block swallows its own header
+
     def redact(self, text: str) -> str:
         """
         Description: Replace every detected secret everywhere it occurs while keeping the line
@@ -157,16 +179,8 @@ class Redactor:
         Output: Redacted text with session-keyed placeholders; detection may initialize the model
             or log a verification failure, and initial detection errors propagate.
         """
-        spans = {m.group(0): "private_key" for m in _PEM_BLOCK.finditer(text)}
-        for f in self._findings(text):
-            value = f.token or ""
-            stripped = _NAME_PREFIX.sub("", value, count=1)
-            if len(stripped) >= 8:  # never shrink a token like "abcd==" to "=", which would rewrite every "="
-                value = stripped
-            if value.strip():
-                spans.setdefault(value, secret_type(f.category))
-        for value in sorted(spans, key=len, reverse=True):  # longest first: a block swallows its own header
-            ph = self.placeholder(value, spans[value])
+        for value, stype in self.secret_values(text).items():
+            ph = self.placeholder(value, stype)
             text = text.replace(value, "\n".join([ph] * (value.count("\n") + 1)))
         return text
 
