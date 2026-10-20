@@ -117,6 +117,7 @@ enforce = [
     "cli/Harpocrates/detectors/entropy_detector.py",
     "cli/Harpocrates/detectors/path_tokens.py",
     "cli/Harpocrates/envvars.py",
+    "cli/Harpocrates/gate/__main__.py",
     "cli/Harpocrates/gate/body_encoding.py",
     "cli/Harpocrates/gate/body_read.py",
     "cli/Harpocrates/gate/config.py",
