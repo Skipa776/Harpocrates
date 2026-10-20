@@ -122,6 +122,7 @@ enforce = [
     "cli/Harpocrates/gate/config.py",
     "cli/Harpocrates/gate/errors.py",
     "cli/Harpocrates/gate/headers.py",
+    "cli/Harpocrates/gate/relay.py",
     "cli/Harpocrates/gate/request_log.py",
     "cli/Harpocrates/gate/routes.py",
     "cli/Harpocrates/gate/scan.py",
