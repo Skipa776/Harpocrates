@@ -135,6 +135,45 @@ Switches: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `skipWebFetchPrefligh
 
 Doctor reports bypass as a failure with the agent name and the check that failed. Claude Code and Codex that are not running are skipped, not passed.
 
+## SEC-10: a repo cannot move the agent off the gate
+
+Oct 19, 2026. The hook (`hooks.py`) runs the check in `cli/Harpocrates/gatecheck.py` first on every Claude Code tool call. The code and its module docstring are the one definition; this section is the summary.
+
+**Install record.** `~/.harpo/install.json` gets one more top-level entry, written by `harpo guard up` (G7), read by the hook:
+
+```json
+"gate": {"enabled": true, "port": 47321, "token_header": "x-harpo-gate-token"}
+```
+
+| Case | Hook |
+| --- | --- |
+| No record, no `gate` entry, `"enabled": false`, or `~/.harpo` is a symlink or a file (SEC-09) | No gate installed. Nothing changes |
+| `"enabled": true` with an integer `port` of 1 to 65535 and a valid HTTP header name in `token_header` | The check runs |
+| Anything else: a record that is not JSON, a `gate` that is not an object, `enabled` that is not true or false, a bad port or header | Every tool call is refused (fail closed), naming `~/.harpo/install.json`. Without the entry Harpo cannot tell whether the gate is on |
+
+**What is a bypass.** For each variable the effective value is the one from the highest-precedence source that sets it, an empty string included (a settings file cannot remove a variable, so an empty value is how one overrides it, C6).
+
+| Variable | Bypass when |
+| --- | --- |
+| `ANTHROPIC_BASE_URL` | Not exactly `http://<localhost, 127.0.0.1 or [::1]>:<gate port>`: https, a path (even `/`), query, user info, a missing port or any other host fail. Also when no source sets it (Claude Code then calls the provider) |
+| `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` | On: anything but empty, `0`, `false`, `no`, `off` |
+| `ANTHROPIC_CUSTOM_HEADERS` | No `Name: Value` line with the record's `token_header` and a non-empty value. Not set counts as lacking it |
+
+**Precedence, highest first** (C5, checked 2026-10-19): managed settings (`managed-settings.json`, then `managed-settings.d/*.json` in name order, a later file winning, C7), `--settings`, `<repo>/.claude/settings.local.json`, `<repo>/.claude/settings.json`, `~/.claude/settings.json`; then the hook's own environment, because an `env` entry replaces the shell's value in the process environment (C6). G2 (T2) saw the same: the project value beat the user value and an exported variable. The hook reads the files above except `--settings`, MDM profiles, the Windows registry and server-managed settings; Claude Code copies what those set into the process environment, which the hook does read. The settings are looked up under the event's `cwd` and under `CLAUDE_PROJECT_DIR`, because a `cd` can move the `cwd` away from where Claude Code started.
+
+**Refusal.** A `deny` with one plain line naming each setting file (and the line, when the key is written plainly) and the host and port of a wrong URL, never a path, query, user info, header or token. Every permission mode and `--ask` give the same deny: there is no `ask` code path, no desktop notice, and nothing reads further input. A settings file that exists but cannot be used (not a regular file, over 1 MiB, not strict JSON: duplicate keys, NaN, BOM, trailing text, a non-text value for one of the four variables) is itself the refusal, and then only such files are named, because the effective values are unknown. Files are opened without blocking, so a pipe planted in a repo cannot hang the hook (a hook that times out is read as an allow). Cost: about 0.1 ms with the gate on and two settings files, 0.015 ms with no gate (500 calls each, Python 3.12).
+
+**Codex.** A project `.codex/config.toml` cannot set `model_provider`, `model_providers` or `openai_base_url` (X1; the Codex section above), so a repo cannot move Codex off the gate that way, and the check never opens a project `.codex` file (`test_sec_10_codex_project_config_is_never_read`). The hook skips the check for Codex events, which carry `turn_id` and `model` (X3), because Codex does not read Claude Code settings. An event with both fields is never judged; one without them is judged as Claude Code, which can only refuse more.
+
+**`harpo doctor`** (FR-PROOF-05) does not exist yet (G7, FR-INSTALL-02). `gatecheck.bypass_findings(project_dir)` returns one finding per bypassing setting (or one for a bad record or file) and is what doctor will call and fail on.
+
+**Not covered, for the next steps.**
+
+- The hook only sees the tools its matcher names. `harness.claude_code_settings` registers `Read|Grep|Bash|Edit|MultiEdit|Write|NotebookEdit`, so a tool outside that list (`WebFetch`, `Task`, MCP tools) never reaches the hook. `decide` refuses any tool name it is given; widening the matcher is a one-line change in `harness.py`, not made here.
+- `harpo install` rewrites the record from its own sections only (`install._run`), so it drops a `gate` entry written by `harpo guard up`. G7 must keep the entry when it rewrites the record, or the check goes quiet.
+- `CLAUDE_CODE_USE_FOUNDRY`, `CLAUDE_CODE_USE_MANTLE`, `CLAUDE_CODE_USE_ANTHROPIC_AWS` and `ANTHROPIC_AWS_BASE_URL` (C6) are the same kind of switch; SEC-10 as approved names only Bedrock and Vertex.
+- Per-run flags and the process's own `HTTPS_PROXY` are invisible to the hook.
+
 ## Open questions for Josh (decided Oct 19, 2026: see Decisions in `docs/gate-parser-spec.md`)
 
 1. **WebSocket scope.** Proposed: not in v1; route A avoids it; route B refuses the upgrade and relies on Codex's HTTP fallback. If ChatGPT-login users need route B, WebSocket moves into M2. Accept?
@@ -170,9 +209,13 @@ Results, Oct 19, 2026. Probe run `20261019T175710Z-g2` (`bench/results/proof/g2-
 | C2 | https://code.claude.com/docs/en/llm-gateway-connect |
 | C3 | https://code.claude.com/docs/en/data-usage |
 | C4 | https://code.claude.com/docs/en/llm-gateway |
+| C5 | https://code.claude.com/docs/en/settings ("Settings precedence") |
+| C6 | https://code.claude.com/docs/en/env-vars ("Precedence"; the variable table) |
+| C7 | https://code.claude.com/docs/en/managed-settings ("Where each mechanism stores the policy", "managed-settings.d") |
 | O2 | https://developers.openai.com/api/docs/guides/websocket-mode.md |
 | X1 | https://learn.chatgpt.com/docs/config-file/config-reference |
 | X2 | https://learn.chatgpt.com/docs/auth |
+| X3 | https://learn.chatgpt.com/docs/hooks (PreToolUse input; `model` and `turn_id` are Codex-specific) |
 | CX1 | https://github.com/openai/codex/blob/e4568a3538c9cab6627d64ff8cdfc7d98b79b7db/codex-rs/core/src/client.rs |
 | CX2 | https://github.com/openai/codex/blob/e4568a3538c9cab6627d64ff8cdfc7d98b79b7db/codex-rs/model-provider-info/src/lib.rs |
 | CX3 | https://github.com/openai/codex/blob/e4568a3538c9cab6627d64ff8cdfc7d98b79b7db/codex-rs/responses-api-proxy/README.md |
