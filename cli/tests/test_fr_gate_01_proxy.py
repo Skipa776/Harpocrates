@@ -139,3 +139,59 @@ def test_fr_gate_01_a_websocket_upgrade_is_a_426_on_any_path_and_a_401_without_t
         assert rig.mock.records() == []
         # Without the right token an upgrade is a 401 first (token check, then route).
         assert rig.call("GET", target, None, upgrade, token=False).status == 401
+
+
+# --- bodies ------------------------------------------------------------------------------------------------------
+
+def post_head(rig, *extra: str, target: str = "/v1/messages") -> bytes:
+    """A request head for the raw tests: the right token, JSON, and the extra header lines."""
+    lines = [f"POST {target} HTTP/1.1", "Host: gate.test", f"{TOKEN_HEADER}: {rig.token}",
+             "anthropic-version: 2023-06-01", "Content-Type: application/json", *extra]
+    return ("\r\n".join(lines) + "\r\n\r\n").encode()
+
+
+def status_and_text(raw: bytes) -> tuple[bytes, str]:
+    return raw.split(b"\r\n", 1)[0], raw.partition(b"\r\n\r\n")[2].decode("latin-1")
+
+
+def test_fr_gate_01_oversized_and_truncated_bodies_blocked() -> None:
+    with running_rig(scan_step=passthrough_scan, max_body=2048, client_timeout=1) as rig:
+        # Over the cap by Content-Length: refused from the header; the agent still gets its answer.
+        status, text = status_and_text(rig.raw(post_head(rig, "Content-Length: 3000") + b"a" * 3000))
+        assert status == b"HTTP/1.1 400 Bad Request" and "HARPO-BLOCK-BODY-TOO-LARGE" in text
+        # Over the cap in chunks.
+        chunks = b"".join(f"{len(p):x}\r\n".encode() + p + b"\r\n" for p in (b"a" * 1500, b"b" * 1500)) + b"0\r\n\r\n"
+        status, text = status_and_text(rig.raw(post_head(rig, "Transfer-Encoding: chunked") + chunks))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TOO-LARGE" in text
+        # Truncated: the agent promises 3000 bytes, sends 100 and stops.
+        status, text = status_and_text(rig.raw(post_head(rig, "Content-Length: 1000") + b"a" * 100))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TRUNCATED" in text
+        status, text = status_and_text(rig.raw(post_head(rig, "Transfer-Encoding: chunked") + b"5\r\nhel"))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TRUNCATED" in text
+        status, text = status_and_text(rig.raw(post_head(rig, "Transfer-Encoding: chunked") + b"5\r\nhello\r\n"))
+        assert "HARPO-BLOCK-BODY-TRUNCATED" in text
+        # Stalled: the agent sends part of the body and then nothing, without hanging up.
+        status, text = status_and_text(rig.raw(post_head(rig, "Content-Length: 1000") + b"a" * 100, half_close=False))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TRUNCATED" in text
+        assert rig.mock.records() == []
+
+
+@pytest.mark.parametrize("extra,body", [
+    (["Content-Length: abc"], b"{}"), (["Content-Length: -1"], b"{}"), (["Content-Length: 2", "Content-Length: 2"], b"{}"),
+    (["Content-Length: 2", "Transfer-Encoding: chunked"], b"2\r\n{}\r\n0\r\n\r\n"),
+    (["Transfer-Encoding: gzip, chunked"], b"2\r\n{}\r\n0\r\n\r\n"), (["Transfer-Encoding: chunked"], b"zz\r\n{}\r\n0\r\n\r\n"),
+    (["Transfer-Encoding: chunked"], b"2\r\n{}XX0\r\n\r\n"),
+])
+def test_fr_gate_01_a_body_with_bad_framing_is_blocked(extra: list[str], body: bytes) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        status, text = status_and_text(rig.raw(post_head(rig, *extra) + body))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-FRAMING" in text
+        assert rig.mock.records() == []
+
+
+def test_fr_gate_01_a_body_on_a_route_that_has_none_is_blocked() -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        head = (f"GET /v1/models HTTP/1.1\r\nHost: g\r\n{TOKEN_HEADER}: {rig.token}\r\nContent-Length: 5\r\n\r\nhello").encode()
+        status, text = status_and_text(rig.raw(head))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TOO-LARGE" in text
+        assert rig.mock.records() == []

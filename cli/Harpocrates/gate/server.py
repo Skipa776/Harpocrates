@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
 
 from Harpocrates.gate.body_encoding import Zstd, load_zstd
+from Harpocrates.gate.body_read import read_body
 from Harpocrates.gate.config import BIND_HOST, GateConfig
 from Harpocrates.gate.errors import error_response
 from Harpocrates.gate.request_log import RequestLog
@@ -16,6 +17,8 @@ from Harpocrates.gate.routes import Route, classify
 from Harpocrates.gate.scan import ScanStep, default_scan_step
 from Harpocrates.gate.session_token import TOKEN_HEADER, check_token
 
+_BODY_CODES = {"too-large": "HARPO-BLOCK-BODY-TOO-LARGE", "bad-framing": "HARPO-BLOCK-BODY-FRAMING",
+               "truncated": "HARPO-BLOCK-BODY-TRUNCATED"}
 _DRAIN_LIMIT = 1 << 20
 _DRAIN_SECONDS = 1.0
 
@@ -74,6 +77,15 @@ class GateHandler(BaseHTTPRequestHandler):
     server_version = "harpo-gate"
     sys_version = ""
     disable_nagle_algorithm = True  # an SSE event must not wait for a delayed ACK
+
+    def setup(self) -> None:
+        """
+        Description: Apply the agent-side timeout before the connection's streams are made.
+        Parameters: None
+        Output: None. A client that sends nothing for client_timeout seconds raises a timeout in the next read.
+        """
+        self.timeout = self.server.config.client_timeout
+        super().setup()
 
     def version_string(self) -> str:
         """
@@ -138,8 +150,9 @@ class GateHandler(BaseHTTPRequestHandler):
         Parameters: None
         Output: None. Checks the token first (SEC-03): a missing, repeated or wrong token gets 401 and nothing else is
             read. Then the route: a WebSocket upgrade gets 426 and any route the gate does not know gets 400, both
-            without reading the body. At this stage nothing after the route check exists yet, so every known route is
-            blocked as well.
+            without reading the body. Then the body is read (not at all on a route that takes none): bad framing,
+            a body over the cap and a body cut short get 400. At this stage nothing after the body exists yet, so every
+            complete body is blocked as well.
         """
         lowered = {name.lower(): value for name, value in self.headers.items()}
         route = classify(self.command, self.path, lowered)
@@ -149,7 +162,12 @@ class GateHandler(BaseHTTPRequestHandler):
             return self._refuse(route, "HARPO-BLOCK-UPGRADE", body_unread=True)
         if route.action == "block":
             return self._refuse(route, "HARPO-BLOCK-ROUTE", body_unread=True)
-        self._refuse(route, "HARPO-BLOCK-INTERNAL", body_unread=True)
+        cap = 0 if route.action == "pass" else self.server.config.max_body
+        raw = read_body(self.rfile, self.headers.get_all("Content-Length", []),
+                        self.headers.get_all("Transfer-Encoding", []), cap)
+        if raw.status != "ok":
+            return self._refuse(route, _BODY_CODES[raw.status], body_unread=True)
+        self._refuse(route, "HARPO-BLOCK-INTERNAL", body_unread=False)
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _serve  # noqa: N815 - http.server names
 
