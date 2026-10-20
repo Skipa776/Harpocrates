@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
 
@@ -136,18 +137,21 @@ class GateHandler(BaseHTTPRequestHandler):
             route: the route of the request, which picks the error shape.
             code: the reason code.
             body_unread: True when part of the request body may still be on the connection.
-        Output: None. Writes the answer; the connection is closed afterwards.
+        Output: None. Writes the answer and notes the status, decision and reason for the log; the connection is closed
+            afterwards (after the log line is written, when part of the body must still be drained).
         """
         status, payload = error_response(route.provider, code)
+        decision = {"HARPO-BLOCK-UPGRADE": "upgrade-refused", UPSTREAM_FAILED: "upstream-error"}.get(code, "blocked")
+        self._facts.update(status=status, decision=decision, reason=code)
+        self._responded = True
         self.close_connection = True
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Connection", "close")
         self.end_headers()
+        self._drain = body_unread
         self.wfile.write(payload)
-        if body_unread:
-            self._discard_pending()
 
     def _forward(self, route: Route, body: bytes, encoding: str) -> None:
         """
@@ -157,27 +161,34 @@ class GateHandler(BaseHTTPRequestHandler):
             body: the scanned body, already in the encoding the request arrived in.
             encoding: "identity", "gzip" or "zstd".
         Output: None. The agent gets the provider's reply unchanged; if the provider cannot be reached or does not answer
-            in time it gets 502. A reply that breaks off mid-stream closes the agent's connection.
+            in time it gets 502. A reply that breaks off mid-stream closes the agent's connection. Notes the sizes,
+            timings, status and decision for the log.
         """
         config = self.server.config
         has_body = route.action != "pass"
         headers = upstream_request_headers(list(self.headers.items()), encoding, len(body) if has_body else None)
+        self._facts["bytes_out"] = len(body) if has_body else 0
+        sent_at = time.monotonic()
         try:
             connection, response = open_upstream(config.upstream_for(route.provider), config, self.command, self.path,
                                                  headers, body if has_body else None)
         except UpstreamError:
             return self._refuse(route, UPSTREAM_FAILED, body_unread=False)
+        self._facts["ms_upstream"] = (time.monotonic() - sent_at) * 1000
+        self._responded = True
         try:
             relayed = relay_response(response, self.wfile, self.request_version == "HTTP/1.0")
         finally:
             connection.close()
+        self._facts.update(status=relayed.status, decision="forwarded", bytes_back=relayed.bytes_back)
         if relayed.ended != "complete":
             self.close_connection = True
 
-    def _serve(self) -> None:
+    def _pipeline(self, route: Route) -> None:
         """
-        Description: Answer one request.
-        Parameters: None
+        Description: Run one request through the checks in order and forward it if every one passes.
+        Parameters:
+            route: the route of the request.
         Output: None. Checks the token first (SEC-03): a missing, repeated or wrong token gets 401 and nothing else is
             read. Then the route: a WebSocket upgrade gets 426 and any route the gate does not know gets 400, both
             without reading the body. Then the body is read (not at all on a route that takes none): bad framing,
@@ -186,8 +197,6 @@ class GateHandler(BaseHTTPRequestHandler):
             step runs on the decoded body (on every route, an empty body included): an error, a timeout or a Block
             from it gets 400 (FR-GATE-03). What the step lets through goes to the provider and the reply streams back.
         """
-        lowered = {name.lower(): value for name, value in self.headers.items()}
-        route = classify(self.command, self.path, lowered)
         if not check_token(self.headers.get_all(TOKEN_HEADER, []), self.server.token):
             return self._refuse(route, "HARPO-BLOCK-TOKEN", body_unread=True)
         if route.action == "upgrade":
@@ -202,10 +211,44 @@ class GateHandler(BaseHTTPRequestHandler):
         decoded = decode_body(raw.data, self.headers.get_all("Content-Encoding", []), cap, self.server.zstd)
         if decoded.status != "ok":
             return self._refuse(route, _ENCODING_CODES[decoded.status], body_unread=False)
+        self._facts["bytes_in"] = len(decoded.body)
+        scan_started = time.monotonic()
         outcome = run_scan(self.server.scan_step, decoded.body, route, self.server.config.scan_timeout)
+        self._facts["ms_scan"] = (time.monotonic() - scan_started) * 1000
         if isinstance(outcome, Block):
             return self._refuse(route, outcome.reason, body_unread=False)
         self._forward(route, encode_body(outcome.body, decoded.encoding, self.server.zstd), decoded.encoding)
+
+    def _serve(self) -> None:
+        """
+        Description: Answer one request, and log it.
+        Parameters: None
+        Output: None. Runs the request through _pipeline. An unexpected error is a block: 400 HARPO-BLOCK-INTERNAL when
+            nothing was answered yet, otherwise the connection is closed with nothing added; the error text is never
+            shown or logged. A socket error means the agent went away. Always writes one line to the request log.
+        """
+        started = time.monotonic()
+        self._responded = False
+        self._drain = False
+        self._facts: dict[str, object] = {"method": self.command, "route": "unknown"}
+        route = Route("unknown", "openai", "block")
+        try:
+            route = classify(self.command, self.path, {name.lower(): value for name, value in self.headers.items()})
+            self._facts["route"] = route.name
+            self._pipeline(route)
+        except OSError:
+            self.close_connection = True
+        except Exception:  # fail closed: whatever went wrong, the request is not forwarded unscanned
+            self.close_connection = True
+            if self._responded:
+                self._facts.update(decision="blocked", reason="HARPO-BLOCK-INTERNAL")
+            else:
+                self._refuse(route, "HARPO-BLOCK-INTERNAL", body_unread=True)
+        finally:
+            self._facts["ms_total"] = (time.monotonic() - started) * 1000
+            self.server.log.write(self._facts)
+            if self._drain:
+                self._discard_pending()
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _serve  # noqa: N815 - http.server names
 

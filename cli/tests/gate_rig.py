@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import socket
+import time
 from contextlib import contextmanager
 from typing import Iterable, Iterator, NamedTuple, Optional
 
@@ -59,6 +60,13 @@ class Rig:
             return Reply(response.status, response.getheaders(), response.read())
         finally:
             conn.close()
+
+    def wait_log(self, count: int, seconds: float = 3.0) -> list:
+        """The request-log lines so far. The gate logs after it answers, so wait up to `seconds` for `count` of them."""
+        deadline = time.monotonic() + seconds
+        while len(self.log_lines) < count and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return list(self.log_lines)
 
     def raw(self, data: bytes, half_close: bool = True, timeout: float = 15) -> bytes:
         """Send raw bytes to the gate and return everything it sends back until it closes."""

@@ -162,7 +162,10 @@ def test_fr_install_05_auth_headers_forwarded_byte_identical_and_never_logged(mo
             assert (name, value) in received, name  # same name spelling, same value bytes
         order = [h for h in received if h[0] in canaries]
         assert [h[0] for h in order] == [n for n in sent if n in canaries]  # the agent's header order is kept
-        logged = "".join(rig.log_lines) + capfd.readouterr().out + capfd.readouterr().err
+        lines = rig.wait_log(3)
+        assert len(lines) == 3  # one line for each of the three requests, so the check below is not vacuous
+        out, err = capfd.readouterr()
+        logged = "".join(lines) + out + err
         for secret in (*canaries.values(), body_canary, query_canary, rig.token):
             assert secret not in logged
 
