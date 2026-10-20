@@ -4,12 +4,14 @@ what the plan implies. Every credential and canary in them is a made-up string."
 from __future__ import annotations
 
 import dataclasses
+import gzip
 import json
 import socket
 
 import pytest
 from gate_rig import passthrough_scan, running_rig  # noqa: F401
 
+import Harpocrates.gate.server as gate_server
 from Harpocrates.gate.config import GateConfig
 from Harpocrates.gate.server import start_gate
 from Harpocrates.gate.session_token import TOKEN_HEADER, new_token
@@ -194,4 +196,52 @@ def test_fr_gate_01_a_body_on_a_route_that_has_none_is_blocked() -> None:
         head = (f"GET /v1/models HTTP/1.1\r\nHost: g\r\n{TOKEN_HEADER}: {rig.token}\r\nContent-Length: 5\r\n\r\nhello").encode()
         status, text = status_and_text(rig.raw(head))
         assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TOO-LARGE" in text
+        assert rig.mock.records() == []
+
+
+# --- content encodings -------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("encoding", ["br", "deflate", "x-gzip", "compress", "gzip, br", "identity, gzip", "unknown",
+                                      "zstd, gzip", ""])
+def test_fr_install_04_unknown_encoding_blocked(encoding: str) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        reply = rig.call("POST", "/v1/messages", gzip.compress(MESSAGES), {**JSON, "Content-Encoding": encoding,
+                                                                       "anthropic-version": "2023-06-01"})
+        assert reply.status == 400 and "HARPO-BLOCK-ENCODING" in reply.body.decode()
+        assert "HARPO-BLOCK-ENCODING-CORRUPT" not in reply.body.decode()
+        assert rig.mock.records() == []
+
+
+def test_fr_install_04_two_encoding_headers_are_blocked() -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        raw = rig.raw(post_head(rig, "Content-Encoding: gzip", "Content-Encoding: gzip", "Content-Length: 2") + b"{}")
+        assert "HARPO-BLOCK-ENCODING" in status_and_text(raw)[1] and rig.mock.records() == []
+
+
+def test_fr_install_04_zstd_is_blocked_when_no_zstd_module_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gate_server, "load_zstd", lambda: None)
+    with running_rig(scan_step=passthrough_scan) as rig:
+        reply = rig.call("POST", "/v1/messages", b"\x28\xb5\x2f\xfd" + b"\0" * 8, {**JSON, "Content-Encoding": "zstd"})
+        assert reply.status == 400 and "HARPO-BLOCK-ENCODING" in reply.body.decode()
+        assert rig.mock.records() == []
+
+
+@pytest.mark.parametrize("encoding,body", [
+    ("gzip", b"not gzip at all"), ("gzip", gzip.compress(MESSAGES)[:-6]), ("gzip", gzip.compress(MESSAGES) + b"extra"),
+    ("gzip", b""), ("zstd", b"not zstd at all"),
+])
+def test_fr_install_04_a_corrupt_or_padded_body_is_blocked(encoding: str, body: bytes) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        reply = rig.call("POST", "/v1/messages", body, {**JSON, "Content-Encoding": encoding})
+        assert reply.status == 400 and "HARPO-BLOCK-ENCODING-CORRUPT" in reply.body.decode()
+        assert rig.mock.records() == []
+
+
+def test_fr_install_04_a_compression_bomb_is_blocked_at_the_cap() -> None:
+    with running_rig(scan_step=passthrough_scan, max_body=1 << 20) as rig:
+        bomb = gzip.compress(b"\0" * (100 << 20), compresslevel=9)
+        assert len(bomb) < (1 << 20)  # small on the wire, so only the cap after decoding can stop it
+        reply = rig.call("POST", "/v1/messages", bomb, {**JSON, "Content-Encoding": "gzip"})
+        assert reply.status == 400 and "HARPO-BLOCK-BODY-TOO-LARGE" in reply.body.decode()
         assert rig.mock.records() == []

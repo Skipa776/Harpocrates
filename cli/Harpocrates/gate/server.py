@@ -8,7 +8,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
 
-from Harpocrates.gate.body_encoding import Zstd, load_zstd
+from Harpocrates.gate.body_encoding import Zstd, decode_body, load_zstd
 from Harpocrates.gate.body_read import read_body
 from Harpocrates.gate.config import BIND_HOST, GateConfig
 from Harpocrates.gate.errors import error_response
@@ -19,6 +19,8 @@ from Harpocrates.gate.session_token import TOKEN_HEADER, check_token
 
 _BODY_CODES = {"too-large": "HARPO-BLOCK-BODY-TOO-LARGE", "bad-framing": "HARPO-BLOCK-BODY-FRAMING",
                "truncated": "HARPO-BLOCK-BODY-TRUNCATED"}
+_ENCODING_CODES = {"unsupported": "HARPO-BLOCK-ENCODING", "zstd-unavailable": "HARPO-BLOCK-ENCODING",
+                   "corrupt": "HARPO-BLOCK-ENCODING-CORRUPT", "too-large": "HARPO-BLOCK-BODY-TOO-LARGE"}
 _DRAIN_LIMIT = 1 << 20
 _DRAIN_SECONDS = 1.0
 
@@ -151,8 +153,9 @@ class GateHandler(BaseHTTPRequestHandler):
         Output: None. Checks the token first (SEC-03): a missing, repeated or wrong token gets 401 and nothing else is
             read. Then the route: a WebSocket upgrade gets 426 and any route the gate does not know gets 400, both
             without reading the body. Then the body is read (not at all on a route that takes none): bad framing,
-            a body over the cap and a body cut short get 400. At this stage nothing after the body exists yet, so every
-            complete body is blocked as well.
+            a body over the cap and a body cut short get 400. Then the body is decoded (identity, gzip, zstd): any other
+            Content-Encoding, a corrupt stream and a body that passes the cap once decoded get 400. At this stage
+            nothing after the decoding exists yet, so every decodable body is blocked as well.
         """
         lowered = {name.lower(): value for name, value in self.headers.items()}
         route = classify(self.command, self.path, lowered)
@@ -167,6 +170,9 @@ class GateHandler(BaseHTTPRequestHandler):
                         self.headers.get_all("Transfer-Encoding", []), cap)
         if raw.status != "ok":
             return self._refuse(route, _BODY_CODES[raw.status], body_unread=True)
+        decoded = decode_body(raw.data, self.headers.get_all("Content-Encoding", []), cap, self.server.zstd)
+        if decoded.status != "ok":
+            return self._refuse(route, _ENCODING_CODES[decoded.status], body_unread=False)
         self._refuse(route, "HARPO-BLOCK-INTERNAL", body_unread=False)
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _serve  # noqa: N815 - http.server names
