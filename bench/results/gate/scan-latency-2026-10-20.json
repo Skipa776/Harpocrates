@@ -1,0 +1,234 @@
+{
+  "date": "2026-10-20",
+  "hardware": {
+    "machine": "arm64",
+    "cpu": "Apple M3 Pro",
+    "cores": 12,
+    "os": "Darwin 27.0.0",
+    "python": "3.12.12"
+  },
+  "scan_step": "real scanner",
+  "repeats": 5,
+  "client_connection": "keep-alive",
+  "requests_blocked_by_the_gate": 0,
+  "requests_refused_by_the_mock": 5,
+  "first_scan_in_process_ms": 151.9,
+  "first_turn": {
+    "n": 85,
+    "body_bytes": {
+      "min": 39841,
+      "p50": 64617,
+      "max": 1039744
+    },
+    "added_ms": {
+      "p50": 31.387,
+      "p95": 295.742,
+      "mean": 58.903,
+      "min": 20.725,
+      "max": 315.753
+    },
+    "scan_ms": {
+      "p50": 29.942,
+      "p95": 293.847,
+      "mean": 57.512,
+      "min": 19.493,
+      "max": 314.112
+    }
+  },
+  "first_turn_large": {
+    "n": 10,
+    "body_bytes": {
+      "min": 764520,
+      "p50": 1039744,
+      "max": 1039744
+    },
+    "added_ms": {
+      "p50": 270.818,
+      "p95": 315.521,
+      "mean": 271.039,
+      "min": 226.828,
+      "max": 315.753
+    },
+    "scan_ms": {
+      "p50": 269.038,
+      "p95": 314.093,
+      "mean": 269.482,
+      "min": 225.176,
+      "max": 314.112
+    }
+  },
+  "follow_up": {
+    "n": 305,
+    "body_bytes": {
+      "min": 23876,
+      "p50": 40498,
+      "max": 1040737
+    },
+    "added_ms": {
+      "p50": 6.688,
+      "p95": 8.797,
+      "mean": 5.59,
+      "min": 1.641,
+      "max": 11.023
+    },
+    "scan_ms": {
+      "p50": 5.962,
+      "p95": 7.701,
+      "mean": 4.631,
+      "min": 1.271,
+      "max": 9.419
+    }
+  },
+  "follow_up_large": {
+    "n": 10,
+    "body_bytes": {
+      "min": 765920,
+      "p50": 1040737,
+      "max": 1040737
+    },
+    "added_ms": {
+      "p50": 8.988,
+      "p95": 10.934,
+      "mean": 8.644,
+      "min": 5.983,
+      "max": 11.023
+    },
+    "scan_ms": {
+      "p50": 7.096,
+      "p95": 8.825,
+      "mean": 7.059,
+      "min": 5.165,
+      "max": 8.828
+    }
+  },
+  "target": {
+    "follow_up_p95_ms": 50,
+    "met": true
+  },
+  "sessions": [
+    {
+      "label": "20261019T175710Z-g2/claude-block-after_a_tool_result",
+      "requests": 3,
+      "max_body_bytes": 65081
+    },
+    {
+      "label": "20261019T175710Z-g2/claude-block-first_request",
+      "requests": 2,
+      "max_body_bytes": 64617
+    },
+    {
+      "label": "20261019T175710Z-g2/claude-corpus",
+      "requests": 5,
+      "max_body_bytes": 74979
+    },
+    {
+      "label": "20261019T175710Z-g2/claude-long",
+      "requests": 1,
+      "max_body_bytes": 764520
+    },
+    {
+      "label": "20261019T175710Z-g2/claude-settings-project",
+      "requests": 2,
+      "max_body_bytes": 64621
+    },
+    {
+      "label": "20261019T175710Z-g2/codex-block-400",
+      "requests": 1,
+      "max_body_bytes": 39841
+    },
+    {
+      "label": "20261019T175710Z-g2/codex-chatgpt-route-a",
+      "requests": 1,
+      "max_body_bytes": 42896
+    },
+    {
+      "label": "20261019T175710Z-g2/codex-compaction",
+      "requests": 577,
+      "max_body_bytes": 40384
+    },
+    {
+      "label": "20261019T175710Z-g2/codex-corpus",
+      "requests": 4,
+      "max_body_bytes": 49780
+    },
+    {
+      "label": "20261019T175710Z-g2/codex-long",
+      "requests": 1,
+      "max_body_bytes": 1039744
+    },
+    {
+      "label": "20261019T175710Z-g2/codex-route-b-apikey",
+      "requests": 1,
+      "max_body_bytes": 40532
+    },
+    {
+      "label": "20261019T175710Z-g2/codex-route-b-chatgpt",
+      "requests": 1,
+      "max_body_bytes": 43588
+    },
+    {
+      "label": "20261019T175822Z-agent-control-s0/claude",
+      "requests": 4,
+      "max_body_bytes": 66587
+    },
+    {
+      "label": "20261019T175822Z-agent-control-s0/codex",
+      "requests": 4,
+      "max_body_bytes": 41885
+    },
+    {
+      "label": "20261019T175822Z-agent-read-hook-s0/claude",
+      "requests": 4,
+      "max_body_bytes": 74201
+    },
+    {
+      "label": "20261019T175822Z-agent-read-hook-s0/codex",
+      "requests": 4,
+      "max_body_bytes": 48622
+    },
+    {
+      "label": "20261020-gate-e2e-g3-retro/claude-sec10-match",
+      "requests": 4,
+      "max_body_bytes": 74161
+    },
+    {
+      "label": "20261020-gate-e2e-g3-retro/claude-sec10-mismatch",
+      "requests": 4,
+      "max_body_bytes": 74652
+    }
+  ],
+  "top_cost": [
+    {
+      "function": "~:<method 'search' of 're.Pattern' objects>",
+      "share_pct": 13.1
+    },
+    {
+      "function": "~:<method 'sub' of 're.Pattern' objects>",
+      "share_pct": 7.1
+    },
+    {
+      "function": "walk_common.py:strings",
+      "share_pct": 4.2
+    },
+    {
+      "function": "entropy_detector.py:shannon_entropy",
+      "share_pct": 4.0
+    },
+    {
+      "function": "jsonlocate.py:_children",
+      "share_pct": 3.7
+    },
+    {
+      "function": "detector.py:_scan_line",
+      "share_pct": 2.6
+    },
+    {
+      "function": "detector.py:_structured_candidates",
+      "share_pct": 2.6
+    },
+    {
+      "function": "~:<built-in method builtins.any>",
+      "share_pct": 2.2
+    }
+  ]
+}
