@@ -126,6 +126,7 @@ enforce = [
     "cli/Harpocrates/gate/routes.py",
     "cli/Harpocrates/gate/scan.py",
     "cli/Harpocrates/gate/session_token.py",
+    "cli/Harpocrates/gate/upstream.py",
     "cli/Harpocrates/grants.py",
     "cli/Harpocrates/harness.py",
     "cli/Harpocrates/hooks.py",

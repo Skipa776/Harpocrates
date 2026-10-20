@@ -53,12 +53,12 @@ def parse_upstream(url: str) -> Upstream:
     host = parts.hostname
     if not _HOST_CHARS.fullmatch(host):
         raise ValueError("an upstream URL has a host with characters a host name cannot hold")
-    if parts.scheme == "http" and not _is_loopback_ip(host):
+    if parts.scheme == "http" and not is_loopback_ip(host):
         raise ValueError("plain http is allowed only for a loopback IP address (127.0.0.1 or ::1); use https")
     return Upstream(parts.scheme, host, port)
 
 
-def _is_loopback_ip(host: str) -> bool:
+def is_loopback_ip(host: str) -> bool:
     """
     Description: Tell whether a host is a loopback IP literal, without any name lookup.
     Parameters:
