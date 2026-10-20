@@ -265,7 +265,7 @@ def _load(path: Path) -> _Doc:
         return _Doc(present=True, raw=raw, problem="not valid UTF-8")
     try:
         data = json.loads(text, parse_constant=_no_constant, object_pairs_hook=_no_duplicates)
-    except ValueError:  # JSONDecodeError, duplicate keys, NaN
+    except (ValueError, RecursionError):  # JSONDecodeError, duplicate keys, NaN, a huge integer, nesting too deep
         return _Doc(present=True, text=text, raw=raw, problem="not valid JSON")
     return _Doc(present=True, data=data, text=text)
 

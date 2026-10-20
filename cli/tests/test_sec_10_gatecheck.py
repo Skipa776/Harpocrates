@@ -359,6 +359,8 @@ GARBLED = {
     "BOM": b"\xef\xbb\xbf{}",
     "trailing text": b'{"env": {}} trailing',
     "comment": b'{"env": {} /* x */}',
+    "deeply nested": b"[" * 100_000 + b"]" * 100_000,  # RecursionError, not a ValueError
+    "huge number": b'{"env": {"X": ' + b"9" * 5000 + b"}}",  # ValueError from the int limit on 3.11 and later
 }
 
 
