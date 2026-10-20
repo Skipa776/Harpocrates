@@ -14,6 +14,7 @@ from Harpocrates.gate.errors import error_response
 from Harpocrates.gate.request_log import RequestLog
 from Harpocrates.gate.routes import Route, classify
 from Harpocrates.gate.scan import ScanStep, default_scan_step
+from Harpocrates.gate.session_token import TOKEN_HEADER, check_token
 
 _DRAIN_LIMIT = 1 << 20
 _DRAIN_SECONDS = 1.0
@@ -135,10 +136,14 @@ class GateHandler(BaseHTTPRequestHandler):
         """
         Description: Answer one request.
         Parameters: None
-        Output: None. At this stage the gate has no handling for any request, so it blocks all of them.
+        Output: None. Checks the token first (SEC-03): a missing, repeated or wrong token gets 401 and nothing else is
+            read. At this stage nothing after the token check exists yet, so every other request is blocked.
         """
         lowered = {name.lower(): value for name, value in self.headers.items()}
-        self._refuse(classify(self.command, self.path, lowered), "HARPO-BLOCK-INTERNAL", body_unread=True)
+        route = classify(self.command, self.path, lowered)
+        if not check_token(self.headers.get_all(TOKEN_HEADER, []), self.server.token):
+            return self._refuse(route, "HARPO-BLOCK-TOKEN", body_unread=True)
+        self._refuse(route, "HARPO-BLOCK-INTERNAL", body_unread=True)
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _serve  # noqa: N815 - http.server names
 
