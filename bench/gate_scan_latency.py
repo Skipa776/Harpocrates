@@ -72,18 +72,19 @@ class Session(NamedTuple):
     requests: list
 
 
-def load_sessions(root: Path) -> list[Session]:
+def load_sessions(root: Path, run_prefix: str = "") -> list[Session]:
     """
     Description: Read the recorded model requests of every session under a recordings folder.
     Parameters:
         root: the folder holding <run>/<session>/requests.jsonl.
+        run_prefix: only runs whose folder name starts with this (the G2 runs start with 20261019).
     Output: A Session for each file with at least one POST model request whose body was recorded in full. Headers whose value
         was stored as <present> (credentials) and the headers a client library sets again are left out. Runs named *-direct-*
         (the synthetic corpus, one request per case, many of them meant to be blocked) are not sessions and are skipped.
     """
     sessions = []
     for path in sorted(Path(root).glob("*/*/requests.jsonl")):
-        if "-direct-" in path.parent.parent.name:
+        if "-direct-" in path.parent.parent.name or not path.parent.parent.name.startswith(run_prefix):
             continue
         requests = []
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -189,7 +190,8 @@ def _top_cost(sessions: list[Session], max_follow_ups: int) -> list[dict]:
     return [{"function": f"{Path(key[0]).name}:{key[2]}", "share_pct": round(100 * entry[2] / total, 1)} for key, entry in top]
 
 
-def measure(recordings: Path, repeats: int = 5, max_follow_ups: int = 30, large_bytes: int = LARGE_BYTES) -> dict:
+def measure(recordings: Path, repeats: int = 5, max_follow_ups: int = 30, large_bytes: int = LARGE_BYTES,
+            run_prefix: str = "") -> dict:
     """
     Description: Replay the recorded sessions and measure what the scanner adds.
     Parameters:
@@ -197,11 +199,12 @@ def measure(recordings: Path, repeats: int = 5, max_follow_ups: int = 30, large_
         repeats: how many times each session is replayed against a fresh gate.
         max_follow_ups: how many recorded follow-ups of a session are replayed.
         large_bytes: the size from which a follow-up counts as large.
+        run_prefix: only runs whose folder name starts with this.
     Output: The record: date, hardware, per-class figures (first_turn, first_turn_large, follow_up, follow_up_large: n,
         body sizes, added_ms, scan_ms), the target and whether it was met, the scan step's first-call time, how many replayed requests the gate
         blocked or the mock refused (they give no sample), the sessions (labels and counts), and top_cost. Starts and stops a mock and gates on 127.0.0.1.
     """
-    sessions = load_sessions(recordings)
+    sessions = load_sessions(recordings, run_prefix)
     started = time.perf_counter()
     strict_findings(_ENTROPY_SAMPLE)  # in a fresh process this includes loading the model
     first_scan_ms = (time.perf_counter() - started) * 1000
@@ -243,7 +246,7 @@ def measure(recordings: Path, repeats: int = 5, max_follow_ups: int = 30, large_
         upstream.close()
     follow = _group(classes["follow"])
     return {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "hardware": describe_hardware(), "scan_step": "real scanner",
-            "repeats": repeats, "client_connection": "keep-alive", "requests_blocked_by_the_gate": blocked,
+            "run_prefix": run_prefix, "repeats": repeats, "client_connection": "keep-alive", "requests_blocked_by_the_gate": blocked,
             "requests_refused_by_the_mock": refused_by_mock, "first_scan_in_process_ms": round(first_scan_ms, 1),
             "first_turn": _group(classes["first"]), "first_turn_large": _group(classes["first_large"]), "follow_up": follow,
             "follow_up_large": _group(classes["large"]),
@@ -276,11 +279,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--recordings", type=Path, default=DEFAULT_RECORDINGS)
+    parser.add_argument("--run-prefix", default="20261019", help="only recorded runs whose folder starts with this (default: the G2 runs)")
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--max-follow-ups", type=int, default=30)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
-    record = measure(args.recordings, args.repeats, args.max_follow_ups)
+    record = measure(args.recordings, args.repeats, args.max_follow_ups, run_prefix=args.run_prefix)
     path = write_record(record, args.out)
     print(path)
     for name in ("first_turn", "first_turn_large", "follow_up", "follow_up_large"):

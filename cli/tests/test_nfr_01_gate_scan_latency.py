@@ -86,3 +86,11 @@ def test_nfr_01_the_recorded_scan_latency_reference_separates_first_turns_from_f
     assert data["follow_up"]["n"] >= 40 and data["first_turn"]["n"] >= 10 and data["first_turn_large"]["n"] >= 2
     assert {"p50", "p95"} <= set(data["follow_up"]["added_ms"]) and data["hardware"]["cpu"] and data["date"]
     assert "top_cost" in data
+
+
+def test_nfr_01_load_sessions_can_be_limited_to_the_runs_of_one_day(tmp_path: Path) -> None:
+    write_session(tmp_path, "20261019T1-g2", "a", [record(0, "anthropic.messages", anthropic_body(0))])
+    write_session(tmp_path, "20261020-later", "b", [record(0, "anthropic.messages", anthropic_body(0))])
+    write_session(tmp_path, "20261019T2-direct-s0", "c", [record(0, "anthropic.messages", anthropic_body(0))])
+    assert [s.label for s in bench.load_sessions(tmp_path)] == ["20261019T1-g2/a", "20261020-later/b"]  # *-direct-* is never a session
+    assert [s.label for s in bench.load_sessions(tmp_path, "20261019")] == ["20261019T1-g2/a"]
