@@ -10,6 +10,12 @@ Fail closed: both harnesses treat a hook crash or timeout as "allow", so every e
 command, a search pattern it can't evaluate safely, and running out of its time budget all exit 2, which
 blocks the call. Run as `python -m Harpocrates.hooks` with the hook event JSON on stdin.
 
+SEC-10: before any of that, when the install record says the gate is on, the hook asks Harpocrates/gatecheck.py
+whether the Claude Code settings in force send requests anywhere but the gate (base URL, Bedrock, Vertex, custom headers
+without the gate token). If so, every tool call of a Claude Code session is denied, in every mode and with or without
+--ask: the deny names the setting file, nothing prompts and nothing waits for an answer. Codex events (they carry
+`turn_id` and `model`) are skipped, since Codex does not read Claude Code settings. No gate installed: unchanged.
+
 FR-READ-05: paths on the user's allowlist (Harpocrates/allowlist.py) pass, each use logged.
 FR-READ-06: reads never prompt. A Read, Grep or Bash call that would expose a secret-bearing file is refused in every
 mode. With `--ask` (Claude Code only) an edit of such a file (Edit, MultiEdit, Write, NotebookEdit) asks the user
@@ -47,6 +53,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable, Optional
 
+from Harpocrates import gatecheck
 from Harpocrates.harness import SENSITIVE_FILES
 
 _PLACEHOLDER_TYPE = re.compile(r"<<HARPO:(\w+):[0-9a-f]{4}>>")
@@ -1672,6 +1679,18 @@ def _bash(command: str, cwd: Path) -> int:
 # ---------------------------------------------------------------------------------------- entry
 
 
+def _from_codex(event: dict) -> bool:
+    """
+    Description: Whether a PreToolUse event comes from Codex. Codex documents `model` and `turn_id` as its own fields
+        on top of the common ones (https://learn.chatgpt.com/docs/hooks, checked 2026-10-19); Claude Code sends neither.
+    Parameters:
+        event: The parsed hook event.
+    Output: True when the event has both fields; False otherwise. A Codex event that lacked them would be judged as a
+        Claude Code one, which can only refuse more, never less.
+    """
+    return "turn_id" in event and "model" in event
+
+
 def decide(raw: str, ask: bool = False) -> int:
     """
     Description: Dispatch a PreToolUse event under a fixed budget and fail closed on errors.
@@ -1680,7 +1699,9 @@ def decide(raw: str, ask: bool = False) -> int:
         ask: Whether supported human-answerable modes may prompt for edits.
     Output: Zero after a deny/ask decision or an allowed call, or 2 on other errors; sets deadline
         and ask mode, may read files or update audit/grant state, and prints only safe decisions or
-        exception types. Budget exhaustion emits a deny decision.
+        exception types. Budget exhaustion emits a deny decision. SEC-10: when the gate is on and a Claude Code
+        setting sends requests around it (gatecheck.refusal), every tool call gets a deny, before anything else is
+        looked at and whatever `ask` and the permission mode are; this never prompts.
     Notes: Hook entry point: print a deny or ask decision, or nothing; 2 (block) on any error.
     """
     global _deadline, _can_ask
@@ -1689,6 +1710,10 @@ def decide(raw: str, ask: bool = False) -> int:
         event = json.loads(raw)
         tool, args = event.get("tool_name"), event.get("tool_input") or {}
         cwd = Path(event.get("cwd") or ".")
+        if not _from_codex(event):
+            bypass = gatecheck.refusal(cwd)
+            if bypass:
+                return _deny(bypass)
         _can_ask = ask and event.get("permission_mode") in _PROMPTING_MODES
         if tool == "Read":
             return _check_files([cwd / args["file_path"]], "safe_read", cwd, session_id=event.get("session_id"))
