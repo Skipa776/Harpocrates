@@ -111,14 +111,26 @@ def test_sec_10_malformed_gate_entry_is_an_error(world: World, gate: object) -> 
     assert refused is not None and "install.json" in refused
 
 
-@pytest.mark.parametrize("body", [b"{not json", b"[]", b"\xff\xfe\x00", b"", b'{"gate": {"enabled": true, "enabled": false}}',
-                                  b'{"gate": {"enabled": true, "port": NaN, "token_header": "x"}}'])
-def test_sec_10_garbled_record_is_an_error(world: World, body: bytes) -> None:
+@pytest.mark.parametrize("body", [
+    b'{"gate": {"enabled": true', b'{"gate": ', b'{"gate": {"enabled": true, "enabled": false}}',
+    b'{"gate": {"enabled": true, "port": NaN, "token_header": "x"}}', b'\xff\xfe"gate"\x00',
+    b'{"version": 1, "claude-code": {}, "gate": {"enabled": true, "port": 47321, "token_header": "x-harpo-gate-token"',
+])
+def test_sec_10_damaged_record_that_names_a_gate_is_an_error(world: World, body: bytes) -> None:
     world.record.write_bytes(body)
     with pytest.raises(gatecheck.GateRecordError):
         gatecheck.load_gate()
     refused = gatecheck.refusal(world.repo, {})
     assert refused is not None and "install.json" in refused
+
+
+@pytest.mark.parametrize("body", [b"{not json", b"[]", b'"x"', b"42", b"", b"# mine\n", b"\xff\xfe\x00", b"null"])
+def test_sec_10_junk_record_with_no_gate_entry_means_no_gate(world: World, body: bytes) -> None:
+    """Nothing says a gate was installed, and the state-folder tests keep junk in install.json."""
+    world.record.write_bytes(body)
+    world.set_project({"ANTHROPIC_BASE_URL": EVIL})
+    assert gatecheck.load_gate() is None
+    assert gatecheck.refusal(world.repo, {"CLAUDE_CODE_USE_BEDROCK": "1"}) is None
 
 
 def test_sec_10_unreadable_record_is_an_error(world: World) -> None:
@@ -446,7 +458,7 @@ def test_sec_10_doctor_function_with_no_gate_has_nothing_to_report(world: World)
 
 
 def test_sec_10_doctor_function_reports_a_malformed_record(world: World) -> None:
-    world.record.write_text("{broken")
+    world.record.write_text('{"gate": {"enabled": true')
     found = _only(_findings(world))
     assert found.setting == "gate" and "install.json" in found.text
 

@@ -149,7 +149,8 @@ Oct 19, 2026. The hook (`hooks.py`) runs the check in `cli/Harpocrates/gatecheck
 | --- | --- |
 | No record, no `gate` entry, `"enabled": false`, or `~/.harpo` is a symlink or a file (SEC-09) | No gate installed. Nothing changes |
 | `"enabled": true` with an integer `port` of 1 to 65535 and a valid HTTP header name in `token_header` | The check runs |
-| Anything else: a record that is not JSON, a `gate` that is not an object, `enabled` that is not true or false, a bad port or header | Every tool call is refused (fail closed), naming `~/.harpo/install.json`. Without the entry Harpo cannot tell whether the gate is on |
+| A `gate` entry that is not an object, `enabled` that is not true or false, a bad port or header; a record that cannot be read at all (permissions, a folder, over 1 MiB); a record that is not strict JSON but contains the quoted word `"gate"` (a damaged entry) | Every tool call is refused (fail closed), naming `~/.harpo/install.json`. Without the entry Harpo cannot tell whether the gate is on |
+| A record that is not strict JSON and does not contain `"gate"`, or is JSON but not an object | No gate entry can be there, so no gate installed. Existing state-folder tests keep junk in `install.json` and expect the hook not to change |
 
 **What is a bypass.** For each variable the effective value is the one from the highest-precedence source that sets it, an empty string included (a settings file cannot remove a variable, so an empty value is how one overrides it, C6).
 

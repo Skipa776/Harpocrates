@@ -136,11 +136,28 @@ def test_sec_10_garbled_settings_refuse_every_tool(world: World, capsys, where: 
     _every_tool_refused(world, capsys, "~/.claude/settings.json" if where == "user" else str(path), "cannot be read")
 
 
-@pytest.mark.parametrize("record", [b"{broken", b"[]", b'{"gate": null}', b'{"gate": {"enabled": true}}',
+@pytest.mark.parametrize("record", [b'{"gate": {"enabled": tr', b'{"gate": null}', b'{"gate": {"enabled": true}}',
                                     b'{"gate": {"enabled": true, "port": "x", "token_header": "h"}}'])
 def test_sec_10_malformed_record_refuses_every_tool(world: World, capsys, record: bytes) -> None:
     world.record.write_bytes(record)
     _every_tool_refused(world, capsys, "install.json")
+
+
+def test_sec_10_unreadable_record_refuses_every_tool(world: World, capsys) -> None:
+    world.record.chmod(0)
+    try:
+        if os.access(world.record, os.R_OK):
+            pytest.skip("running with privileges that ignore file modes")
+        _every_tool_refused(world, capsys, "install.json")
+    finally:
+        world.record.chmod(0o600)
+
+
+def test_sec_10_junk_in_the_record_without_a_gate_entry_changes_nothing(world: World, capsys) -> None:
+    """test_sec_09 keeps text that is not JSON in install.json and expects the hook to behave as before."""
+    world.record.write_text("# mine\n")
+    world.set_project({"ANTHROPIC_BASE_URL": EVIL})
+    assert _run(_event(world.repo, "Read", {"file_path": "README.md"}), capsys) == (0, "", "")
 
 
 def test_sec_10_the_message_is_plain(world: World, capsys) -> None:

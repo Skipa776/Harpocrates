@@ -13,10 +13,13 @@ one more top-level entry, written by `harpo guard up` (G7) and read here:
 
   * absent entry, absent record, or "enabled": false  -> no gate installed; this module reports nothing.
   * "enabled": true needs "port" (an integer, 1 to 65535: where http://127.0.0.1:<port> listens) and "token_header"
-    (the HTTP header name that carries the gate token, see docs/gate-proxy-spec.md). Anything else about the entry,
-    and a record that cannot be read or parsed at all, is an error and the hook refuses (fail closed): without it
-    Harpo cannot tell whether the gate is on. A ~/.harpo that is a symlink or a file reads as no record, as every
-    other reader does (SEC-09). Unknown keys are ignored.
+    (the HTTP header name that carries the gate token, see docs/gate-proxy-spec.md). Anything else about the entry is
+    an error and the hook refuses (fail closed): without it Harpo cannot tell whether the gate is on. So is a record
+    that exists but cannot be read (permissions, a folder, over 1 MiB), and a record that is not strict JSON when its
+    bytes contain the quoted word "gate" (a gate entry may be there, damaged). A record that is not strict JSON and
+    does not contain it, or is JSON but not an object, cannot hold a gate entry and counts as no gate; the existing
+    state-folder tests keep junk in install.json and expect the hook not to change. A ~/.harpo that is a symlink or a
+    file reads as no record, as every other reader does (SEC-09). Unknown keys are ignored.
 
 What counts as a bypass. For each of ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX and
 ANTHROPIC_CUSTOM_HEADERS the effective value is the one from the highest-precedence source that sets it, even to an
@@ -71,6 +74,7 @@ _GATE_URL = re.compile(r"http://(localhost|127\.0\.0\.1|\[::1\]):([0-9]{1,5})", 
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")  # an HTTP token (RFC 9110, 5.6.2)
 _TARGET = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,15}://(?:[^/?#@\\\s]*@)?(\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9.-]{1,253})"
                      r"(?::([0-9]{1,5}))?(?=[/?#]|$)")
+_NOT_JSON = ("not valid JSON", "not valid UTF-8")  # the _Doc problems that leave bytes to look at
 _OFF = {"", "0", "false", "no", "off"}  # what switches a provider flag off; anything else is on
 _PROVIDERS = (("CLAUDE_CODE_USE_BEDROCK", "Amazon Bedrock"), ("CLAUDE_CODE_USE_VERTEX", "Google Vertex AI"))
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
@@ -148,6 +152,7 @@ class _Doc:
         present: Whether the file exists.
         data: The parsed JSON, when there is no problem.
         text: The file's text, for finding line numbers.
+        raw: The file's bytes when it is not UTF-8 or not strict JSON, so the record reader can look for a gate entry.
         problem: A short fixed phrase when it cannot be used, else empty.
     Output: An immutable value.
     """
@@ -155,6 +160,7 @@ class _Doc:
     present: bool = False
     data: object = None
     text: str = ""
+    raw: bytes = b""
     problem: str = ""
 
 
@@ -256,11 +262,11 @@ def _load(path: Path) -> _Doc:
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        return _Doc(present=True, problem="not valid UTF-8")
+        return _Doc(present=True, raw=raw, problem="not valid UTF-8")
     try:
         data = json.loads(text, parse_constant=_no_constant, object_pairs_hook=_no_duplicates)
     except ValueError:  # JSONDecodeError, duplicate keys, NaN
-        return _Doc(present=True, text=text, problem="not valid JSON")
+        return _Doc(present=True, text=text, raw=raw, problem="not valid JSON")
     return _Doc(present=True, data=data, text=text)
 
 
@@ -278,14 +284,16 @@ def load_gate() -> Optional[Gate]:
         return None
     label = f"~/{state.name}/{RECORD}"
     doc = _load(state / RECORD)
-    if doc.problem:
+    if doc.problem in _NOT_JSON:
+        # A record that is not strict JSON: nothing says a gate was ever installed unless the file names one. Refuse
+        # only then (a truncated or half-edited gate entry); other junk predates the gate and changes nothing.
+        if b'"gate"' in doc.raw:
+            raise GateRecordError(label, doc.problem)
+        return None
+    if doc.problem:  # present but not readable at all (permissions, a folder, over the size cap): cannot tell
         raise GateRecordError(label, doc.problem)
-    if not doc.present:
-        return None
-    if not isinstance(doc.data, dict):
-        raise GateRecordError(label, "not a JSON object")
-    if "gate" not in doc.data:
-        return None
+    if not doc.present or not isinstance(doc.data, dict) or "gate" not in doc.data:
+        return None  # an array, a string or a number cannot hold a gate entry
     entry = doc.data["gate"]
     if not isinstance(entry, dict):
         raise GateRecordError(label, "gate is not an object")
