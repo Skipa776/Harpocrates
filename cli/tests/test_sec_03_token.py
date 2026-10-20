@@ -133,3 +133,17 @@ def test_sec_03_check_token_uses_a_constant_time_compare(monkeypatch: pytest.Mon
     assert check_token([expected], expected) is True
     assert check_token(["not-the-token"], expected) is False
     assert len(calls) == 2 and all(isinstance(a, bytes) and isinstance(b, bytes) for a, b in calls)
+
+
+def test_sec_03_a_failed_write_leaves_no_temporary_file_and_keeps_the_old_token(tmp_path: Path,
+                                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    path, first = tmp_path / "gate.token", new_token()
+    write_token_file(path, first)
+
+    def refuse(*args: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(OSError):
+        write_token_file(path, new_token())
+    assert [p.name for p in tmp_path.iterdir()] == ["gate.token"] and read_token_file(path) == first

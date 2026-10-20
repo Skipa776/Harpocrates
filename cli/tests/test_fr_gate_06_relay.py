@@ -186,3 +186,24 @@ def test_fr_gate_06_an_agent_that_hangs_up_stops_the_relay_quietly() -> None:
 
     relayed, _ = fetch(reply, out=Gone())
     assert relayed.ended == "client-gone"
+
+
+def test_fr_gate_06_an_agent_gone_before_the_head_or_before_the_last_chunk_stops_quietly() -> None:
+    class FailsAt(io.BytesIO):
+        def __init__(self, at: int) -> None:
+            super().__init__()
+            self.at, self.writes = at, 0
+
+        def write(self, data):
+            self.writes += 1
+            if self.writes == self.at:
+                raise ConnectionResetError("reset")
+            return super().write(data)
+
+    def reply(conn):
+        conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" + chunk(b"one") + b"0\r\n\r\n")
+
+    relayed, _ = fetch(reply, out=FailsAt(1))  # the head
+    assert relayed == Relayed(200, 0, "client-gone")
+    relayed, _ = fetch(reply, out=FailsAt(3))  # the terminating chunk
+    assert relayed == Relayed(200, 3, "client-gone")

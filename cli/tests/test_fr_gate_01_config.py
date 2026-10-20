@@ -45,7 +45,7 @@ def test_fr_gate_01_https_overrides_keep_their_port_and_default_to_443() -> None
 
 @pytest.mark.parametrize("url", [
     "", "https://", "ftp://example.com", "example.com", "https://user:pw@example.com", "https://example.com/v1",
-    "https://example.com?x=1", "https://example.com#frag", "https://example.com:notaport", "https://example.com:0",
+    "https://example.com?x=1", "https://example.com#frag", "https://example.com:notaport", "https://example.com:0", "https://exa_mple.com", "https://exa%0d%0ample.com",
 ])
 def test_fr_gate_01_upstream_must_be_a_bare_scheme_host_and_port(url: str) -> None:
     with pytest.raises(ValueError):

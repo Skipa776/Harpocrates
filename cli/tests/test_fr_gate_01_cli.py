@@ -125,3 +125,17 @@ def test_fr_gate_01_a_port_already_in_use_exits_1(child_python, token_file) -> N
         proc = start(child_python, "--port", str(taken.getsockname()[1]), "--token-file", str(path))
         out, err = proc.communicate(timeout=20)
     assert proc.returncode == 1 and out == "" and "127.0.0.1" in err and "Traceback" not in err
+
+
+def test_fr_gate_01_main_reports_its_exit_status_in_process(token_file, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    from Harpocrates.gate.__main__ import main
+
+    path, token = token_file
+    assert main(["--token-file", str(tmp_path / "missing.token")]) == 2
+    assert main(["--port", "70000", "--token-file", str(path)]) == 2
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen(1)
+        assert main(["--port", str(taken.getsockname()[1]), "--token-file", str(path)]) == 1
+    captured = capsys.readouterr()
+    assert token not in captured.out + captured.err and "Traceback" not in captured.err

@@ -327,3 +327,38 @@ def test_fr_install_04_gzip_decoded() -> None:
         rig.call("POST", "/v1/responses", zstandard.ZstdCompressor().compress(RESPONSES),
                  {**JSON, "Content-Encoding": "zstd"})
     assert seen == [(MESSAGES, "anthropic.messages")] * 3 + [(RESPONSES, "openai.responses")]
+
+
+# --- the server object -------------------------------------------------------------------------------------------
+
+def test_fr_gate_01_a_gate_is_a_context_manager_and_closes_its_port() -> None:
+    with start_gate(GateConfig(), new_token()) as gate:
+        port = gate.port
+        socket.create_connection(("127.0.0.1", port), timeout=2).close()
+    with pytest.raises(OSError):
+        socket.create_connection(("127.0.0.1", port), timeout=2).close()
+    gate.close()  # closing twice is harmless
+
+
+def test_fr_gate_01_start_gate_refuses_a_socket_that_ends_up_bound_elsewhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Lying(gate_server.GateServer):
+        def __init__(self, *args: object) -> None:
+            super().__init__(*args)
+            self.server_address = ("0.0.0.0", self.server_address[1])
+
+    monkeypatch.setattr(gate_server, "GateServer", Lying)
+    with pytest.raises(ValueError, match="127.0.0.1"):
+        start_gate(GateConfig(), new_token())
+
+
+def test_fr_gate_01_a_socket_error_while_answering_closes_the_connection_without_a_second_answer(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    def gone(*args: object) -> bool:
+        raise BrokenPipeError("agent went away")
+
+    monkeypatch.setattr(gate_server, "check_token", gone)
+    with running_rig(scan_step=passthrough_scan) as rig:
+        assert rig.raw(post_head(rig, "Content-Length: 2") + b"{}") == b""  # hung up on, nothing written
+        assert rig.mock.records() == []
+        lines = rig.wait_log(1)
+        assert len(lines) == 1 and "decision" not in json.loads(lines[0])
