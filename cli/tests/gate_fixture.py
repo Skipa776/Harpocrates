@@ -96,6 +96,8 @@ def make_world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
     monkeypatch.setattr(gatecheck, "managed_dir", lambda: managed)  # never the real /Library/Application Support/...
     for name in WATCHED:
         monkeypatch.delenv(name, raising=False)
+    for name in [n for n in os.environ if n.upper().startswith("CLAUDE_CODE_USE_")]:  # this run's own, if any
+        monkeypatch.delenv(name)
     machine = World(home=home, repo=repo, managed=managed)
     machine.set_record()
     machine.set_user()

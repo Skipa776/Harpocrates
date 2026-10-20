@@ -157,7 +157,7 @@ Oct 19, 2026. The hook (`hooks.py`) runs the check in `cli/Harpocrates/gatecheck
 | Variable | Bypass when |
 | --- | --- |
 | `ANTHROPIC_BASE_URL` | Not exactly `http://<localhost, 127.0.0.1 or [::1]>:<gate port>`: https, a path (even `/`), query, user info, a missing port or any other host fail. Also when no source sets it (Claude Code then calls the provider) |
-| `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` | On: anything but empty, `0`, `false`, `no`, `off` |
+| Any `CLAUDE_CODE_USE_<NAME>`: Bedrock, Vertex, Foundry, Mantle, Anthropic AWS and whatever a later release adds (matched by pattern, in any casing) | On. Claude Code documents `1`, `true`, `yes`, `on` as on and `0`, `false`, `no`, `off` as off, in any casing (C6); empty counts as unset for provider selection. The hook treats anything except empty and the four off words as on, the cautious reading of an unrecognised word. Two names in the C6 table are not providers and are skipped: `CLAUDE_CODE_USE_NATIVE_FILE_SEARCH` and `CLAUDE_CODE_USE_POWERSHELL_TOOL` (documented with `=1`) |
 | `ANTHROPIC_CUSTOM_HEADERS` | No `Name: Value` line with the record's `token_header` and a non-empty value. Not set counts as lacking it |
 
 **Precedence, highest first** (C5, checked 2026-10-19): managed settings (`managed-settings.json`, then `managed-settings.d/*.json` in name order, a later file winning, C7), `--settings`, `<repo>/.claude/settings.local.json`, `<repo>/.claude/settings.json`, `~/.claude/settings.json`; then the hook's own environment, because an `env` entry replaces the shell's value in the process environment (C6). G2 (T2) saw the same: the project value beat the user value and an exported variable. The hook reads the files above except `--settings`, MDM profiles, the Windows registry and server-managed settings; Claude Code copies what those set into the process environment, which the hook does read. The settings are looked up under the event's `cwd` and under `CLAUDE_PROJECT_DIR`, because a `cd` can move the `cwd` away from where Claude Code started.
@@ -172,7 +172,7 @@ Oct 19, 2026. The hook (`hooks.py`) runs the check in `cli/Harpocrates/gatecheck
 
 - The hook only sees the tools its matcher names. `harness.claude_code_settings` registers `Read|Grep|Bash|Edit|MultiEdit|Write|NotebookEdit`, so a tool outside that list (`WebFetch`, `Task`, MCP tools) never reaches the hook. `decide` refuses any tool name it is given; widening the matcher is a one-line change in `harness.py`, not made here.
 - `harpo install` rewrites the record from its own sections only (`install._run`), so it drops a `gate` entry written by `harpo guard up`. G7 must keep the entry when it rewrites the record, or the check goes quiet.
-- `CLAUDE_CODE_USE_FOUNDRY`, `CLAUDE_CODE_USE_MANTLE`, `CLAUDE_CODE_USE_ANTHROPIC_AWS` and `ANTHROPIC_AWS_BASE_URL` (C6) are the same kind of switch; SEC-10 as approved names only Bedrock and Vertex.
+- `ANTHROPIC_AWS_BASE_URL` (C6) is an endpoint override beside `ANTHROPIC_BASE_URL`; it only matters with `CLAUDE_CODE_USE_ANTHROPIC_AWS` on, which is now a bypass by itself.
 - Per-run flags and the process's own `HTTPS_PROXY` are invisible to the hook.
 
 ## Open questions for Josh (decided Oct 19, 2026: see Decisions in `docs/gate-parser-spec.md`)

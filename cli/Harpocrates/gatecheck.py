@@ -21,13 +21,18 @@ one more top-level entry, written by `harpo guard up` (G7) and read here:
     state-folder tests keep junk in install.json and expect the hook not to change. A ~/.harpo that is a symlink or a
     file reads as no record, as every other reader does (SEC-09). Unknown keys are ignored.
 
-What counts as a bypass. For each of ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX and
-ANTHROPIC_CUSTOM_HEADERS the effective value is the one from the highest-precedence source that sets it, even to an
-empty string (a settings file cannot remove a variable, so an empty value is how it overrides one). It is a bypass when
+What counts as a bypass. For ANTHROPIC_BASE_URL, ANTHROPIC_CUSTOM_HEADERS and every CLAUDE_CODE_USE_<NAME> variable that
+any source sets, the effective value is the one from the highest-precedence source that sets it, even to an empty
+string (a settings file cannot remove a variable, so an empty value is how it overrides one). It is a bypass when
   * ANTHROPIC_BASE_URL is not http://127.0.0.1:<port> (localhost and [::1] are the same host; the port must be given
     and match; the path, query, fragment and user info must be absent; matched as one strict pattern, not a URL parser),
     or is not set at all (Claude Code then uses its default, the provider);
-  * CLAUDE_CODE_USE_BEDROCK or CLAUDE_CODE_USE_VERTEX is on (anything but empty, 0, false, no, off);
+  * any CLAUDE_CODE_USE_<NAME> is on. These are the provider switches (Bedrock, Vertex, Foundry, Mantle, Anthropic AWS
+    and whatever a later release adds), matched by pattern, not by a list, and without regard to case. On is anything
+    except empty, 0, false, no, off: the page documents 1, true, yes, on as on and 0, false, no, off as off, in any
+    casing (https://code.claude.com/docs/en/env-vars, checked 2026-10-19), and an unrecognised word is treated as on,
+    the cautious reading. Two names in that table are not providers and are skipped: CLAUDE_CODE_USE_NATIVE_FILE_SEARCH
+    (file discovery) and CLAUDE_CODE_USE_POWERSHELL_TOOL (the PowerShell tool, documented with `=1`), see _NOT_PROVIDERS;
   * ANTHROPIC_CUSTOM_HEADERS does not carry the token header with a value (not set counts as lacking it).
 
 Precedence, highest first (https://code.claude.com/docs/en/settings, "Settings precedence", checked 2026-10-19):
@@ -66,7 +71,7 @@ from typing import Mapping, Optional
 
 from Harpocrates import paths
 
-WATCHED = ("ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_CUSTOM_HEADERS")
+WATCHED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS")  # by name; the CLAUDE_CODE_USE_<NAME> switches by pattern
 MAX_BYTES = 1 << 20  # a settings file or the record is a few hundred bytes; more than this is not one
 RECORD = "install.json"
 
@@ -76,7 +81,15 @@ _TARGET = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,15}://(?:[^/?#@\\\s]*@)?(\[[0-9A
                      r"(?::([0-9]{1,5}))?(?=[/?#]|$)")
 _NOT_JSON = ("not valid JSON", "not valid UTF-8")  # the _Doc problems that leave bytes to look at
 _OFF = {"", "0", "false", "no", "off"}  # what switches a provider flag off; anything else is on
-_PROVIDERS = (("CLAUDE_CODE_USE_BEDROCK", "Amazon Bedrock"), ("CLAUDE_CODE_USE_VERTEX", "Google Vertex AI"))
+_USE_FLAG = re.compile(r"CLAUDE_CODE_USE_[A-Z0-9_]{1,100}", re.IGNORECASE)  # Windows names ignore case
+# The CLAUDE_CODE_USE_ names in https://code.claude.com/docs/en/env-vars (checked 2026-10-19) that do not choose a
+# model provider. Everything else with the prefix is treated as a provider switch, including names not yet released.
+_NOT_PROVIDERS = frozenset({"CLAUDE_CODE_USE_NATIVE_FILE_SEARCH", "CLAUDE_CODE_USE_POWERSHELL_TOOL"})
+_PROVIDER_LABELS = {  # for the message only; a name that is not here is "another model provider"
+    "CLAUDE_CODE_USE_BEDROCK": "Amazon Bedrock", "CLAUDE_CODE_USE_VERTEX": "Google Vertex AI",
+    "CLAUDE_CODE_USE_FOUNDRY": "Microsoft Foundry", "CLAUDE_CODE_USE_MANTLE": "the Amazon Bedrock Mantle endpoint",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS": "Claude Platform on AWS",
+}
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 ENVIRONMENT = "the environment Claude Code runs hooks in"
 
@@ -326,9 +339,21 @@ def _line_of(text: str, name: str) -> Optional[int]:
     return found
 
 
+def _is_provider_flag(name: str) -> bool:
+    """
+    Description: Whether an environment variable name is a CLAUDE_CODE_USE_<NAME> switch that chooses a model provider.
+    Parameters:
+        name: A variable name from a settings `env` block or the environment.
+    Output: True for the prefix plus 1 to 100 letters, digits or underscores, in any casing, unless it is one of the
+        documented non-provider names (_NOT_PROVIDERS); False otherwise. No side effects.
+    """
+    return _USE_FLAG.fullmatch(name) is not None and name.upper() not in _NOT_PROVIDERS
+
+
 def _watched(doc: _Doc) -> tuple[dict[str, str], dict[str, int], str]:
     """
-    Description: Take the four variables out of a settings document's `env` block.
+    Description: Take the watched variables (the base URL, the custom headers and every provider switch) out of a
+        settings document's `env` block.
     Parameters:
         doc: A present, parsed settings file.
     Output: (values as text, their lines, problem phrase). A JSON number or boolean becomes its JSON text; a document
@@ -343,10 +368,9 @@ def _watched(doc: _Doc) -> tuple[dict[str, str], dict[str, int], str]:
     if not isinstance(env, dict):
         return {}, {}, "env is not an object"
     values: dict[str, str] = {}
-    for name in WATCHED:
-        if name not in env:
+    for name, value in env.items():
+        if name not in WATCHED and not _is_provider_flag(name):
             continue
-        value = env[name]
         if isinstance(value, str):
             values[name] = value
         elif isinstance(value, bool):
@@ -494,12 +518,13 @@ def _has_token(value: str, header: str) -> bool:
 
 def _judge(gate: Gate, sources: list[_Source], environ: Mapping[str, str]) -> list[Finding]:
     """
-    Description: Check the four variables' effective values against the gate.
+    Description: Check the watched variables' effective values against the gate.
     Parameters:
         gate: The gate from the install record.
         sources: The settings sources for one project, highest precedence first.
         environ: The hook's own environment.
-    Output: One Finding per variable that sends requests around the gate, in the order of WATCHED; empty when none does.
+    Output: One Finding per variable that sends requests around the gate: the base URL, then each switched-on provider
+        switch by name, then the custom headers; empty when none does.
     """
     found: list[Finding] = []
     value, source = _effective("ANTHROPIC_BASE_URL", sources, environ)
@@ -517,10 +542,12 @@ def _judge(gate: Gate, sources: list[_Source], environ: Mapping[str, str]) -> li
             text = (f"{where} sets ANTHROPIC_BASE_URL to {_target(value) or 'a value that is not an address'}, "
                     f"which is not the gate address {gate.url}.")
         found.append(Finding(where, "ANTHROPIC_BASE_URL", text))
-    for name, label in _PROVIDERS:
+    flags = {n for s in sources for n in s.values if _is_provider_flag(n)} | {n for n in environ if _is_provider_flag(n)}
+    for name in sorted(flags, key=lambda n: (n.upper(), n)):
         value, source = _effective(name, sources, environ)
         if value is not None and value.strip().lower() not in _OFF:
             where = _where(source, name)
+            label = _PROVIDER_LABELS.get(name.upper(), "another model provider")
             found.append(Finding(where, name, f"{where} turns on {name}, which sends requests to {label} instead of "
                                  "the gate."))
     value, source = _effective("ANTHROPIC_CUSTOM_HEADERS", sources, environ)

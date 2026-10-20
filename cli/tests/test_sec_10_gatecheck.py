@@ -237,6 +237,98 @@ def test_sec_10_bedrock_in_the_hook_environment(world: World) -> None:
     assert found.setting == "CLAUDE_CODE_USE_BEDROCK" and "environment" in found.where
 
 
+# Any CLAUDE_CODE_USE_<NAME> switched on is a bypass, not only Bedrock and Vertex: the variable table in
+# https://code.claude.com/docs/en/env-vars (checked 2026-10-19) lists ANTHROPIC_AWS, FOUNDRY and MANTLE too, and a
+# later release adds more. Truthy is the page's general rule: 1, true, yes, on in any casing; 0, false, no, off is off.
+# Two names in that table are not providers (a file-search switch and the PowerShell tool) and are not bypasses.
+
+PROVIDER_FLAGS = [
+    ("CLAUDE_CODE_USE_FOUNDRY", "Microsoft Foundry"),
+    ("CLAUDE_CODE_USE_MANTLE", "Mantle"),
+    ("CLAUDE_CODE_USE_ANTHROPIC_AWS", "Claude Platform on AWS"),
+    ("CLAUDE_CODE_USE_SOME_FUTURE_PROVIDER", "another model provider"),
+]
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "Yes", "on"])
+@pytest.mark.parametrize("name,label", PROVIDER_FLAGS)
+def test_sec_10_every_provider_flag_in_settings_is_a_bypass(world: World, name: str, label: str, value: str) -> None:
+    path = world.set_project({name: value})
+    found = _only(_findings(world))
+    assert found.setting == name and str(path) in found.text and name in found.text and label in found.text
+    assert f"line {line_of(path, name)}" in found.text
+
+
+@pytest.mark.parametrize("name,label", PROVIDER_FLAGS)
+def test_sec_10_every_provider_flag_in_the_hook_environment_is_a_bypass(world: World, name: str, label: str) -> None:
+    found = _only(_findings(world, {name: "1"}))
+    assert found.setting == name and "environment" in found.where and label in found.text
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "False", "no", "off", "  "])
+@pytest.mark.parametrize("name,label", PROVIDER_FLAGS)
+def test_sec_10_every_provider_flag_switched_off_is_fine(world: World, name: str, label: str, value: str) -> None:
+    world.set_project({name: value})
+    assert _findings(world) == []
+    assert _findings(world, {name: value}) == []
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_USE_NATIVE_FILE_SEARCH", "CLAUDE_CODE_USE_POWERSHELL_TOOL"])
+def test_sec_10_use_flags_that_are_not_providers_are_fine(world: World, name: str) -> None:
+    """Both are documented as ordinary switches (file discovery, the PowerShell tool); `=1` is the documented way
+    to turn them on, so refusing it would lock out anyone who does."""
+    world.set_project({name: "1"})
+    assert _findings(world) == []
+    assert _findings(world, {name: "1"}) == []
+    world.set_project({name: None})  # not text, but not a watched variable either
+    assert _findings(world) == []
+
+
+def test_sec_10_provider_flag_names_are_matched_without_regard_to_case(world: World) -> None:
+    """Windows environment variable names are case-insensitive."""
+    path = world.set_project({"claude_code_use_foundry": "1"})
+    assert _only(_findings(world)).setting == "claude_code_use_foundry"
+    path.unlink()
+    assert _only(_findings(world, {"Claude_Code_Use_Mantle": "true"})).setting == "Claude_Code_Use_Mantle"
+
+
+def test_sec_10_provider_flags_follow_the_same_precedence(world: World) -> None:
+    world.set_user({"ANTHROPIC_BASE_URL": GATE_URL, "ANTHROPIC_CUSTOM_HEADERS": HEADERS_OK,
+                    "CLAUDE_CODE_USE_FOUNDRY": "1"})
+    assert _only(_findings(world)).setting == "CLAUDE_CODE_USE_FOUNDRY"
+    world.set_project({"CLAUDE_CODE_USE_FOUNDRY": ""})  # a project value overrides the user's, even an empty one
+    assert _findings(world) == []
+    world.set_project({"CLAUDE_CODE_USE_FOUNDRY": "0"}, local=True)
+    assert _findings(world, {"CLAUDE_CODE_USE_FOUNDRY": "1"}) == []  # a settings value beats the shell's
+    world.set_managed({"CLAUDE_CODE_USE_MANTLE": "1"})
+    assert _only(_findings(world)).setting == "CLAUDE_CODE_USE_MANTLE"
+
+
+def test_sec_10_each_switched_on_provider_flag_is_its_own_finding(world: World) -> None:
+    world.set_project({"CLAUDE_CODE_USE_FOUNDRY": "1", "CLAUDE_CODE_USE_BEDROCK": "1"}, local=True)
+    found = _findings(world, {"CLAUDE_CODE_USE_MANTLE": "1", "CLAUDE_CODE_USE_NATIVE_FILE_SEARCH": "1"})
+    assert [f.setting for f in found] == ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_FOUNDRY",
+                                          "CLAUDE_CODE_USE_MANTLE"]
+
+
+def test_sec_10_a_provider_flag_that_is_not_text_is_a_finding(world: World) -> None:
+    path = _place(world, "project", b'{"env": {"CLAUDE_CODE_USE_FOUNDRY": null}}')
+    found = _only(_findings(world))
+    assert str(path) in found.text and "cannot" in found.text
+
+
+def test_sec_10_provider_flag_numbers_and_booleans_in_json(world: World) -> None:
+    world.set_project({"CLAUDE_CODE_USE_FOUNDRY": 1, "CLAUDE_CODE_USE_MANTLE": True, "CLAUDE_CODE_USE_X": 0,
+                       "CLAUDE_CODE_USE_Y": False})
+    assert [f.setting for f in _findings(world)] == ["CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE"]
+
+
+def test_sec_10_provider_flag_message_never_shows_other_values(world: World) -> None:
+    world.set_project({"CLAUDE_CODE_USE_FOUNDRY": "1", "CLAUDE_CODE_USE_ODD": "SECRETFLAGVALUE", "FOO": "bar"})
+    text = gatecheck.refusal(world.repo, {})
+    assert text is not None and "SECRETFLAGVALUE" not in text
+
+
 @pytest.mark.parametrize("headers", ["x-team: platform", "Authorization: Bearer abc", "x-harpo-gate-token-other: x",
                                      "x-harpo-gate-token:", "x-harpo-gate-token:   ", "", "no colon here"])
 def test_sec_10_custom_headers_without_the_token_are_a_bypass(world: World, headers: str) -> None:

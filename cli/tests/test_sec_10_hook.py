@@ -122,6 +122,27 @@ def test_sec_10_bedrock_and_vertex_refuse_every_tool(world: World, capsys, monke
     _every_tool_refused(world, capsys, "Vertex", "environment")
 
 
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE", "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+                                  "CLAUDE_CODE_USE_SOME_FUTURE_PROVIDER"])
+def test_sec_10_any_provider_flag_refuses_every_tool(world: World, capsys, monkeypatch: pytest.MonkeyPatch,
+                                                     name: str) -> None:
+    path = world.set_project({name: "1"})
+    _every_tool_refused(world, capsys, str(path), name)
+    path.unlink()
+    monkeypatch.setenv(name, "true")
+    _every_tool_refused(world, capsys, name, "environment")
+    monkeypatch.setenv(name, "0")  # switched off: back to normal
+    assert _run(_event(world.repo, "Read", {"file_path": "README.md"}), capsys) == (0, "", "")
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_USE_POWERSHELL_TOOL", "CLAUDE_CODE_USE_NATIVE_FILE_SEARCH"])
+def test_sec_10_use_flags_that_are_not_providers_do_not_refuse(world: World, capsys, monkeypatch: pytest.MonkeyPatch,
+                                                               name: str) -> None:
+    world.set_project({name: "1"})
+    monkeypatch.setenv(name, "1")
+    assert _run(_event(world.repo, "Read", {"file_path": "README.md"}), capsys) == (0, "", "")
+
+
 def test_sec_10_custom_headers_without_the_token_refuse_every_tool(world: World, capsys) -> None:
     path = world.set_project({"ANTHROPIC_CUSTOM_HEADERS": "x-team: platform"})
     _every_tool_refused(world, capsys, str(path), HEADER)
