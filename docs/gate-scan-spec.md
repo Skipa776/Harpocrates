@@ -1,6 +1,6 @@
 # G4 spec: scan and redact the request
 
-Oct 19, 2026 · status: **awaiting Josh's approval** · requirements: FR-GATE-03, FR-GATE-04, FR-GATE-05 (determinism part), FR-GATE-10, FR-CORE-05, SEC-02. Builds on `docs/gate-parser-spec.md` (field classes, block tables and the 15 decisions) and replaces G3's blocking stub.
+Oct 19, 2026 · status: **approved by Josh, Oct 20, 2026** · requirements: FR-GATE-03, FR-GATE-04, FR-GATE-05 (determinism part), FR-GATE-10, FR-CORE-05, SEC-02. Builds on `docs/gate-parser-spec.md` (field classes, block tables and the 15 decisions) and replaces G3's blocking stub.
 
 ## Inputs and outputs
 
@@ -50,7 +50,7 @@ Every failure blocks; none of these forwards anything:
 - scan timeout (default 5 s)
 - body over the cap
 
-**Override (FR-GATE-03):** `--allow-unscanned` exists only as a start-up flag of the gate process, never per request. It logs a loud line on every forwarded request, it is off by default, and `harpo doctor` reports it. **Your call on the exact wording, or whether to drop the override from v1.** My recommendation is to drop it.
+**Override (FR-GATE-03): none in v1.** The override flag is dropped. A scanner failure blocks, and the fix is a restart or a downgrade, never forwarding unscanned. This changes FR-GATE-03's "explicit logged override flag": trade-off note, Josh's approval on Oct 20, 2026, default taken when he accepted G4 without choosing. It can be added later behind its own requirement.
 
 ## Test plan, tests first
 

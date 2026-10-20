@@ -143,7 +143,7 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | --- | --- | --- | --- |
 | FR-GATE-01 | Localhost proxy that the agent's API base URL points to; forwards over TLS to the real provider | Agent completes a normal session through the proxy | M2 |
 | FR-GATE-02 | Written parser spec per provider format (Anthropic Messages and OpenAI Responses in v1; OpenAI Chat Completions when the Copilot adapter ships) covering text, tool calls, tool results, and system prompts | Spec in `docs/`; parser tests for every content-block type | M2 |
-| FR-GATE-03 | Fail closed on scanner error, timeout, or unparseable request; explicit logged override flag | Killed scanner, timeout, and malformed request all blocked | M2 |
+| FR-GATE-03 | Fail closed on scanner error, timeout, or unparseable request. No override in v1 (Oct 20, 2026: a switch that forwards unscanned is the fail-open state the gate exists to prevent; a scanner failure blocks until restart or downgrade) | Killed scanner, timeout, and malformed request all blocked | M2 |
 | FR-GATE-04 | Scan the full request each turn, including history, not only the newest message | Secret planted in turn 1 history is redacted in turn 5 | M2 |
 | FR-GATE-05 | Deterministic placeholders so the unchanged start of each request stays identical and provider prompt caching still works | Cache hit rate with Guard on within 5 points of Guard off | M3 |
 | FR-GATE-06 | Stream responses back to the agent unchanged (server-sent events) | Streaming works end to end in both agents | M2 |
