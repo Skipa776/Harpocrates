@@ -138,6 +138,7 @@ enforce = [
     "cli/Harpocrates/gate/upstream.py",
     "cli/Harpocrates/gate/walk_anthropic.py",
     "cli/Harpocrates/gate/walk_common.py",
+    "cli/Harpocrates/gate/walk_responses.py",
     "cli/Harpocrates/gatecheck.py",
     "cli/Harpocrates/grants.py",
     "cli/Harpocrates/harness.py",

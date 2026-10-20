@@ -6,13 +6,13 @@ redacted-thinking blocks are dropped (decision 5, FR-GATE-10) before anything in
 """
 from __future__ import annotations
 
-from typing import Callable, Iterator, Optional
+from typing import Callable, Iterator
 
 from Harpocrates.gate.walk_common import (
     NO_SKIP,
-    OPAQUE,
     Drop,
     Op,
+    fields,
     leaf,
     refuse_shape,
     refuse_type,
@@ -27,30 +27,6 @@ IDS = frozenset({"type", "id", "tool_use_id", "name", "server_name", "caller", "
 # Typed server tools hold settings, not free text; custom tools have no type or "custom".
 SERVER_TOOLS = ("bash_", "code_execution_", "text_editor_", "computer_", "web_search_", "web_fetch_", "memory_",
                 "tool_search_tool_", "browser_toolset", "mcp_toolset")
-Special = dict[str, Callable[[object, tuple], Iterator[Op]]]
-
-
-def fields(block: dict, path: tuple, skip: frozenset = NO_SKIP, special: Optional[Special] = None,
-           cls: str = "R") -> Iterator[Op]:
-    """
-    Description: Walk the members of one block: skip the identifiers, give named members their own rule, scan the rest.
-    Parameters:
-        block: the block (an object).
-        path: its path.
-        skip: member names that are identifiers or ciphertext and are not scanned. Signatures and cache markers are
-            always skipped.
-        special: member name -> function(value, path) for members with their own rule.
-        cls: "R" or "S" for the members scanned generically.
-    Output: Operations in document order.
-    """
-    for name, value in block.items():
-        if name in skip or name in OPAQUE:
-            continue
-        if special and name in special:
-            yield from special[name](value, path + (name,))
-        else:
-            yield from strings(value, path + (name,), cls)
-
 
 def _content(value: object, path: tuple) -> Iterator[Op]:
     """

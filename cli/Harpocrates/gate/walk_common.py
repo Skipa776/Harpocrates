@@ -7,7 +7,7 @@ connector credentials (K). A walker raises RefusalError for a shape or type the 
 """
 from __future__ import annotations
 
-from typing import Iterator, NamedTuple, Union
+from typing import Callable, Iterator, NamedTuple, Optional, Union
 
 from Harpocrates.gate.blocks import PARSE, UNKNOWN_TYPE, RefusalError
 
@@ -58,6 +58,7 @@ class Drop(NamedTuple):
 
 
 Op = Union[Leaf, KeyText, Drop]
+Special = dict[str, Callable[[object, tuple], Iterator[Op]]]
 
 
 def refuse_type() -> RefusalError:
@@ -129,3 +130,28 @@ def strings(node: object, path: tuple, cls: str = "R", skip: frozenset = NO_SKIP
     elif isinstance(node, list):
         for position, value in enumerate(node):
             yield from strings(value, path + (position,), cls, skip, keys, deep)
+
+
+def fields(block: dict, path: tuple, skip: frozenset = NO_SKIP, special: Optional[Special] = None,
+           cls: str = "R", json_keys: frozenset = NO_SKIP) -> Iterator[Op]:
+    """
+    Description: Walk the members of one block: skip the identifiers, give named members their own rule, scan the rest.
+    Parameters:
+        block: the block (an object).
+        path: its path.
+        skip: member names that are identifiers or ciphertext and are not scanned. Signatures and cache markers are
+            always skipped.
+        special: member name -> function(value, path) for members with their own rule.
+        cls: "R" or "S" for the members scanned generically.
+        json_keys: member names whose string value holds JSON (tool-call arguments), yielded with as_json=True.
+    Output: Operations in document order.
+    """
+    for name, value in block.items():
+        if name in skip or name in OPAQUE:
+            continue
+        if special and name in special:
+            yield from special[name](value, path + (name,))
+        elif name in json_keys and isinstance(value, str):
+            yield from leaf(path + (name,), value, cls, as_json=True)
+        else:
+            yield from strings(value, path + (name,), cls)
