@@ -88,3 +88,54 @@ def test_sec_03_a_rejected_request_with_a_large_body_still_gets_its_answer() -> 
         big = b'{"pad":"' + b"a" * 600_000 + b'"}'
         reply = rig.call("POST", "/v1/messages", big, JSON, token=False)
         assert reply.status == 401 and rig.mock.records() == []
+
+
+# --- routes ------------------------------------------------------------------------------------------------------
+
+RECOVERY_PHRASES = ("thinking", "signature", "bound to a different conversation", "extra inputs are not permitted",
+                    "prompt is too long")
+
+
+@pytest.mark.parametrize("method,target", [
+    ("POST", "/v1/chat/completions"), ("POST", "/v1/images/generations"), ("POST", "/v1/realtime/calls"),
+    ("POST", "/v1/memories/trace_summarize"), ("GET", "/v1/messages"), ("DELETE", "/v1/messages"),
+    ("PUT", "/v1/responses"), ("PATCH", "/v1/responses"), ("OPTIONS", "/v1/messages"), ("HEAD", "/api/hello"),
+    ("POST", "/v1/messages/"), ("POST", "/"), ("GET", "/v1/models/gpt-5"), ("POST", "/thinking/signature?key=FAKE-Q-1"),
+])
+def test_fr_gate_01_each_unknown_route_is_blocked_without_echoing_the_path(method: str, target: str) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        for headers in ({}, {"anthropic-version": "2023-06-01"}):
+            reply = rig.call(method, target, MESSAGES if method in ("POST", "PUT", "PATCH") else None, headers)
+            assert reply.status == 400
+            if method != "HEAD":
+                text = reply.body.decode()
+                assert "HARPO-BLOCK-ROUTE" in text
+                assert not [p for p in RECOVERY_PHRASES if p in text.lower()]
+                assert "FAKE-Q-1" not in text and "/v1/" not in text and "/api/" not in text  # no path is echoed
+                assert ("type" in json.loads(text)) == bool(headers)  # Anthropic shape only for an Anthropic caller
+        assert rig.mock.records() == []
+
+
+def test_fr_gate_01_unknown_route_blocked_and_websocket_426() -> None:
+    """The plan's test: a route the gate does not know is a 400 and nothing is forwarded; a WebSocket upgrade is a 426."""
+    with running_rig(scan_step=passthrough_scan) as rig:
+        blocked = rig.call("POST", "/v1/chat/completions", RESPONSES, JSON)
+        assert blocked.status == 400 and "HARPO-BLOCK-ROUTE" in blocked.body.decode()
+        upgrade = rig.call("GET", "/v1/responses", None, {"Upgrade": "websocket", "Connection": "Upgrade"})
+        assert upgrade.status == 426 and "HARPO-BLOCK-UPGRADE" in upgrade.body.decode()
+        assert rig.mock.records() == []
+
+
+@pytest.mark.parametrize("target", ["/v1/responses", "/v1/messages", "/v1/models", "/anything"])
+def test_fr_gate_01_a_websocket_upgrade_is_a_426_on_any_path_and_a_401_without_the_token(target: str) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        upgrade = {"Upgrade": "websocket", "Connection": "Upgrade", "Sec-WebSocket-Version": "13",
+                   "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ=="}
+        reply = rig.call("GET", target, None, upgrade)
+        assert reply.status == 426
+        body = json.loads(reply.body)
+        assert "HARPO-BLOCK-UPGRADE" in body["error"]["message"]
+        assert not [p for p in RECOVERY_PHRASES if p in reply.body.decode().lower()]
+        assert rig.mock.records() == []
+        # Without the right token an upgrade is a 401 first (token check, then route).
+        assert rig.call("GET", target, None, upgrade, token=False).status == 401

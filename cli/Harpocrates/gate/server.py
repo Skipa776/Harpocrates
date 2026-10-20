@@ -137,12 +137,18 @@ class GateHandler(BaseHTTPRequestHandler):
         Description: Answer one request.
         Parameters: None
         Output: None. Checks the token first (SEC-03): a missing, repeated or wrong token gets 401 and nothing else is
-            read. At this stage nothing after the token check exists yet, so every other request is blocked.
+            read. Then the route: a WebSocket upgrade gets 426 and any route the gate does not know gets 400, both
+            without reading the body. At this stage nothing after the route check exists yet, so every known route is
+            blocked as well.
         """
         lowered = {name.lower(): value for name, value in self.headers.items()}
         route = classify(self.command, self.path, lowered)
         if not check_token(self.headers.get_all(TOKEN_HEADER, []), self.server.token):
             return self._refuse(route, "HARPO-BLOCK-TOKEN", body_unread=True)
+        if route.action == "upgrade":
+            return self._refuse(route, "HARPO-BLOCK-UPGRADE", body_unread=True)
+        if route.action == "block":
+            return self._refuse(route, "HARPO-BLOCK-ROUTE", body_unread=True)
         self._refuse(route, "HARPO-BLOCK-INTERNAL", body_unread=True)
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _serve  # noqa: N815 - http.server names
