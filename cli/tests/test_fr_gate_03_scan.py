@@ -8,75 +8,83 @@ import time
 import pytest
 
 from Harpocrates.gate.routes import Route
-from Harpocrates.gate.scan import Block, Forward, ScanUnavailableError, default_scan_step, run_scan
+from Harpocrates.gate.scan import (
+    Block,
+    Forward,
+    RequestHead,
+    ScanUnavailableError,
+    default_scan_step,
+    run_scan,
+)
 
 ROUTE = Route("anthropic.messages", "anthropic", "scan")
 BODY = b'{"messages":[]}'
+HEAD = RequestHead((('user-agent', 'agent/1'), ('x-api-key', 'k')), '/v1/messages', 'beta=true')
 
 
 def test_fr_gate_03_default_scan_step_raises_for_every_input() -> None:
     for body in (b"", BODY, b"\xff\xfe"):
         for route in (ROUTE, Route("openai.responses", "openai", "scan"), Route("openai.models", "openai", "pass")):
             with pytest.raises(ScanUnavailableError):
-                default_scan_step(body, route)
+                default_scan_step(body, route, HEAD)
 
 
 def test_fr_gate_03_default_scan_step_blocks_through_run_scan() -> None:
-    assert run_scan(default_scan_step, BODY, ROUTE, 5.0) == Block("HARPO-BLOCK-SCAN-ERROR")
+    assert run_scan(default_scan_step, BODY, ROUTE, HEAD, 5.0) == Block("HARPO-BLOCK-SCAN-ERROR")
 
 
-def test_fr_gate_03_a_step_gets_the_decoded_body_and_the_route() -> None:
+def test_fr_gate_03_a_step_gets_the_decoded_body_the_route_and_the_head() -> None:
     seen: list[tuple] = []
 
-    def step(body: bytes, route: Route) -> Forward:
-        seen.append((body, route))
+    def step(body: bytes, route: Route, head: RequestHead) -> Forward:
+        seen.append((body, route, head))
         return Forward(body)
 
-    assert run_scan(step, BODY, ROUTE, 5.0) == Forward(BODY)
-    assert seen == [(BODY, ROUTE)]
+    assert run_scan(step, BODY, ROUTE, HEAD, 5.0) == Forward(BODY)
+    assert seen == [(BODY, ROUTE, HEAD)]
 
 
 def test_fr_gate_03_a_step_may_rewrite_the_body() -> None:
-    assert run_scan(lambda body, route: Forward(b"rewritten"), BODY, ROUTE, 5.0) == Forward(b"rewritten")
+    assert run_scan(lambda body, route, head: Forward(b"rewritten"), BODY, ROUTE, HEAD, 5.0) == Forward(b"rewritten")
 
 
 def test_fr_gate_03_a_step_may_block_with_a_reason_code() -> None:
-    assert run_scan(lambda body, route: Block("HARPO-BLOCK-UNKNOWN-TYPE"), BODY, ROUTE, 5.0) == Block(
+    assert run_scan(lambda body, route, head: Block("HARPO-BLOCK-UNKNOWN-TYPE"), BODY, ROUTE, HEAD, 5.0) == Block(
         "HARPO-BLOCK-UNKNOWN-TYPE")
 
 
 @pytest.mark.parametrize("reason", ["", "blocked: secret sk-abc found", "HARPO-BLOCK-THINKING", "harpo-block-x",
                                     "HARPO-BLOCK-A\nB", "HARPO-UPSTREAM-FAILED", "x" * 500])
 def test_fr_gate_03_a_block_reason_that_is_not_a_safe_code_becomes_a_scan_error(reason: str) -> None:
-    assert run_scan(lambda body, route: Block(reason), BODY, ROUTE, 5.0) == Block("HARPO-BLOCK-SCAN-ERROR")
+    assert run_scan(lambda body, route, head: Block(reason), BODY, ROUTE, HEAD, 5.0) == Block("HARPO-BLOCK-SCAN-ERROR")
 
 
 @pytest.mark.parametrize("answer", [None, b"bytes", "text", {"body": b"x"}, (b"x",), Forward("not bytes"),
                                     Forward(bytearray(b"x")), 3])
 def test_fr_gate_03_an_answer_of_the_wrong_kind_is_a_scan_error(answer: object) -> None:
-    assert run_scan(lambda body, route: answer, BODY, ROUTE, 5.0) == Block("HARPO-BLOCK-SCAN-ERROR")
+    assert run_scan(lambda body, route, head: answer, BODY, ROUTE, HEAD, 5.0) == Block("HARPO-BLOCK-SCAN-ERROR")
 
 
 @pytest.mark.parametrize("error", [RuntimeError("boom"), ValueError("x"), KeyError("k"), MemoryError(),
                                    RecursionError(), SystemExit(1), KeyboardInterrupt()])
 def test_fr_gate_03_a_step_that_raises_is_a_scan_error(error: BaseException) -> None:
-    def step(body: bytes, route: Route) -> Forward:
+    def step(body: bytes, route: Route, head: RequestHead) -> Forward:
         raise error
 
-    assert run_scan(step, BODY, ROUTE, 5.0) == Block("HARPO-BLOCK-SCAN-ERROR")
+    assert run_scan(step, BODY, ROUTE, HEAD, 5.0) == Block("HARPO-BLOCK-SCAN-ERROR")
 
 
 def test_fr_gate_03_a_step_over_the_budget_is_a_timeout_and_is_not_waited_for() -> None:
     release = threading.Event()
     finished: list[bool] = []
 
-    def slow(body: bytes, route: Route) -> Forward:
+    def slow(body: bytes, route: Route, head: RequestHead) -> Forward:
         release.wait(10)
         finished.append(True)
         return Forward(body)
 
     started = time.monotonic()
-    result = run_scan(slow, BODY, ROUTE, 0.2)
+    result = run_scan(slow, BODY, ROUTE, HEAD, 0.2)
     elapsed = time.monotonic() - started
     release.set()
     assert result == Block("HARPO-BLOCK-SCAN-TIMEOUT")
@@ -86,8 +94,8 @@ def test_fr_gate_03_a_step_over_the_budget_is_a_timeout_and_is_not_waited_for() 
 
 
 def test_fr_gate_03_a_step_inside_the_budget_is_not_a_timeout() -> None:
-    def quick(body: bytes, route: Route) -> Forward:
+    def quick(body: bytes, route: Route, head: RequestHead) -> Forward:
         time.sleep(0.05)
         return Forward(body)
 
-    assert run_scan(quick, BODY, ROUTE, 2.0) == Forward(BODY)
+    assert run_scan(quick, BODY, ROUTE, HEAD, 2.0) == Forward(BODY)

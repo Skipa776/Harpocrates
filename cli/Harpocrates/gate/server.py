@@ -17,7 +17,7 @@ from Harpocrates.gate.headers import upstream_request_headers
 from Harpocrates.gate.relay import relay_response
 from Harpocrates.gate.request_log import RequestLog
 from Harpocrates.gate.routes import Route, classify
-from Harpocrates.gate.scan import Block, ScanStep, default_scan_step, run_scan
+from Harpocrates.gate.scan import Block, RequestHead, ScanStep, default_scan_step, run_scan
 from Harpocrates.gate.session_token import TOKEN_HEADER, check_token
 from Harpocrates.gate.upstream import UpstreamError, open_upstream
 
@@ -184,6 +184,16 @@ class GateHandler(BaseHTTPRequestHandler):
         if relayed.ended != "complete":
             self.close_connection = True
 
+    def _head(self) -> RequestHead:
+        """
+        Description: Collect what the scan step is told about the request besides its body (decision 12).
+        Parameters: None
+        Output: A RequestHead with the headers as received (without the gate token header), the path and the query.
+        """
+        path, _, query = self.path.partition("?")
+        kept = tuple((name, value) for name, value in self.headers.items() if name.lower() != TOKEN_HEADER)
+        return RequestHead(kept, path, query)
+
     def _pipeline(self, route: Route) -> None:
         """
         Description: Run one request through the checks in order and forward it if every one passes.
@@ -213,7 +223,7 @@ class GateHandler(BaseHTTPRequestHandler):
             return self._refuse(route, _ENCODING_CODES[decoded.status], body_unread=False)
         self._facts["bytes_in"] = len(decoded.body)
         scan_started = time.monotonic()
-        outcome = run_scan(self.server.scan_step, decoded.body, route, self.server.config.scan_timeout)
+        outcome = run_scan(self.server.scan_step, decoded.body, route, self._head(), self.server.config.scan_timeout)
         self._facts["ms_scan"] = (time.monotonic() - scan_started) * 1000
         if isinstance(outcome, Block):
             return self._refuse(route, outcome.reason, body_unread=False)

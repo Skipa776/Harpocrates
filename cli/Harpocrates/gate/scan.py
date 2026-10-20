@@ -36,7 +36,23 @@ class Block(NamedTuple):
     reason: str
 
 
-ScanStep = Callable[[bytes, Route], Union[Forward, Block]]
+class RequestHead(NamedTuple):
+    """
+    Description: What the scan step is told about a request besides its body (decision 12): the header values, the path
+        and the query, which can hold a secret as well.
+    Parameters:
+        headers: (name, value) pairs as received, in order, duplicates and case kept, without the gate token header.
+        path: the request path without the query, as received (for example "/v1/messages").
+        query: the query string without the leading "?", or "" when there is none.
+    Output: An immutable record built by the server.
+    """
+
+    headers: tuple[tuple[str, str], ...]
+    path: str
+    query: str
+
+
+ScanStep = Callable[[bytes, Route, RequestHead], Union[Forward, Block]]
 
 
 class ScanUnavailableError(RuntimeError):
@@ -47,24 +63,26 @@ class ScanUnavailableError(RuntimeError):
     """
 
 
-def default_scan_step(body: bytes, route: Route) -> Forward:
+def default_scan_step(body: bytes, route: Route, head: RequestHead) -> Forward:
     """
     Description: The stub scan step G3 ships with. It never lets a request through.
     Parameters:
         body: the decoded request body (ignored).
         route: the route of the request (ignored).
+        head: the headers, path and query of the request (ignored).
     Output: Never returns. Raises ScanUnavailableError on every call.
     """
     raise ScanUnavailableError("the scan step arrives in G4; until then nothing is forwarded")
 
 
-def run_scan(step: ScanStep, body: bytes, route: Route, timeout: float) -> Union[Forward, Block]:
+def run_scan(step: ScanStep, body: bytes, route: Route, head: RequestHead, timeout: float) -> Union[Forward, Block]:
     """
     Description: Run a scan step on a decoded body, treating anything but a clear answer as a block.
     Parameters:
-        step: the scan step, called as step(body, route).
+        step: the scan step, called as step(body, route, head).
         body: the decoded request body.
         route: the route of the request.
+        head: the headers, path and query of the request.
         timeout: seconds the step may take.
     Output: The step's Forward when it returned Forward with bytes. Its Block when the reason passes
         errors.is_block_code. Otherwise Block("HARPO-BLOCK-SCAN-TIMEOUT") when the step ran past the timeout (it is
@@ -80,7 +98,7 @@ def run_scan(step: ScanStep, body: bytes, route: Route, timeout: float) -> Union
         Output: None. Appends one item to answer.
         """
         try:
-            answer.append(step(body, route))
+            answer.append(step(body, route, head))
         except BaseException as error:  # a step that fails in any way must still end in a block
             answer.append(error)
 

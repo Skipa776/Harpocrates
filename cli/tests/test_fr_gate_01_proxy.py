@@ -281,10 +281,10 @@ def test_fr_gate_03_scan_stub_blocks_everything() -> None:
 
 
 def test_fr_gate_03_scan_error_and_timeout_block() -> None:
-    def explode(body: bytes, route: object) -> Forward:
+    def explode(body: bytes, route: object, head: object) -> Forward:
         raise RuntimeError("scanner crashed with FAKE-SECRET-IN-MESSAGE")
 
-    def hang(body: bytes, route: object) -> Forward:
+    def hang(body: bytes, route: object, head: object) -> Forward:
         time.sleep(30)
         return Forward(body)
 
@@ -303,10 +303,10 @@ def test_fr_gate_03_scan_error_and_timeout_block() -> None:
 
 
 def test_fr_gate_03_a_step_that_answers_with_garbage_or_blocks_is_obeyed_as_a_block() -> None:
-    with running_rig(scan_step=lambda body, route: "yes") as rig:
+    with running_rig(scan_step=lambda body, route, head: "yes") as rig:
         reply = rig.call("POST", "/v1/messages", MESSAGES, JSON)
         assert reply.status == 400 and "HARPO-BLOCK-SCAN-ERROR" in reply.body.decode()
-    with running_rig(scan_step=lambda body, route: Block("HARPO-BLOCK-UNKNOWN-TYPE")) as rig:
+    with running_rig(scan_step=lambda body, route, head: Block("HARPO-BLOCK-UNKNOWN-TYPE")) as rig:
         reply = rig.call("POST", "/v1/messages", MESSAGES, {**JSON, "anthropic-version": "2023-06-01"})
         assert reply.status == 400 and "HARPO-BLOCK-UNKNOWN-TYPE" in reply.body.decode()
         assert rig.mock.records() == []
@@ -316,7 +316,7 @@ def test_fr_install_04_gzip_decoded() -> None:
     """The scan step sees the decoded JSON, whatever encoding the body arrived in."""
     seen: list[tuple[bytes, str]] = []
 
-    def capture(body: bytes, route) -> Block:
+    def capture(body: bytes, route, head) -> Block:
         seen.append((body, route.name))
         return Block("HARPO-BLOCK-CAPTURED")
 
@@ -362,3 +362,24 @@ def test_fr_gate_01_a_socket_error_while_answering_closes_the_connection_without
         assert rig.mock.records() == []
         lines = rig.wait_log(1)
         assert len(lines) == 1 and "decision" not in json.loads(lines[0])
+
+
+def test_fr_gate_04_the_scan_step_gets_the_headers_path_and_query_without_the_gate_token() -> None:
+    """Decision 12: header values, the path and the query go to the scan step. The gate token is the gate's own and
+    never reaches it."""
+    seen: list = []
+
+    def capture(body: bytes, route, head) -> Forward:
+        seen.append(head)
+        return Forward(body)
+
+    with running_rig(scan_step=capture) as rig:
+        rig.call("POST", "/v1/messages?beta=true&x=a%20b", MESSAGES, {**JSON, "anthropic-version": "2023-06-01",
+                                                                       "X-Custom": "one"})
+        rig.call("GET", "/v1/models", None, {"anthropic-version": "2023-06-01"})
+    first, second = seen
+    names = [name.lower() for name, _ in first.headers]
+    assert "x-harpo-gate-token" not in names and "x-custom" in names and "anthropic-version" in names
+    assert dict(first.headers)["X-Custom"] == "one"
+    assert (first.path, first.query) == ("/v1/messages", "beta=true&x=a%20b")
+    assert (second.path, second.query) == ("/v1/models", "")

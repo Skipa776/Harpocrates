@@ -121,7 +121,7 @@ def measure(calls: int = 200, warmup: int = 20, body_bytes: int = 100 * 1024) ->
     headers = {"Content-Type": "application/json", "anthropic-version": "2023-06-01"}
     upstream = mock.start_server()
     config = GateConfig(anthropic_upstream=upstream.url, openai_upstream=upstream.url)
-    gate = start_gate(config, token, scan_step=lambda data, route: Forward(data))
+    gate = start_gate(config, token, scan_step=lambda data, route, head: Forward(data))
     direct_conn = http.client.HTTPConnection(upstream.host, upstream.port, timeout=30)
     gate_conn = http.client.HTTPConnection(gate.host, gate.port, timeout=30)
     direct, via = [], []

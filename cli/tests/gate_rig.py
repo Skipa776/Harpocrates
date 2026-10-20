@@ -16,7 +16,7 @@ from Harpocrates.gate.server import start_gate
 from Harpocrates.gate.session_token import TOKEN_HEADER, new_token
 
 
-def passthrough_scan(body: bytes, route: object) -> Forward:
+def passthrough_scan(body: bytes, route: object, head: object) -> Forward:
     """A scan step that lets everything through. Only tests use it: the gate itself ships no such step."""
     return Forward(body)
 

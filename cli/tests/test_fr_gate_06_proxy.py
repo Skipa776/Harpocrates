@@ -106,7 +106,7 @@ def test_fr_gate_01_a_body_at_the_cap_is_forwarded_and_one_byte_over_is_not() ->
 
 def test_fr_gate_01_a_scan_step_may_rewrite_the_body_and_the_length_follows() -> None:
     rewritten = json.dumps({"model": "m", "max_tokens": 1, "messages": [{"role": "user", "content": "REDACTED"}]})
-    with running_rig(scan_step=lambda body, route: Forward(rewritten.encode())) as rig:
+    with running_rig(scan_step=lambda body, route, head: Forward(rewritten.encode())) as rig:
         reply = rig.call("POST", "/v1/messages", MESSAGES, {**JSON, **ANTHROPIC})
         (record,) = rig.mock.records()
         assert reply.status == 200 and record["body"] == rewritten
@@ -195,7 +195,7 @@ def test_fr_install_04_forwarded_body_is_re_encoded_as_received(body: bytes, enc
         assert record["body_status"] == "ok" and record["body"] == body.decode()  # the provider can read it
         assert record["content_encoding"] == (None if encoding == "identity" else encoding)
         assert record["content_length_header"] == record["body_size"]  # the length is for the forwarded bytes
-    with running_rig(scan_step=lambda b, r: Forward(b'{"rewritten":true}')) as rig:
+    with running_rig(scan_step=lambda b, r, h: Forward(b'{"rewritten":true}')) as rig:
         assert rig.call("POST", "/v1/messages", wire, headers).status == 200
         (record,) = rig.mock.records()
         assert record["body"] == '{"rewritten":true}' and record["content_encoding"] == (
