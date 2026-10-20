@@ -1,5 +1,5 @@
-"""FR-GATE-03: the scan step. The default raises, so nothing is forwarded until G4; an error, a timeout or an
-answer the gate cannot trust is a block. Unit tests of run_scan."""
+"""FR-GATE-03: running a scan step. An error, a timeout or an answer the gate cannot trust is a block. Unit tests of
+run_scan."""
 from __future__ import annotations
 
 import threading
@@ -12,25 +12,12 @@ from Harpocrates.gate.scan import (
     Block,
     Forward,
     RequestHead,
-    ScanUnavailableError,
-    default_scan_step,
     run_scan,
 )
 
 ROUTE = Route("anthropic.messages", "anthropic", "scan")
 BODY = b'{"messages":[]}'
 HEAD = RequestHead((('user-agent', 'agent/1'), ('x-api-key', 'k')), '/v1/messages', 'beta=true')
-
-
-def test_fr_gate_03_default_scan_step_raises_for_every_input() -> None:
-    for body in (b"", BODY, b"\xff\xfe"):
-        for route in (ROUTE, Route("openai.responses", "openai", "scan"), Route("openai.models", "openai", "pass")):
-            with pytest.raises(ScanUnavailableError):
-                default_scan_step(body, route, HEAD)
-
-
-def test_fr_gate_03_default_scan_step_blocks_through_run_scan() -> None:
-    assert run_scan(default_scan_step, BODY, ROUTE, HEAD, 5.0) == Block("HARPO-BLOCK-SCAN-ERROR")
 
 
 def test_fr_gate_03_a_step_gets_the_decoded_body_the_route_and_the_head() -> None:

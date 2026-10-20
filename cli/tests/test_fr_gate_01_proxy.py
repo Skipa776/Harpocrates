@@ -12,6 +12,7 @@ import time
 
 import pytest
 import zstandard
+from gate_canaries import PLACEHOLDER, known_format
 from gate_rig import (
     JSON,
     MESSAGES,
@@ -25,7 +26,8 @@ from gate_rig import (
 
 import Harpocrates.gate.server as gate_server
 from Harpocrates.gate.config import GateConfig
-from Harpocrates.gate.scan import Block, Forward, default_scan_step
+from Harpocrates.gate.request_scan import RequestScanner
+from Harpocrates.gate.scan import Block, Forward
 from Harpocrates.gate.server import start_gate
 from Harpocrates.gate.session_token import TOKEN_HEADER, new_token
 
@@ -269,14 +271,34 @@ EVERY_KIND = [  # (method, target, body, headers): each way a request can reach 
 ]
 
 
-def test_fr_gate_03_scan_stub_blocks_everything() -> None:
-    """The default state: no scan step is given, so nothing may leave. This is what G3 alone does."""
-    assert inspect.signature(start_gate).parameters["scan_step"].default is default_scan_step
-    with running_rig() as rig:
+def test_fr_gate_03_default_scan_step_is_the_real_scanner_with_its_own_key_per_gate() -> None:
+    """The stub of G3 is gone: with no scan step given, the gate scans (G4) and each gate has its own session key."""
+    assert inspect.signature(start_gate).parameters["scan_step"].default is None
+    secret = known_format()["github_token"]
+    body = json.dumps({"model": "m", "max_tokens": 1, "messages": [{"role": "user", "content": f"my key {secret}"}]}).encode()
+    seen = []
+    for _ in range(2):
+        with running_rig() as rig:
+            assert isinstance(rig.gate.server.scan_step, RequestScanner)
+            reply = rig.call("POST", "/v1/messages", body, {**JSON, "anthropic-version": "2023-06-01"})
+            assert reply.status == 200
+            (record,) = rig.mock.records()
+            assert secret not in record["body"] and PLACEHOLDER.search(record["body"])
+            seen.append(rig.gate.server.scan_step.finder.redactor)
+    assert seen[0] is not seen[1]
+
+
+def test_fr_gate_03_the_gate_has_no_override_and_a_failing_scanner_forwards_nothing() -> None:
+    """FR-GATE-03, Oct 20 2026: no flag forwards a request that was not scanned."""
+    assert "override" not in " ".join(inspect.signature(start_gate).parameters) and not hasattr(GateConfig(), "override")
+
+    def broken(body: bytes, route: object, head: object) -> Forward:
+        raise RuntimeError("scanner failed")
+
+    with running_rig(scan_step=broken) as rig:
         for method, target, body, headers in EVERY_KIND:
             reply = rig.call(method, target, body, {**JSON, **headers})
-            assert reply.status == 400, (method, target)
-            assert "HARPO-BLOCK-SCAN-ERROR" in reply.body.decode(), (method, target)
+            assert reply.status == 400 and "HARPO-BLOCK-SCAN-ERROR" in reply.body.decode(), (method, target)
         assert rig.mock.records() == []  # not one request reached the provider
 
 

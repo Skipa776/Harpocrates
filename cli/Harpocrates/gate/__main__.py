@@ -1,7 +1,7 @@
 """Run the gate: python -m Harpocrates.gate --port N --token-file F
 
-There is no bind-address option (the gate listens on 127.0.0.1 only) and no scan-step option (until G4 the stub scan
-step blocks every request). `harpo guard up` wraps this command later (G7).
+There is no bind-address option (the gate listens on 127.0.0.1 only) and no way to skip the scan: no override flag exists
+(FR-GATE-03). `harpo guard up` wraps this command later (G7).
 """
 from __future__ import annotations
 

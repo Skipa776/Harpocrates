@@ -11,7 +11,7 @@ from typing import Iterable, Iterator, NamedTuple, Optional
 
 from bench import mock_provider as mock
 from Harpocrates.gate.config import GateConfig
-from Harpocrates.gate.scan import Forward, default_scan_step
+from Harpocrates.gate.scan import Forward
 from Harpocrates.gate.server import start_gate
 from Harpocrates.gate.session_token import TOKEN_HEADER, new_token
 
@@ -86,9 +86,9 @@ class Rig:
 
 
 @contextmanager
-def running_rig(scan_step=default_scan_step, mock_kwargs: Optional[dict] = None, **config: object) -> Iterator[Rig]:
-    """Start the mock provider and a gate pointed at it. The default scan step is the gate's own (the stub that
-    raises); a test that wants requests to go through passes passthrough_scan."""
+def running_rig(scan_step=None, mock_kwargs: Optional[dict] = None, **config: object) -> Iterator[Rig]:
+    """Start the mock provider and a gate pointed at it. The default scan step is the gate's own (the real scanner,
+    G4); a test that wants requests to go through passes passthrough_scan."""
     upstream = mock.start_server(**(mock_kwargs or {}))
     token, log_lines = new_token(), []
     settings = GateConfig(**{"anthropic_upstream": upstream.url, "openai_upstream": upstream.url, **config})

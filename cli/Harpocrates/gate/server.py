@@ -16,8 +16,9 @@ from Harpocrates.gate.errors import UPSTREAM_FAILED, error_response
 from Harpocrates.gate.headers import upstream_request_headers
 from Harpocrates.gate.relay import relay_response
 from Harpocrates.gate.request_log import RequestLog
+from Harpocrates.gate.request_scan import RequestScanner
 from Harpocrates.gate.routes import Route, classify
-from Harpocrates.gate.scan import Block, RequestHead, ScanStep, default_scan_step, run_scan
+from Harpocrates.gate.scan import Block, RequestHead, ScanStep, run_scan
 from Harpocrates.gate.session_token import TOKEN_HEADER, check_token
 from Harpocrates.gate.upstream import UpstreamError, open_upstream
 
@@ -35,7 +36,7 @@ class GateServer(ThreadingHTTPServer):
     Parameters:
         config: the checked settings.
         token: the session token an agent must send.
-        scan_step: the scan step (the default raises, so nothing is forwarded).
+        scan_step: the scan step.
         log: where one line per request goes.
         zstd: the zstd functions, or None when no zstd module is available.
     Output: A bound server. Raises OSError when the port is taken.
@@ -360,21 +361,23 @@ class RunningGate:
         self.close()
 
 
-def start_gate(config: GateConfig, token: str, scan_step: ScanStep = default_scan_step,
+def start_gate(config: GateConfig, token: str, scan_step: Optional[ScanStep] = None,
                log_sink: Optional[Callable[[str], None]] = None) -> RunningGate:
     """
     Description: Bind 127.0.0.1 and start serving in a background thread.
     Parameters:
         config: the checked settings.
         token: the session token (see session_token.new_token).
-        scan_step: the scan step. The default raises, so every request is blocked; only a test passes another.
+        scan_step: the scan step, or None for a new RequestScanner: the real scanner, with a session key made now (SEC-02)
+            that dies with this gate. Only a test passes another. There is no way to skip scanning (FR-GATE-03).
         log_sink: a function that takes one request-log line, or None to log nothing.
     Output: The running gate. Raises ValueError, before anything listens, when the settings do not name 127.0.0.1 or the
         socket ends up bound elsewhere; OSError when the port is taken.
     """
     if config.host != BIND_HOST:
         raise ValueError(f"host: the gate binds {BIND_HOST} only")
-    server = GateServer(config, token, scan_step, RequestLog(log_sink), load_zstd())
+    server = GateServer(config, token, scan_step if scan_step is not None else RequestScanner(), RequestLog(log_sink),
+                        load_zstd())
     if server.server_address[0] != BIND_HOST:  # belt and braces after the bind
         server.server_close()
         raise ValueError(f"host: the gate bound a socket other than {BIND_HOST}; refusing to serve")

@@ -47,11 +47,12 @@ def test_fr_gate_01_one_log_line_per_request_with_route_status_decision_sizes_an
 
 
 def test_fr_gate_01_a_blocked_by_the_scan_step_request_logs_its_sizes_and_the_reason() -> None:
-    with running_rig() as rig:  # the default stub
-        rig.call("POST", "/v1/messages", MESSAGES, {**JSON, **ANTHROPIC})
+    bad = b'{"messages": 5}'  # the scanner refuses a body that is not shaped as the format says
+    with running_rig() as rig:
+        rig.call("POST", "/v1/messages", bad, {**JSON, **ANTHROPIC})
         (entry,) = entries(rig, 1)
-    assert (entry["decision"], entry["reason"], entry["status"]) == ("blocked", "HARPO-BLOCK-SCAN-ERROR", 400)
-    assert entry["bytes_in"] == len(MESSAGES) and "bytes_out" not in entry and entry["ms_scan"] >= 0
+    assert (entry["decision"], entry["reason"], entry["status"]) == ("blocked", "HARPO-BLOCK-PARSE", 400)
+    assert entry["bytes_in"] == len(bad) and "bytes_out" not in entry and entry["ms_scan"] >= 0
 
 
 def test_fr_gate_01_an_unreachable_provider_logs_an_upstream_error() -> None:

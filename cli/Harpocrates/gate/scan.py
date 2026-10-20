@@ -1,7 +1,5 @@
-"""The scan step (FR-GATE-03): the one place a request body is judged before it can leave.
-
-G3 ships only a stub that raises, so every request is blocked. G4 replaces the stub with the real scanner.
-"""
+"""The scan step (FR-GATE-03): the one place a request is judged before it can leave. request_scan.RequestScanner is the
+step the gate runs; this module holds the answer types and the wrapper that turns any failure into a block."""
 from __future__ import annotations
 
 import threading
@@ -53,26 +51,6 @@ class RequestHead(NamedTuple):
 
 
 ScanStep = Callable[[bytes, Route, RequestHead], Union[Forward, Block]]
-
-
-class ScanUnavailableError(RuntimeError):
-    """
-    Description: Raised by the default scan step, which exists only so that nothing is forwarded before G4.
-    Parameters: None
-    Output: An exception; run_scan turns it into a block.
-    """
-
-
-def default_scan_step(body: bytes, route: Route, head: RequestHead) -> Forward:
-    """
-    Description: The stub scan step G3 ships with. It never lets a request through.
-    Parameters:
-        body: the decoded request body (ignored).
-        route: the route of the request (ignored).
-        head: the headers, path and query of the request (ignored).
-    Output: Never returns. Raises ScanUnavailableError on every call.
-    """
-    raise ScanUnavailableError("the scan step arrives in G4; until then nothing is forwarded")
 
 
 def run_scan(step: ScanStep, body: bytes, route: Route, head: RequestHead, timeout: float) -> Union[Forward, Block]:

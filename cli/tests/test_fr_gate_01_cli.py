@@ -1,6 +1,7 @@
 """FR-GATE-01 / SEC-03 / FR-GATE-03: `python -m Harpocrates.gate --port N --token-file F` as a real process.
 
-The gate here is the shipped one with its default scan step, so it can only ever refuse: no request reaches a provider.
+The gate here is the shipped one with its default scan step. This test sends it only requests it refuses, because the
+process has no upstream option and would otherwise forward to the real provider.
 The token file and every token are made up by the test.
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from gate_canaries import known_format
 
 from Harpocrates.gate.session_token import TOKEN_HEADER, new_token, write_token_file
 
@@ -58,24 +60,25 @@ def request(url: str, method: str, target: str, body: bytes | None, headers: dic
         conn.close()
 
 
-def test_fr_gate_01_the_command_serves_on_loopback_with_the_stub_scan_step_and_stops_cleanly(child_python, token_file) -> None:
+def test_fr_gate_01_the_command_serves_on_loopback_with_the_real_scanner_and_stops_cleanly(child_python, token_file) -> None:
     path, token = token_file
     proc = start(child_python, "--port", "0", "--token-file", str(path))
     try:
         url = listening_url(proc)
         assert url.startswith("http://127.0.0.1:") and int(url.rsplit(":", 1)[1]) > 0
-        # No token: 401. Right token: the stub scan step refuses, so nothing is forwarded.
+        # No token: 401. Right token: the scanner refuses each of these (a body that is not JSON, a secret in the query), so
+        # nothing is forwarded: this process would otherwise send it to the real provider.
         assert request(url, "POST", "/v1/messages", b"{}", {"anthropic-version": "x"})[0] == 401
-        for method, target, body in (("POST", "/v1/messages", b"{}"), ("POST", "/v1/responses", b"{}"),
-                                     ("POST", "/v1/messages/count_tokens", b"{}"), ("GET", "/v1/models", None)):
+        for method, target, body in (("POST", "/v1/messages", b"not json"), ("POST", "/v1/responses", b"[1]"),
+                                     ("POST", "/v1/messages/count_tokens", b"{"), ("GET", f"/v1/models?key={known_format()['openai_key']}", None)):
             status, payload = request(url, method, target, body, {TOKEN_HEADER: token})
-            assert status == 400 and b"HARPO-BLOCK-SCAN-ERROR" in payload
+            assert status == 400 and (b"HARPO-BLOCK-PARSE" in payload or b"HARPO-BLOCK-HEADER-SECRET" in payload)
     finally:
         code, err = stop(proc)
     assert code == 0
     lines = [json.loads(line) for line in err.splitlines() if line.strip()]
     assert [e["decision"] for e in lines] == ["blocked"] * 5 and lines[0]["reason"] == "HARPO-BLOCK-TOKEN"
-    assert token not in err  # the token is never written to the log
+    assert token not in err and known_format()["openai_key"] not in err  # neither the token nor the secret is logged
 
 
 def test_fr_gate_01_sigint_also_stops_it_cleanly(child_python, token_file) -> None:
@@ -90,6 +93,15 @@ def test_fr_gate_01_the_command_has_no_way_to_bind_another_address(child_python,
     proc = start(child_python, "--host", "0.0.0.0", "--token-file", str(path))
     out, err = proc.communicate(timeout=20)
     assert proc.returncode == 2 and out == "" and "--host" in err
+
+
+@pytest.mark.parametrize("flag", ["--override", "--no-scan", "--skip-scan", "--allow-unscanned", "--scan-step", "--fail-open"])
+def test_fr_gate_03_the_command_has_no_override_flag(child_python, token_file, flag: str) -> None:
+    """FR-GATE-03 (Oct 20, 2026): a scanner failure blocks until restart or downgrade. No flag forwards unscanned."""
+    path, _ = token_file
+    proc = start(child_python, flag, "--token-file", str(path))
+    out, err = proc.communicate(timeout=20)
+    assert proc.returncode == 2 and out == "" and flag in err
 
 
 @pytest.mark.parametrize("make", ["missing", "loose", "short", "empty"])

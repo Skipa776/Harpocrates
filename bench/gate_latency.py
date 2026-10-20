@@ -3,8 +3,7 @@
     python -m bench.gate_latency [--calls 200] [--warmup 20] [--body-bytes 102400] [--out bench/results/gate]
 
 Everything runs on 127.0.0.1: bench/mock_provider.py is the upstream, and the gate runs with a pass-through scan step
-defined here (the gate itself ships none; G4 replaces its stub with the real scanner, so these numbers leave the scan
-out). The calls alternate direct, then through the gate, so drift in the machine hits both. The client keeps one
+defined here (the gate itself ships none), so these numbers leave the scan out; bench/gate_scan_latency.py measures the scan. The calls alternate direct, then through the gate, so drift in the machine hits both. The client keeps one
 connection to each; the gate opens a new one to the mock per request, as it will to a provider. The record holds
 numbers and the machine and date only, never a request. A reference for NFR-01 (M3), not a gate on G3.
 """
