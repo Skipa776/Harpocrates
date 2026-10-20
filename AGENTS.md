@@ -24,6 +24,7 @@ cargo fmt --manifest-path core/Cargo.toml --check && cargo clippy --manifest-pat
 4. Any change to thresholds, placeholder format, or logging needs a note explaining the trade-off.
 5. Never use benchmark suites or evasion cases for training or tuning.
 6. Every pull request lists the requirement IDs it closes and the tests that prove them.
+7. Before a feature counts as done, an end-to-end test exercises it through its real entry point: the `harpo` CLI, the hook as the agent invokes it, or the gate with a real `claude -p` or `codex exec` session in a throwaway home against the mock provider. Unit and component tests alone do not finish a feature.
 
 ## Current milestone
 
