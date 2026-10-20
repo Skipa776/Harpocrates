@@ -10,8 +10,8 @@ install would put it: ANTHROPIC_CUSTOM_HEADERS for Claude Code, http_headers in 
 provider, and the real ~/.harpo, ~/.harpocrates, ~/.claude/settings.json, ~/.codex/config.toml and ~/.codex/auth.json are
 snapshotted before and after the suite.
 
-g3  The gate with the scan step it ships. At G3 that step blocks everything, so both agents must show the gate's 400 message
-    and the mock must record nothing. Then two Claude Code variants with a test-only pass-through scan step, so the mock can
+g3  The gate with the G3 scan step, which blocked everything (reproduced here as the explicit "stub" step, since the gate no
+    longer ships one): both agents must show the gate's 400 message and the mock must record nothing. Then two Claude Code variants with a test-only pass-through scan step, so the mock can
     script tool calls: the install record says the gate is on the port Claude Code uses (SEC-10 stays quiet) and on another
     port (SEC-10 refuses every tool call).
 g4  The gate with its real scanner, in front of the scripted reads (Read .env, cat, grep): with and without Harpo's read
@@ -55,7 +55,8 @@ class Scenario(NamedTuple):
     Parameters:
         label: a short unique name, used for the recording folder.
         agent: claude or codex.
-        scan: "default" for the scan step the gate ships, "passthrough" for a test-only step that forwards everything.
+        scan: "default" for the scan step the gate ships (the real scanner), "passthrough" for a test-only step that forwards
+            everything, "stub" for a test-only step that raises, as the G3 stub did (every request blocked).
         hook: whether Harpo is installed into the throwaway home (its read hook, and for Claude Code the SEC-10 check).
         record: how the install record's gate entry relates to the gate: "match" (its port is the gate's), "mismatch"
             (another port), or "none" (no entry written).
@@ -75,8 +76,8 @@ class Scenario(NamedTuple):
 
 
 SUITES: dict[str, list[Scenario]] = {
-    "g3": [Scenario("claude-default-scan", "claude", "default", True, "match", True),
-           Scenario("codex-default-scan", "codex", "default", True, "none", True),
+    "g3": [Scenario("claude-default-scan", "claude", "stub", True, "match", True),
+           Scenario("codex-default-scan", "codex", "stub", True, "none", True),
            Scenario("claude-sec10-match", "claude", "passthrough", True, "match", False, "sec10"),
            Scenario("claude-sec10-mismatch", "claude", "passthrough", True, "mismatch", True, "sec10")],
     "g4": [Scenario("claude-gate-only", "claude", "default", False, "none"),
@@ -98,6 +99,18 @@ def sec10_script(repo: Path) -> list[dict]:
              ("Bash", {"command": "cat config/settings.py", "description": "Show settings"}),
              ("Bash", {"command": "grep -rn TOKEN .", "description": "Search for TOKEN"})]
     return [{"tool_calls": [{"name": name, "input": data}]} for name, data in calls] + [{"text": "done"}]
+
+
+def stub_scan(body: bytes, route: object, *rest: object) -> Forward:
+    """
+    Description: A scan step that fails every time, as the G3 stub did, so every request is blocked.
+    Parameters:
+        body: the decoded request body (ignored).
+        route: the route (ignored).
+        *rest: any further arguments the gate passes (ignored).
+    Output: Never returns. Raises RuntimeError, which the gate turns into a block.
+    """
+    raise RuntimeError("the G3 stub: no scanner")
 
 
 def passthrough_scan(body: bytes, route: object, *rest: object) -> Forward:
@@ -202,7 +215,7 @@ class _Rig:
     """
     Description: The gate and its token, started once the mock's address is known.
     Parameters:
-        scan: "default" or "passthrough".
+        scan: "default", "passthrough" or "stub".
     Output: An object with start(mock_url), gate, token and log_lines.
     """
 
@@ -210,7 +223,7 @@ class _Rig:
         """
         Description: Remember the scan mode; nothing runs yet.
         Parameters:
-            scan: "default" or "passthrough".
+            scan: "default", "passthrough" or "stub".
         Output: None.
         """
         self.scan, self.gate, self.token, self.log_lines = scan, None, new_token(), []
@@ -223,7 +236,7 @@ class _Rig:
         Output: The running gate (the same one on a second call).
         """
         if self.gate is None:
-            extra = {} if self.scan == "default" else {"scan_step": passthrough_scan}
+            extra = {} if self.scan == "default" else {"scan_step": stub_scan if self.scan == "stub" else passthrough_scan}
             config = GateConfig(anthropic_upstream=mock_url, openai_upstream=mock_url)
             self.gate = start_gate(config, self.token, log_sink=self.log_lines.append, **extra)
         return self.gate

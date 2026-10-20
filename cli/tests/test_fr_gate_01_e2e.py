@@ -29,7 +29,7 @@ def tw():
 def test_fr_gate_01_e2e_suites_have_unique_labels_and_known_agents() -> None:
     labels = [sc.label for suite in e2e.SUITES.values() for sc in suite]
     assert len(labels) == len(set(labels)) and {sc.agent for suite in e2e.SUITES.values() for sc in suite} == {"claude", "codex"}
-    assert {sc.scan for suite in e2e.SUITES.values() for sc in suite} <= {"default", "passthrough"}
+    assert {sc.scan for suite in e2e.SUITES.values() for sc in suite} <= {"default", "passthrough", "stub"}
     assert {sc.record for suite in e2e.SUITES.values() for sc in suite} <= {"match", "mismatch", "none"}
 
 
@@ -92,9 +92,10 @@ def test_fr_gate_01_e2e_gate_log_summary_counts_without_content() -> None:
 
 
 @pytest.mark.integration
-def test_fr_gate_03_e2e_real_agents_through_the_shipped_scan_step(tmp_path: Path) -> None:
-    """Real claude -p and codex exec behind the gate with the scan step it ships: SEC-10 stays quiet on a matching
-    record and refuses every tool call on a record for another port. The real home must not change."""
+def test_fr_gate_03_e2e_real_agents_behind_a_gate_that_blocks_everything(tmp_path: Path) -> None:
+    """Real claude -p and codex exec behind a gate whose scan step blocks everything (the G3 state): both show the gate's
+    message and the mock records nothing; SEC-10 stays quiet on a matching record and refuses every tool call on a record for
+    another port. The real home must not change."""
     present = [name for name in ("claude", "codex") if shutil.which(name)]
     if not present:
         pytest.skip("neither claude nor codex is installed")
