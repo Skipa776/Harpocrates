@@ -85,7 +85,7 @@ UUID_V4_PATTERN = re.compile(
 )
 
 
-# v0.2.0: AI-generated placeholder detection (design doc §2 "AI Leftover" Paradigm).
+# AI-generated placeholder detection: values an LLM writes in place of a real key.
 # Word-boundary anchors are intentionally omitted for underscore-joined patterns like
 # dummy_token, DUMMY_SECRET, FAKE_API_KEY which are the primary LLM leftovers.
 _AI_PLACEHOLDER_RE = re.compile(
@@ -93,7 +93,7 @@ _AI_PLACEHOLDER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# v0.2.0: Connection-string and credential-context keywords
+# Connection-string and credential-context keywords
 _CONNECTION_KEYWORDS = [
     "jdbc:", "bearer", "authorization:", "database", "password",
     "credentials", "connection_string", "dsn", "api_key", "access_key",
@@ -199,7 +199,7 @@ FEATURE_NAMES: Tuple[str, ...] = (
     # Env-loading awareness features (2)
     "env_loader_in_context",
     "is_env_fallback_value",
-    # Phase 7.0 value-shape features (7)
+    # Value-shape features (7)
     "value_starts_with_slash",
     "value_contains_path_separator",
     "value_ends_with_known_ext",
@@ -358,7 +358,7 @@ class FeatureVector:
     env_loader_in_context: bool = False  # Context contains env-loading pattern
     is_env_fallback_value: bool = False  # Token is the fallback/default arg in env-loader call
 
-    # Phase 7.0: value-shape features for FP suppression (64-feature vector)
+    # Value-shape features, which suppress false positives
     value_starts_with_slash: bool = False        # "/" or "~" or "./" prefix → file path
     value_contains_path_separator: bool = False  # "/" or "\" in value (non-URL) → path
     value_ends_with_known_ext: bool = False      # .pem/.key/.crt/.jks/.p12/.json/.yaml/.txt
@@ -441,7 +441,7 @@ class FeatureVector:
             # Env-loading awareness features (2)
             float(self.env_loader_in_context),
             float(self.is_env_fallback_value),
-            # Phase 7.0 value-shape features (7)
+            # Value-shape features (7)
             float(self.value_starts_with_slash),
             float(self.value_contains_path_separator),
             float(self.value_ends_with_known_ext),
@@ -1649,7 +1649,7 @@ def _extract_hex_disambiguation_features(
 
 
 # ---------------------------------------------------------------------------
-# Env-loading pattern awareness (v0.2.0 — features 64-65)
+# Env-loading pattern awareness (features 64-65)
 # ---------------------------------------------------------------------------
 
 _ENV_LOADER_PATTERNS = [
@@ -1777,7 +1777,7 @@ def extract_features(
     token_pos = context.line_content.find(token)
     env_fallback = _detect_env_fallback_value(context.line_content, token_pos) if token_pos >= 0 else False
 
-    # Phase 7.0 value-shape features
+    # Value-shape features
     value_shape = _value_shape_features(token)
 
     # Combine all features

@@ -65,8 +65,8 @@ _PEM_BODY_RE = re.compile(r"^[A-Za-z0-9+/]{64}$")
 # Single `*` catches continuation lines inside /* */ blocks.
 _COMMENT_PREFIXES = ("#", "//", "/*", "*", "<!--", "--")
 _COMMENT_STRIP_RE = re.compile(r"^(?:#+|//+|/\*+|\*+|<!--|--)\s*")
-# Arch override 2026-05-06: compiled regex replaces any() generator for the
-# prose-comment fast-path. ~10x faster on heavily-commented files.
+# The prose-comment fast path: one compiled regex, about 10x faster than any() over the characters on heavily
+# commented files.
 _PROSE_FILTER_RE = re.compile(r"[=:'\"]")
 
 # Phase 2b: sensitive-variable assignment bypass — forwards low-entropy literals
@@ -455,9 +455,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
         else:
             scan_text = _URL_RE.sub(" ", scan_target)
 
-        # TODO(v0.3): switch to finditer to capture offsets → TokenMatch for entropy candidates.
-        # URL stripping does not preserve length so offsets would be scan_text-relative;
-        # re-derive against stripped once the ONNX is retrained on correct features.
+        # Entropy candidates carry no offsets: URL stripping changes lengths, so offsets would count from
+        # scan_text. The context step finds the token in the line instead.
         for token in _TOKEN_RE.findall(scan_text):
             if looks_like_secret(token):
                 ent = shannon_entropy(token)
@@ -481,13 +480,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
                 )
 
         found_tokens = {f.token for f in findings}
-        # NOTE(v0.3): token_start/token_end here are relative to scan_text
-        # (post-URL-strip, and for comment lines also post-prefix-strip). They
-        # are NOT relative to the original line. On comment lines the offset
-        # drift is: actual_start = token_start + len(comment_prefix_stripped).
-        # This is acceptable for v0.2.x — TokenMatch consumers in features.py
-        # still call line.find(token) and are not yet consuming these offsets.
-        # Fix alongside the v0.3 finditer migration.
+        # These offsets count from scan_text (after URL stripping and, on a comment line, after the prefix), not
+        # from the line. The context step checks them against the line and falls back to finding the token.
         for match in _SENSITIVE_ASSIGNMENT_RE.finditer(scan_text):
             value = match.group(1)
             if value not in found_tokens:
