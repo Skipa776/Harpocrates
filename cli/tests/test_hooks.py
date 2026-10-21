@@ -224,6 +224,13 @@ def _canary_token(canaries: list[dict]) -> str:
     return next(c["value"] for c in canaries if c["kind"] == "github_token")
 
 
+def _canary(kind: str) -> str:
+    """A generated fake value of one canary kind (never a real credential)."""
+    from gate_canaries import known_format
+
+    return known_format(7)[kind]
+
+
 def test_fr_read_03_hook_placeholder_text_is_not_a_secret(repo, capsys, tmp_path: Path) -> None:
     """Docs and plans quote <<HARPO:type:hash>> placeholders; redacting them changes nothing, so Read passes.
     A real secret next to one is still refused."""
@@ -399,27 +406,40 @@ def test_fr_read_03_hook_grep_oversize_context_lines_are_scanned(repo, capsys, t
         assert code == 0 and _denied(out), extra
 
 
-def test_fr_read_03_hook_oversize_stays_refused_elsewhere(repo, capsys, tmp_path: Path,
-                                                          monkeypatch: pytest.MonkeyPatch) -> None:
-    """Read, Edit and shell commands can print the whole file, and an output over the limit, a missing ripgrep
-    or a pattern matching every line can't be vouched for: all keep the 'unscanned' refusal."""
+def test_fr_core_05_hook_oversize_file_is_checked_in_chunks(repo, capsys, tmp_path: Path,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read, Edit and shell commands can print the whole file, so an oversize file is checked whole, in chunks
+    (FR-CORE-05): a clean one passes, and one with a secret on its far side is refused naming the secret's type."""
+    token = _canary("github_token")
+    events = lambda: ({"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},  # noqa: E731
+                      {"tool_name": "Edit", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},
+                      _bash(tmp_path, "grep needle big.jsonl"), _bash(tmp_path, "cat big.jsonl"))
+    _oversize(monkeypatch, tmp_path, "needle ok=1")
+    for event in events():
+        assert _run(event, capsys) == (0, ""), event
+    _oversize(monkeypatch, tmp_path, f"GITHUB_TOKEN={token}")
+    for event in events():
+        code, out = _run(event, capsys)
+        assert code == 0 and _denied(out) and "api_token" in out and token not in out, event
+
+
+def test_fr_read_03_hook_grep_tool_oversize_output_stays_refused(repo, capsys, tmp_path: Path,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Grep tool's oversize path judges the lines it would print: an output over the limit, a missing ripgrep
+    or a pattern matching every line can't be vouched for, and keep the 'unscanned' refusal."""
     import shutil
 
     _oversize(monkeypatch, tmp_path, "needle ok=1")
-    for event in ({"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},
-                  {"tool_name": "Edit", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},
-                  _bash(tmp_path, "grep needle big.jsonl"), _bash(tmp_path, "cat big.jsonl"),
-                  _grep_event(tmp_path, "filler")):  # prints more than the limit
-        code, out = _run(event, capsys)
-        assert code == 0 and _denied(out) and "over the size limit" in out, event
+    code, out = _run(_grep_event(tmp_path, "filler"), capsys)  # prints more than the limit
+    assert code == 0 and _denied(out) and "too large to check" in out
     monkeypatch.setattr(shutil, "which", lambda _name: None)
     code, out = _run(_grep_event(tmp_path, "needle"), capsys)
-    assert code == 0 and _denied(out) and "over the size limit" in out
+    assert code == 0 and _denied(out) and "too large to check" in out
 
 
 def test_fr_read_03_hook_oversize_binary_passes_oversize_text_refused(repo, capsys, tmp_path: Path) -> None:
     """A big executable named in a command (`.venv/bin/tool --version | cat`) is binary: it passes like images and
-    PDFs, whatever its size. An oversize TEXT file is still refused."""
+    PDFs, whatever its size. An oversize TEXT file is checked in chunks (FR-CORE-05): refused when it holds a secret."""
     from Harpocrates.read import MAX_BYTES
 
     binary = tmp_path / "tool"
@@ -427,12 +447,13 @@ def test_fr_read_03_hook_oversize_binary_passes_oversize_text_refused(repo, caps
     with binary.open("ab") as f:
         f.truncate(MAX_BYTES + 1024 * 1024)  # ~11 MB, NUL-filled
     text = tmp_path / "big.txt"
-    text.write_bytes(b"filler line\n" * ((MAX_BYTES + 1024 * 1024) // 12))
+    text.write_bytes(b"filler line\n" * ((MAX_BYTES + 1024 * 1024) // 12)
+                     + f"GITHUB_TOKEN={_canary('github_token')}\n".encode())
     assert binary.stat().st_size > MAX_BYTES and text.stat().st_size > MAX_BYTES
     assert _run(_bash(tmp_path, "./tool --version | cat"), capsys) == (0, "")
     assert _run(_bash(tmp_path, "cat tool"), capsys) == (0, "")
     code, out = _run(_bash(tmp_path, "cat big.txt"), capsys)
-    assert code == 0 and _denied(out) and "over the size limit" in out
+    assert code == 0 and _denied(out) and "api_token" in out
 
 
 @pytest.mark.parametrize("ripgrep", [True, False])
@@ -891,14 +912,18 @@ def test_fr_read_03_hook_scans_utf16_files_instead_of_passing_them_as_binary(rep
     assert _run(_bash(tmp_path, "cat clean16.txt"), capsys) == (0, "")  # UTF-16 without a secret still passes
 
 
-def test_fr_read_03_hook_utf16_oversize_is_refused_not_passed(repo, capsys, tmp_path: Path,
+def test_fr_read_03_hook_utf16_oversize_is_checked_not_passed(repo, capsys, tmp_path: Path,
                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """An oversize UTF-16 file is decoded and checked in chunks like a small one (FR-CORE-05), not passed as binary."""
     import Harpocrates.read as read
 
     monkeypatch.setattr(read, "MAX_BYTES", 4096)
     (tmp_path / "big16.txt").write_bytes(_utf16_variants("filler line\n" * 600)["le-bom"])
+    assert _run(_bash(tmp_path, "cat big16.txt"), capsys) == (0, "")
+    token = _canary("github_token")
+    (tmp_path / "big16.txt").write_bytes(_utf16_variants("filler line\n" * 600 + f"GITHUB_TOKEN={token}\n")["le-bom"])
     code, out = _run(_bash(tmp_path, "cat big16.txt"), capsys)
-    assert code == 0 and _denied(out) and "over the size limit" in out
+    assert code == 0 and _denied(out) and "api_token" in out
 
 
 def test_fr_read_03_hook_binary_secret_store_name_is_refused(repo, capsys, tmp_path: Path) -> None:

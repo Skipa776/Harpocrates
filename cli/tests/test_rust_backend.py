@@ -188,11 +188,11 @@ def test_rust_backend_scan_file_filters_unverified_ml(monkeypatch, tmp_path: Pat
     monkeypatch.setattr("Harpocrates.core.rust_backend.subprocess.run", run)
 
     backend = RustScannerBackend(Path("/tmp/native-scanner"))
-    findings = backend.scan_file(path, max_bytes=100)
+    findings = backend.scan_file(path, memory_cap=100)
 
     assert findings == []
     request = json.loads(run.call_args.kwargs["input"])
-    assert request["files"][0]["max_bytes"] == 100
+    assert request["files"][0]["memory_cap"] == 100
 
 
 def test_rust_backend_scan_file_raises_on_native_file_error(
@@ -252,7 +252,7 @@ def test_scan_files_starts_one_versioned_native_process(monkeypatch, tmp_path: P
     monkeypatch.setattr("Harpocrates.core.rust_backend.subprocess.run", run)
 
     batch = RustScannerBackend(Path("/tmp/native-scanner")).scan_files(
-        [second, first], max_bytes=123
+        [second, first], memory_cap=123
     )
 
     assert run.call_count == 1
@@ -261,8 +261,8 @@ def test_scan_files_starts_one_versioned_native_process(monkeypatch, tmp_path: P
     assert request == {
         "protocol_version": PROTOCOL_VERSION,
         "files": [
-            {"path": str(first), "max_bytes": 123},
-            {"path": str(second), "max_bytes": 123},
+            {"path": str(first), "memory_cap": 123},
+            {"path": str(second), "memory_cap": 123},
         ],
     }
     assert [result.path for result in batch.files] == [first, second]
@@ -366,7 +366,7 @@ def test_scan_directory_sends_ignore_policy_to_rust(monkeypatch, tmp_path: Path)
     batch = RustScannerBackend(Path("/tmp/native-scanner")).scan_directory(
         tmp_path,
         recursive=False,
-        max_file_size=456,
+        memory_cap=456,
         ignore_patterns={"node_modules", "*.lock"},
     )
 
@@ -378,7 +378,7 @@ def test_scan_directory_sends_ignore_policy_to_rust(monkeypatch, tmp_path: Path)
         "protocol_version": PROTOCOL_VERSION,
         "root": str(tmp_path.resolve()),
         "recursive": False,
-        "max_file_size": 456,
+        "memory_cap": 456,
         "ignore_patterns": ["*.lock", "node_modules"],
     }
 
@@ -392,7 +392,7 @@ def test_scan_directory_timeout_is_configurable(monkeypatch, tmp_path: Path) -> 
     RustScannerBackend(Path("/tmp/native-scanner")).scan_directory(
         tmp_path,
         recursive=True,
-        max_file_size=1024,
+        memory_cap=1024,
         ignore_patterns=set(),
     )
 
@@ -425,7 +425,7 @@ def test_scan_directory_rejects_path_outside_root(monkeypatch, tmp_path: Path) -
             tmp_path,
             verifier=verifier,
             recursive=True,
-            max_file_size=100,
+            memory_cap=100,
             ignore_patterns=set(),
         )
 
@@ -477,7 +477,7 @@ def test_scan_directory_with_ml_bounds_verifier_batches(monkeypatch, tmp_path: P
         tmp_path,
         verifier=verifier,
         recursive=True,
-        max_file_size=100,
+        memory_cap=100,
         ignore_patterns=set(),
     )
 
@@ -536,7 +536,7 @@ def test_scan_directory_with_ml_batches_python_verification(monkeypatch, tmp_pat
         tmp_path,
         verifier=verifier,
         recursive=True,
-        max_file_size=1000,
+        memory_cap=1000,
         ignore_patterns=set(),
         ml_threshold=0.5,
     )

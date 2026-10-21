@@ -1,4 +1,6 @@
-use harpocrates_rust_scanner::{DirectoryScanRequest, PROTOCOL_VERSION, scan_directory};
+use harpocrates_rust_scanner::{
+    DirectoryScanRequest, MEMORY_CAP, PROTOCOL_VERSION, scan_directory,
+};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,7 +23,7 @@ fn request(root: PathBuf, recursive: bool, ignores: &[&str]) -> DirectoryScanReq
         protocol_version: PROTOCOL_VERSION,
         root,
         recursive,
-        max_file_size: 10 * 1024 * 1024,
+        memory_cap: MEMORY_CAP,
         ignore_patterns: ignores.iter().map(|value| (*value).to_owned()).collect(),
     }
 }

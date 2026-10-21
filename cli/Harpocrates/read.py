@@ -15,16 +15,17 @@ import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, Iterator, List, Optional
 
 from Harpocrates.audit import FindingsLog, placeholders
 from Harpocrates.core.classification import secret_type
 from Harpocrates.core.detector import _apply_ml_verification, _collect_text_findings
 from Harpocrates.core.result import EvidenceType, Finding
+from Harpocrates.utils.file_utils import MEMORY_CAP, PIECE_OVERLAP
 
 logger = logging.getLogger(__name__)
 
-MAX_BYTES = 10 * 1024 * 1024  # larger files are refused, not truncated: a cut can split a secret
+MAX_BYTES = 10 * 1024 * 1024  # read whole up to this size; a larger file is read in chunks (FR-CORE-05), never cut
 MAX_GREP_MATCHES = 200
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", "target"}
 # The regex tier only matches a key's header line; the block itself is what must not leak.
@@ -33,6 +34,18 @@ _PEM_BLOCK = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A
 # Entropy tokens on unquoted `NAME=value` lines include the name; redact only the value.
 _NAME_PREFIX = re.compile(r"^[A-Za-z_][\w.\-]*\s*[=:]\s*(?=\S)")
 _PLACEHOLDER = re.compile(r"<<HARPO:\w+:[0-9a-f]{4}>>")
+_KEY_MARK = re.compile(r"-----(BEGIN|END) [A-Z0-9 ]*PRIVATE KEY-----")
+CONTEXT_LINES = 3  # lines before a chunk that its detection still sees (the verifier reads 3 on each side)
+
+
+class TooLargeToScanError(Exception):
+    """
+    Description: A file the read tool cannot redact within its memory cap: one line, or one private-key block, longer
+        than a chunk (FR-CORE-05). Deliberately not a ValueError, which callers take to mean a binary file.
+    Parameters:
+        message: what was too long.
+    Output: An exception.
+    """
 
 
 @lru_cache(maxsize=1)
@@ -97,6 +110,56 @@ def _read_text(path: Path) -> str:
     if encoding is None and b"\x00" in data[:SNIFF_BYTES]:
         raise ValueError(f"binary file, not read: {path}")
     return data.decode(encoding or "utf-8", errors="replace")
+
+
+def file_chunks(path: Path, memory_cap: int = MEMORY_CAP) -> Iterator[tuple[int, str]]:
+    """
+    Description: Read a text file in chunks of whole lines, decoded as _read_text decodes a file, none of them ending
+        inside a private-key block, so that redacting each chunk on its own redacts the file (FR-CORE-05).
+    Parameters:
+        path: the file.
+        memory_cap: the most bytes a read and its redaction may hold; a chunk is about a sixteenth of it, at most
+            twice that inside a key block.
+    Output: (number of the chunk's first line, its text); joined, the chunks are the file's text. Raises ValueError for
+        a non-regular or binary file, TooLargeToScanError for a line or key block too long for a chunk, OSError.
+    """
+    if not path.is_file():  # also false for FIFOs, sockets and devices, which could block
+        raise ValueError(f"not a regular file: {path}")
+    with path.open("rb") as f:
+        head = f.read(SNIFF_BYTES)
+    encoding = text_encoding(head)
+    if encoding is None and b"\x00" in head:
+        raise ValueError(f"binary file, not read: {path}")
+    limit = max(memory_cap // 16, 2 * PIECE_OVERLAP)
+    chunk: List[str] = []
+    size, first, in_key = 0, 1, False
+    with path.open("r", encoding=encoding or "utf-8", errors="replace", newline="") as f:
+        pending = ""
+        while True:
+            block = f.read(PIECE_OVERLAP)
+            pending += block
+            *lines, pending = pending.split("\n")
+            if len(pending) > 2 * limit:
+                raise TooLargeToScanError(f"a line of {path} is too long to redact in {memory_cap} bytes")
+            lines = [line + "\n" for line in lines]
+            if not block and pending:  # the last line, without a newline
+                lines.append(pending)
+            for line in lines:
+                if len(line) > 2 * limit:
+                    raise TooLargeToScanError(f"a line of {path} is too long to redact in {memory_cap} bytes")
+                for mark in _KEY_MARK.finditer(line):
+                    in_key = mark.group(1) == "BEGIN"
+                chunk.append(line)
+                size += len(line)
+                if size >= limit and not in_key:
+                    yield first, "".join(chunk)
+                    first, chunk, size = first + len(chunk), [], 0
+                elif size > 2 * limit:
+                    raise TooLargeToScanError(f"a private-key block in {path} is too long to redact in {memory_cap} bytes")
+            if not block:
+                break
+    if chunk:
+        yield first, "".join(chunk)
 
 
 class Redactor:
@@ -183,10 +246,72 @@ class Redactor:
         Output: Redacted text with session-keyed placeholders; detection may initialize the model
             or log a verification failure, and initial detection errors propagate.
         """
-        for value, stype in self.secret_values(text).items():
-            ph = self.placeholder(value, stype)
-            text = text.replace(value, "\n".join([ph] * (value.count("\n") + 1)))
+        return self._replace(text, self.secret_values(text))
+
+    def _replace(self, text: str, values: dict) -> str:
+        """
+        Description: Replace known secret values in a text, longest first, keeping its line count.
+        Parameters:
+            text: the text.
+            values: {value: secret type}, longest first (secret_values' order).
+        Output: The text with each value replaced by its placeholder.
+        """
+        for value, stype in values.items():
+            if value in text:
+                ph = self.placeholder(value, stype)
+                text = text.replace(value, "\n".join([ph] * (value.count("\n") + 1)))
         return text
+
+    def _log_chunk(self, raw: str, redacted: str, path: Path) -> None:
+        """
+        Description: Log the placeholders a redaction made, leaving out ones already in the text (FR-LOG-01).
+        Parameters:
+            raw: the text before.
+            redacted: after.
+            path: the file.
+        Output: None.
+        """
+        if self._log is not None:
+            before = set(placeholders(raw))
+            self._log.redactions([p for p in placeholders(redacted) if p not in before], str(path))
+
+    def large_values(self, path: Path, tick: Optional[Callable[[], None]] = None) -> dict:
+        """
+        Description: Every secret value in a file read in chunks (FR-CORE-05), each chunk seen together with the
+            CONTEXT_LINES lines before it, so the second pass can replace a value anywhere in the file.
+        Parameters:
+            path: the file.
+            tick: called once per chunk (the hook passes its deadline check), or None.
+        Output: {value: secret type}, longest first. Raises what file_chunks raises.
+        """
+        values: dict = {}
+        tail = ""
+        for _, text in file_chunks(path):
+            if tick is not None:
+                tick()
+            for value, stype in self.secret_values(tail + text).items():
+                values.setdefault(value, stype)
+            tail = "".join(text.splitlines(keepends=True)[-CONTEXT_LINES:])
+        return {value: values[value] for value in sorted(values, key=len, reverse=True)}
+
+    def _large_lines(self, path: Path, values: dict, keep: Callable[[int, str], bool]) -> Iterator[tuple[int, str]]:
+        """
+        Description: The redacted lines of a large file whose raw chunk passes `keep`, with their numbers.
+        Parameters:
+            path: the file.
+            values: from large_values.
+            keep: (first line number, raw chunk text) -> whether to redact and yield that chunk.
+        Output: (line number, redacted line) in order; logs the chunk's new placeholders.
+        """
+        for first, text in file_chunks(path):
+            if not keep(first, text):
+                continue
+            redacted = self._replace(text, values)
+            self._log_chunk(text, redacted, path)
+            lines = redacted.split("\n")
+            if lines[-1] == "":
+                lines.pop()
+            yield from enumerate(lines, start=first)
 
     def _redact_file(self, text: str, path: Path) -> str:
         """
@@ -197,9 +322,7 @@ class Redactor:
         Output: The redacted text. Placeholders already in the file are not findings.
         """
         redacted = self.redact(text)
-        if self._log is not None:
-            before = set(placeholders(text))
-            self._log.redactions([p for p in placeholders(redacted) if p not in before], str(path))
+        self._log_chunk(text, redacted, path)
         return redacted
 
     def safe_read(self, path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
@@ -211,15 +334,59 @@ class Redactor:
             start_line: Optional 1-based inclusive first line, clamped to at least one.
             end_line: Optional 1-based inclusive last line, bounded by the file's line count.
         Output: Numbered lines like `cat -n`, with secrets redacted and a placeholder warning when
-            needed; reads the file. Raises ValueError for nonregular, oversized, or binary files;
-            filesystem and detection errors propagate, and verification failures may be logged.
+            needed; reads the file. A file over MAX_BYTES is redacted in chunks (FR-CORE-05) and
+            needs a line range; output over MAX_BYTES is refused. Raises ValueError for nonregular or
+            binary files, a large file without a range and too much output; TooLargeToScanError for a
+            line or key block too long to redact; filesystem and detection errors propagate, and
+            verification failures may be logged.
         """
-        lines = self._redact_file(_read_text(Path(path)), Path(path)).split("\n")
+        file = Path(path)
+        if file.is_file() and file.stat().st_size > MAX_BYTES:
+            return self._safe_read_large(file, start_line, end_line)
+        lines = self._redact_file(_read_text(file), file).split("\n")
         if lines and lines[-1] == "":
             lines.pop()
         start = max(start_line or 1, 1)
         end = min(end_line or len(lines), len(lines))
         body = "\n".join(f"{n:>6}\t{lines[n - 1]}" for n in range(start, end + 1))
+        return body + _footer(body)
+
+    def _safe_read_large(self, path: Path, start_line: Optional[int], end_line: Optional[int]) -> str:
+        """
+        Description: safe_read of a file over MAX_BYTES: find every secret value in a first pass, then redact only
+            the chunks that hold the lines asked for (FR-CORE-05).
+        Parameters:
+            path: the file.
+            start_line: the first line, or None for 1.
+            end_line: the last line, or None for the end.
+        Output: As safe_read. Raises ValueError without a range ("an agent cannot use a whole large file") or when
+            the lines asked for pass MAX_BYTES.
+        """
+        if start_line is None and end_line is None:
+            raise ValueError(f"file over {MAX_BYTES} bytes: pass start_line and end_line to read part of it")
+        start, end = max(start_line or 1, 1), end_line
+        values = self.large_values(path)
+        out: List[str] = []
+        size = 0
+
+        def in_range(first: int, text: str) -> bool:
+            """
+            Description: Whether a chunk holds any line asked for.
+            Parameters:
+                first: its first line number.
+                text: its text.
+            Output: True when its lines and the range overlap.
+            """
+            return first + text.count("\n") >= start and (end is None or first <= end)
+
+        for n, line in self._large_lines(path, values, in_range):
+            if n < start or (end is not None and n > end):
+                continue
+            out.append(f"{n:>6}\t{line}")
+            size += len(out[-1]) + 1
+            if size > MAX_BYTES:
+                raise ValueError(f"more than {MAX_BYTES} bytes of output: ask for fewer lines")
+        body = "\n".join(out)
         return body + _footer(body)
 
     def safe_grep(self, pattern: str, path: str = ".", max_matches: int = MAX_GREP_MATCHES) -> str:
@@ -231,8 +398,8 @@ class Redactor:
             path: File or directory to search recursively, defaulting to the current directory.
             max_matches: Match count at which to stop collecting results.
         Output: `path:line:text` for each matching redacted line, with a limit notice when reached
-            and a placeholder warning when needed; reads files and skips unreadable, binary, or
-            oversized files. Raises ValueError for invalid regexes; detection errors propagate and
+            and a placeholder warning when needed; reads files of any size (FR-CORE-05) and skips
+            unreadable, binary or special files, and files with a line too long to redact. Raises ValueError for invalid regexes; detection errors propagate and
             verification failures may be logged. Searching for "<<HARPO" itself finds nothing
             through the raw prefilter unless that pattern is already present in the source.
         """
@@ -243,23 +410,56 @@ class Redactor:
         root = Path(path)
         out: List[str] = []
         for file in _walk(root):
-            try:
-                text = _read_text(file)
-            except (ValueError, OSError):
-                continue
-            # raw prefilter skips files that can't match; the match that is reported still
-            # runs on redacted text. Cost: a search for "<<HARPO" itself finds nothing.
-            if not rx.search(text):
-                continue
+            if file.is_file() and file.stat().st_size > MAX_BYTES:
+                found = self._grep_large(rx, file)
+            else:
+                found = self._grep_small(rx, file)
             rel = file.relative_to(root) if file != root else file
-            for n, line in enumerate(self._redact_file(text, file).split("\n"), start=1):
-                if rx.search(line):
-                    out.append(f"{rel}:{n}:{line}")
-                    if len(out) >= max_matches:
-                        body = "\n".join(out)
-                        return body + f"\n[harpo: stopped at {max_matches} matches]" + _footer(body)
+            for n, line in found:
+                out.append(f"{rel}:{n}:{line}")
+                if len(out) >= max_matches:
+                    body = "\n".join(out)
+                    return body + f"\n[harpo: stopped at {max_matches} matches]" + _footer(body)
         body = "\n".join(out)
         return body + _footer(body)
+
+    def _grep_large(self, rx: "re.Pattern[str]", file: Path) -> Iterator[tuple[int, str]]:
+        """
+        Description: Matching redacted lines of a file over MAX_BYTES (FR-CORE-05): a raw regex pass first, so a file
+            with no match costs no detection; then every secret value; then the matching chunks, redacted.
+        Parameters:
+            rx: the compiled pattern.
+            file: the file.
+        Output: (line number, redacted line) for each match. A file that cannot be read or redacted is skipped, as
+            in _grep_small.
+        """
+        try:
+            if not any(rx.search(text) for _, text in file_chunks(file)):
+                return
+            values = self.large_values(file)
+            lines = list(self._large_lines(file, values, lambda _first, text: bool(rx.search(text))))
+        except (ValueError, OSError, TooLargeToScanError):
+            return
+        yield from ((n, line) for n, line in lines if rx.search(line))
+
+    def _grep_small(self, rx: "re.Pattern[str]", file: Path) -> Iterator[tuple[int, str]]:
+        """
+        Description: Matching redacted lines of a file up to MAX_BYTES, read whole.
+        Parameters:
+            rx: the compiled pattern.
+            file: the file.
+        Output: (line number, redacted line) for each match; nothing for an unreadable, binary or special file.
+        """
+        try:
+            text = _read_text(file)
+        except (ValueError, OSError):
+            return
+            # raw prefilter skips files that can't match; the match that is reported still
+            # runs on redacted text. Cost: a search for "<<HARPO" itself finds nothing.
+        if not rx.search(text):
+            return
+        yield from ((n, line) for n, line in enumerate(self._redact_file(text, file).split("\n"), start=1)
+                    if rx.search(line))
 
 
 def _walk(root: Path):

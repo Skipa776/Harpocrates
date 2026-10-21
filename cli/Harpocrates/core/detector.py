@@ -15,8 +15,9 @@ from __future__ import annotations
 import dataclasses
 import functools
 import re
+from collections.abc import Sequence as SequenceABC
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 from Harpocrates.core.classification import extract_var_name, infer_category
 from Harpocrates.core.result import EvidenceType, Finding, Severity
@@ -24,7 +25,7 @@ from Harpocrates.detectors.entropy_detector import looks_like_secret, shannon_en
 from Harpocrates.detectors.path_tokens import benign_path_token
 from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNATURES
 from Harpocrates.ml.context import HIGH_RISK_EXTENSIONS, LOW_NOISE_EXTENSIONS
-from Harpocrates.utils.file_utils import iter_text_lines
+from Harpocrates.utils.file_utils import MEMORY_CAP, PIECE_OVERLAP, iter_line_pieces
 
 if TYPE_CHECKING:
     from Harpocrates.core.classification import CategoryInference
@@ -328,34 +329,59 @@ def _severity_from_classification(
     return Severity.INFO
 
 
-def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
+def _scan_target(line: str) -> Tuple[str, str, bool]:
+    """
+    Description: What the line scan matches against: the stripped line, without a comment prefix.
+    Parameters:
+        line: the source line.
+    Output: (stripped line, scan target, whether the line is a comment). The target is a suffix of the stripped line,
+        so token offsets count from where it starts. A PEM header's five hyphens are not an SQL comment.
+    """
+    stripped = line.strip()
+    is_comment = not stripped.startswith("-----BEGIN ") and stripped.startswith(_COMMENT_PREFIXES)
+    return stripped, _COMMENT_STRIP_RE.sub("", stripped) if is_comment else stripped, is_comment
+
+
+def _line_base(line: str) -> Tuple[int, bool]:
+    """
+    Description: Where token offsets of a line count from, for the later pieces of a long line (FR-CORE-05).
+    Parameters:
+        line: the line, or its first piece.
+    Output: (characters dropped before the scan target, whether the line is a comment).
+    """
+    stripped, target, is_comment = _scan_target(line)
+    return len(line) - len(line.lstrip()) + len(stripped) - len(target), is_comment
+
+
+def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[bool] = None) -> List[Finding]:
     """
     Description: Scan one line through all three detection phases.
     Parameters:
         line: Source line to scan.
         lineno: One-based source line number.
         file: Optional source file path.
+        continued: For a later piece of a long line (FR-CORE-05), whether the line is a comment; the piece is then
+            scanned as it is, without stripping or comment detection, and offsets count from the piece's start.
     Output: Ordered regex findings or fallback entropy/structured candidates; empty list for blank
     or excluded lines. Findings retain raw tokens and snippets and may populate the file-extension
     cache.
     Returns findings ordered: CRITICAL regex → HIGH regex → entropy. Entropy phase is skipped if any
-    regex hit is found on the line.
+    regex hit is found on the line (on a split line: in the piece).
     """
     findings: List[Finding] = []
-    stripped = line.strip()
+    if continued is None:
+        stripped, scan_target, is_comment = _scan_target(line)
+    else:
+        stripped = scan_target = line
+        is_comment = continued
 
     # Determine whether this file belongs to a credential-bearing extension set
     # (.env, .pem, .key, etc.) where URL bodies are credentials, not noise.
     # Also handles dotted-variant names like .env.local and .env.production.
     file_ext = _file_ext(file) if file is not None else ""
 
-    if not stripped:
+    if not stripped.strip():
         return findings
-
-    # Detect comment lines and strip the prefix so the payload can be scanned.
-    # PEM headers start with five hyphens and must not be treated as SQL comments.
-    is_comment = not stripped.startswith("-----BEGIN ") and stripped.startswith(_COMMENT_PREFIXES)
-    scan_target = _COMMENT_STRIP_RE.sub("", stripped) if is_comment else stripped
 
     in_comment = True if is_comment else None
 
@@ -613,27 +639,43 @@ def _collect_text_findings(text: str) -> List[Finding]:
     return findings
 
 
-def _collect_file_findings(path_obj: Path, max_bytes: Optional[int]) -> List[Finding]:
+def _collect_file_findings(path_obj: Path, memory_cap: Optional[int] = None) -> List[Finding]:
     """
-    Description: Read and scan text lines while tracking block comments to retain all raw
-    candidates.
+    Description: Scan a whole file line by line, in bounded pieces, keeping every raw candidate (FR-CORE-05).
     Parameters:
         path_obj: Source file path.
-        max_bytes: Optional maximum scan size passed to the line reader.
-    Output: List of findings including evidence=ML; reads the file, skips binary content, ignores
-    decoding errors, and propagates OSError.
-    Raw scan of a file — returns all findings including evidence=ML.
+        memory_cap: The most bytes the scan may hold (default MEMORY_CAP); it bounds the piece size, never how much
+            of the file is scanned.
+    Output: Findings including evidence=ML, with line numbers and token offsets of the file. A finding in the overlap
+    of two pieces of a long line is kept once. Skips binary content, ignores decoding errors, propagates OSError.
     """
     file_name = str(path_obj)
     findings: List[Finding] = []
-    in_block_comment = False
-    for lineno, line in iter_text_lines(path_obj, max_bytes=max_bytes):
-        stripped = line.strip()
-        opens = stripped.count("/*")
-        closes = stripped.count("*/")
-        was_in_block = in_block_comment and not stripped.startswith("/*")
-        line_findings = _scan_line(line, lineno, file=file_name)
-        findings.extend(_apply_block_comment_flag(line_findings, was_in_block))
+    in_block_comment = was_in_block = is_comment = False
+    base = 0
+    earlier: set = set()  # findings of the current line's earlier pieces
+    for lineno, offset, piece in iter_line_pieces(path_obj, memory_cap or MEMORY_CAP):
+        stripped = piece.strip()
+        if offset == 0:
+            earlier = set()
+            was_in_block = in_block_comment and not stripped.startswith("/*")
+            base, is_comment = _line_base(piece)
+        fresh = piece[PIECE_OVERLAP:] if offset else stripped  # comment marks are counted once per character
+        found: set = set()
+        line_findings = _scan_line(piece, lineno, file=file_name, continued=is_comment if offset else None)
+        for finding in _apply_block_comment_flag(line_findings, was_in_block):
+            if offset and finding.token_start is not None:  # offsets count from the line's scan target
+                shift = offset - base
+                finding = dataclasses.replace(finding, token_start=finding.token_start + shift,
+                                              token_end=(finding.token_end or finding.token_start) + shift)
+            # A regex finding has file offsets; a candidate's count from URL-stripped text, so it is keyed by token
+            # alone, as a whole-line scan keeps one candidate per token and line.
+            key = (finding.type, finding.token, finding.token_start if finding.evidence == EvidenceType.REGEX else None)
+            found.add(key)
+            if key not in earlier:
+                findings.append(finding)
+        earlier |= found
+        opens, closes = fresh.count("/*"), fresh.count("*/")
         in_block_comment = (in_block_comment and closes == 0) or (opens > closes)
     return findings
 
@@ -660,14 +702,14 @@ def detect_text(
 def detect_file(
     path: str | Path,
     threshold: float = 4.0,
-    max_bytes: Optional[int] = None,
+    memory_cap: Optional[int] = None,
 ) -> List[Finding]:
     """
-    Description: Detect secrets in a file on disk (regex + entropy, no ML).
+    Description: Detect secrets in a whole file on disk (regex + entropy, no ML), in bounded pieces (FR-CORE-05).
     Parameters:
         path: Path to the file to scan
         threshold: Entropy threshold (reserved)
-        max_bytes: Maximum bytes to read
+        memory_cap: The most bytes the scan may hold (default MEMORY_CAP)
     Output: List excluding unverified evidence=ML candidates, or empty for missing/binary files;
     reads the file and propagates other OSError failures. The reserved threshold is unused.
     Skips binary files, handles encoding errors gracefully, and returns an empty list for
@@ -678,7 +720,7 @@ def detect_file(
     path_obj = Path(path)
     if not path_obj.exists():
         return []
-    return [f for f in _collect_file_findings(path_obj, max_bytes) if f.evidence != EvidenceType.ML]
+    return [f for f in _collect_file_findings(path_obj, memory_cap) if f.evidence != EvidenceType.ML]
 
 
 # ---------------------------------------------------------------------------
@@ -808,6 +850,139 @@ def _prepare_ml_context_from_lines(finding: Finding, lines: Sequence[str]) -> "C
     return context
 
 
+_CONTEXT_LINES = 3  # neighbours on each side that extract_context_from_lines reads
+
+
+class _KeptLines(SequenceABC):
+    """
+    Description: The few lines of a file the verifier reads around one candidate, standing in for the whole list of
+        lines (FR-CORE-05); every other line reads as "".
+    Parameters:
+        total: the file's line count.
+        kept: {line number from 1: text}.
+    Output: A read-only sequence of `total` strings.
+    """
+
+    def __init__(self, total: int, kept: Dict[int, str]) -> None:
+        """
+        Description: Keep the line count and the kept lines.
+        Parameters:
+            total: the line count.
+            kept: the kept lines.
+        Output: None.
+        """
+        self.total, self.kept = total, kept
+
+    def __len__(self) -> int:
+        """
+        Description: The file's line count.
+        Parameters: None
+        Output: total.
+        """
+        return self.total
+
+    def __getitem__(self, index):  # type: ignore[override]
+        """
+        Description: One line by 0-based index, or a list for a slice.
+        Parameters:
+            index: an int or a slice.
+        Output: The kept text, or "" for a line not kept. Raises IndexError past the end.
+        """
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(self.total))]
+        if index < 0:
+            index += self.total
+        if not 0 <= index < self.total:
+            raise IndexError(index)
+        return self.kept.get(index + 1, "")
+
+
+def _streamed_contexts(path_obj: Path, candidates: Sequence[Finding],
+                       memory_cap: Optional[int]) -> List[Tuple[Finding, "CodeContext"]]:
+    """
+    Description: Build each candidate's verifier context from one more streaming pass over the file, keeping only what
+        the context reads (FR-CORE-05): the start of each line around the candidate, and on a long line the window
+        around its token (FR-CORE-07).
+    Parameters:
+        path_obj: the file.
+        candidates: findings with line numbers; at most _ML_VERIFICATION_BATCH_SIZE, so the pass stays bounded.
+        memory_cap: the scan's memory cap, or None for MEMORY_CAP.
+    Output: (finding, context) pairs in order, with the contexts _prepare_ml_context_from_lines builds from the
+        whole list of lines. Raises OSError.
+    """
+    from Harpocrates.ml.context import is_comment_line
+
+    width = 2 * _CONTEXT_WINDOW
+    wanted = {n for f in candidates for n in range((f.line or 1) - _CONTEXT_LINES, (f.line or 1) + _CONTEXT_LINES + 1)}
+    starts: Dict[int, str] = {}
+    long_lines: set = set()
+    windows: Dict[int, list] = {}  # candidate index -> [start of token, start of window, end of window, text]
+    total = 0
+    for lineno, offset, piece in iter_line_pieces(path_obj, memory_cap or MEMORY_CAP):
+        total = lineno
+        if lineno not in wanted:
+            continue
+        if offset == 0:
+            starts[lineno] = piece[:width]
+        if offset or len(piece) > width:
+            long_lines.add(lineno)
+        for i, finding in enumerate(candidates):
+            if (finding.line or 1) != lineno or not finding.token:
+                continue
+            if i not in windows:
+                at = finding.token_start
+                if at is None:
+                    found = piece.find(finding.token)
+                    if found < 0:
+                        continue
+                    at = offset + found
+                lo = max(at - _CONTEXT_WINDOW, offset)
+                windows[i] = [at, lo, at + len(finding.token) + _CONTEXT_WINDOW, ""]
+            at, lo, hi, text = windows[i]
+            filled = lo + len(text)
+            if filled < hi:
+                windows[i][3] = text + piece[max(filled, offset) - offset:min(hi, offset + len(piece)) - offset]
+    pairs: List[Tuple[Finding, "CodeContext"]] = []
+    for i, finding in enumerate(candidates):
+        line = finding.line or 1
+        kept = {n: starts[n] for n in range(line - _CONTEXT_LINES, line + _CONTEXT_LINES + 1) if n in starts}
+        local = finding
+        if line in long_lines:
+            if i in windows:
+                at, lo, _hi, text = windows[i]
+                kept[line] = text
+                local = dataclasses.replace(finding, token_start=at - lo, token_end=at - lo + len(finding.token or ""))
+            else:
+                kept[line] = starts.get(line, "")[:_CONTEXT_WINDOW]
+        context = _prepare_ml_context_from_lines(local, _KeptLines(total, kept))
+        if line in long_lines:
+            context = dataclasses.replace(context, in_comment=is_comment_line(starts.get(line, "")))
+        pairs.append((finding, context))
+    return pairs
+
+
+def verify_file_candidates(path_obj: Path, candidates: List[Finding], verifier: "Verifier",
+                           ml_threshold: float = 0.5, memory_cap: Optional[int] = None) -> List[Finding]:
+    """
+    Description: Verify a file's non-regex candidates with the model, reading the file again in bounded pieces for
+        their contexts (FR-CORE-05); both engines use it.
+    Parameters:
+        path_obj: the file.
+        candidates: the candidates.
+        verifier: the model.
+        ml_threshold: the least confidence kept.
+        memory_cap: the scan's memory cap, or None for MEMORY_CAP.
+    Output: The candidates the model keeps. Raises OSError when the file cannot be read again, MLVerificationError
+        when the verifier fails.
+    """
+    verified: List[Finding] = []
+    for start in range(0, len(candidates), _ML_VERIFICATION_BATCH_SIZE):
+        batch = candidates[start : start + _ML_VERIFICATION_BATCH_SIZE]
+        verified.extend(_apply_ml_verification_with_contexts(_streamed_contexts(path_obj, batch, memory_cap),
+                                                             verifier=verifier, ml_threshold=ml_threshold))
+    return verified
+
+
 def _apply_ml_verification_with_contexts(
     findings_with_context: List[Tuple[Finding, "CodeContext"]],
     verifier: "Verifier",
@@ -927,16 +1102,17 @@ def detect_file_with_ml(
     path: str | Path,
     verifier: "Verifier",
     threshold: float = 4.0,
-    max_bytes: Optional[int] = None,
+    memory_cap: Optional[int] = None,
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
     """
-    Description: Detect secrets in a file with ML verification for entropy candidates.
+    Description: Detect secrets in a whole file with ML verification for entropy candidates, in bounded pieces
+        (FR-CORE-05).
     Parameters:
         path: Path to the file
         verifier: ML verifier instance
         threshold: Entropy threshold (reserved)
-        max_bytes: Maximum bytes to read
+        memory_cap: The most bytes the scan may hold (default MEMORY_CAP)
         ml_threshold: Minimum ML confidence to keep an entropy finding
     Output: Regex findings followed by verified non-regex findings; reads the file and may call the
     verifier. Missing/binary files return no findings; initial read errors propagate. Context reread
@@ -952,33 +1128,15 @@ def detect_file_with_ml(
     if not path_obj.exists():
         return []
 
-    findings = _collect_file_findings(path_obj, max_bytes)
-    if not findings:
-        return findings
-
+    findings = _collect_file_findings(path_obj, memory_cap)
     regex_findings = [f for f in findings if f.evidence == EvidenceType.REGEX]
     entropy_findings = [f for f in findings if f.evidence != EvidenceType.REGEX]
-
     if not entropy_findings:
         return regex_findings
-
     try:
-        if max_bytes:
-            with open(path_obj, "r", encoding="utf-8", errors="ignore") as f:
-                full_content = f.read(max_bytes)
-        else:
-            full_content = path_obj.read_text(encoding="utf-8", errors="ignore")
-    except (OSError, IOError):
+        return regex_findings + verify_file_candidates(path_obj, entropy_findings, verifier, ml_threshold, memory_cap)
+    except OSError:
         return [f for f in findings if f.evidence != EvidenceType.ML]
-
-    verified_entropy = _apply_ml_verification(
-        findings=entropy_findings,
-        full_content=full_content,
-        verifier=verifier,
-        ml_threshold=ml_threshold,
-    )
-
-    return regex_findings + verified_entropy
 
 
 __all__ = [

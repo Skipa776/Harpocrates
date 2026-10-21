@@ -34,8 +34,8 @@ logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 
 mcp = FastMCP("harpo")
 
-# Hard ceiling on bytes read per scan_file call. Prevents resource exhaustion
-# from large files or slow streams when the caller omits max_bytes.
+# The largest file one scan_file call takes, so a tool call stays short. A larger file is refused, never scanned in
+# part (a cut can hide a secret); `harpo scan` scans any size.
 _MAX_SCAN_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
 
@@ -149,23 +149,26 @@ def scan_file(
     include_contributions: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Description: Scan a file on disk for secrets using regex + entropy detection, reading
-        at most 10 MB regardless of max_bytes to bound resource use.
+    Description: Scan a whole file on disk for secrets using regex + entropy detection; files
+        over 10 MB (or over max_bytes) are refused, so a tool call stays short.
     Parameters:
         path: Absolute path to the file to scan.
-        max_bytes: Optional cap on bytes read, capped at 10 MB regardless of this value.
+        max_bytes: Optional lower size limit; 10 MB is the most regardless of this value.
         include_contributions: As in scan_text, add TreeSHAP per-feature explanations;
             requires xgboost: pip install 'harpocrates[explain]'.
     Output: List of finding dictionaries with the same fields as scan_text; secret values are
         never returned. Returns an empty list if the path does not exist or is binary. Reads
         with the filesystem scope of the user who launched the server and follows symlinks.
-        Raises ValueError for special files (FIFOs, sockets, devices); detection, import, and
+        Raises ValueError for special files (FIFOs, sockets, devices) and for files over the
+        limit (never a partial scan: run `harpo scan` on those); detection, import, and
         explanation errors propagate. Optional explanations load explanation support.
     """
     resolved = Path(path)
     _check_path(resolved)
-    cap = min(max_bytes, _MAX_SCAN_BYTES) if max_bytes is not None else _MAX_SCAN_BYTES
-    findings: List[Finding] = detect_file(resolved, max_bytes=cap)
+    limit = min(max_bytes, _MAX_SCAN_BYTES) if max_bytes is not None else _MAX_SCAN_BYTES
+    if resolved.is_file() and resolved.stat().st_size > limit:
+        raise ValueError(f"file over {limit} bytes, not scanned: run `harpo scan {path}`, which takes any size")
+    findings: List[Finding] = detect_file(resolved)
     if not include_contributions:
         return [_safe_finding(f) for f in findings]
     return _with_explanations(findings, None)
@@ -183,9 +186,10 @@ def safe_read(path: str, start_line: Optional[int] = None, end_line: Optional[in
     Output: Numbered lines like `cat -n`; the same secret always gets the same placeholder in
         this session. Placeholders are not the real values: never write them into files;
         reference the variable or config key instead. Reads and redacts the whole file before
-        selecting the range. Raises ValueError for binary files, special files, and files over
-        10 MB; filesystem and detection errors propagate. May load the verifier and log its
-        failure, failing closed by redacting all candidates if verification fails.
+        selecting the range. A file over 10 MB needs start_line and end_line, and at most 10 MB
+        of lines is returned. Raises ValueError for binary files, special files, and those cases;
+        filesystem and detection errors propagate. May load the verifier and log its failure,
+        failing closed by redacting all candidates if verification fails.
     """
     return _redactor.safe_read(path, start_line, end_line)
 
@@ -202,7 +206,7 @@ def safe_grep(pattern: str, path: str = ".", max_matches: int = 200) -> str:
             virtualenvs; defaults to the current directory.
         max_matches: Match count at which to stop collecting results, defaulting to 200.
     Output: Redacted matches with a limit notice when reached and a placeholder warning when
-        needed; reads files and skips unreadable, binary, or oversized files. Raises ValueError
+        needed; reads files of any size and skips unreadable or binary files. Raises ValueError
         for invalid regexes; detection errors propagate. May load the verifier and log its
         failure, failing closed by redacting all candidates if verification fails.
     """

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, List, Literal, Optional, Set
 
 from Harpocrates.core.detector import detect_file, detect_file_with_ml, detect_text
 from Harpocrates.core.result import Finding, ScanResult
-from Harpocrates.utils.file_utils import iter_text_lines
+from Harpocrates.utils.file_utils import MEMORY_CAP, count_lines
 
 if TYPE_CHECKING:
     from Harpocrates.core.rust_backend import RustScannerBackend
@@ -130,7 +130,7 @@ def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
 def scan_directory(
     directory: str | Path,
     recursive: bool = True,
-    max_file_size: int = 10 * 1024 * 1024,
+    memory_cap: int = MEMORY_CAP,
     ignore_patterns: Optional[Set[str]] = None,
     verifier: Optional["Verifier"] = None,
     ml_threshold: float = 0.5,
@@ -141,7 +141,7 @@ def scan_directory(
     Parameters:
         directory: Path to directory to scan
         recursive: If True, scan subdirectories
-        max_file_size: Maximum file size to scan (in bytes)
+        memory_cap: The most bytes one file's scan may hold (FR-CORE-05); every file is scanned whole
         ignore_patterns: Additional patterns to ignore (merged with defaults)
         verifier: Optional ML verifier for false positive filtering
         ml_threshold: ML confidence threshold when verifier is enabled
@@ -188,7 +188,7 @@ def scan_directory(
                 batch = native_backend.scan_directory(
                     dir_path,
                     recursive=recursive,
-                    max_file_size=max_file_size,
+                    memory_cap=memory_cap,
                     ignore_patterns=ignore,
                 )
             else:
@@ -196,7 +196,7 @@ def scan_directory(
                     dir_path,
                     verifier=verifier,
                     recursive=recursive,
-                    max_file_size=max_file_size,
+                    memory_cap=memory_cap,
                     ignore_patterns=ignore,
                     ml_threshold=ml_threshold,
                 )
@@ -235,14 +235,6 @@ def scan_directory(
         if not _should_scan_file(file_path, ignore):
             continue
 
-        try:
-            if file_path.stat().st_size > max_file_size:
-                errors.append(f"Skipped large file: {file_path}")
-                continue
-        except (OSError, PermissionError) as e:
-            errors.append(f"Cannot access {file_path}: {e}")
-            continue
-
         eligible_files.append(file_path)
 
     for file_path in eligible_files:
@@ -253,17 +245,15 @@ def scan_directory(
                 findings = detect_file_with_ml(
                     file_path,
                     verifier=verifier,
-                    max_bytes=max_file_size,
+                    memory_cap=memory_cap,
                     ml_threshold=ml_threshold,
                 )
             else:
-                findings = detect_file(file_path, max_bytes=max_file_size)
+                findings = detect_file(file_path, memory_cap=memory_cap)
 
             all_findings.extend(findings)
             scanned_files += 1
-            total_lines += sum(
-                1 for _ in iter_text_lines(file_path, max_bytes=max_file_size)
-            )
+            total_lines += count_lines(file_path, memory_cap)
         except Exception as e:
             errors.append(f"Error scanning {file_path}: {e}")
 
@@ -280,7 +270,7 @@ def scan_directory(
 
 def scan_file(
     filepath: str | Path,
-    max_file_size: int = 10 * 1024 * 1024,
+    memory_cap: int = MEMORY_CAP,
     verifier: Optional["Verifier"] = None,
     ml_threshold: float = 0.5,
     engine: ScanEngine = "auto",
@@ -289,14 +279,13 @@ def scan_file(
     Description: Scan a single file for secrets.
     Parameters:
         filepath: Path to file
-        max_file_size: Maximum file size to scan
+        memory_cap: The most bytes the scan may hold (FR-CORE-05); the whole file is scanned
         verifier: Optional ML verifier for false positive filtering
         ml_threshold: ML confidence threshold when verifier is enabled
         engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it, and ``python`` uses the
         original detector
     Output: ScanResult with findings, counts, timing, and captured errors; reads the file and may
-    initialize a native backend or ML verifier. A file over max_file_size is not scanned: the result
-    holds the error "Skipped large file: PATH", as in a folder scan (the CLI then exits 2). Auto mode records native failures and falls back to
+    initialize a native backend or ML verifier. Auto mode records native failures and falls back to
     Python; line-count read failures produce zero lines.
     ScanResult containing findings from this file
     Example: >>> result = scan_file("config.env") >>> if result.found_secrets: ... print(f"⚠️ Found
@@ -307,12 +296,6 @@ def scan_file(
 
     if not file_path.exists():
         return ScanResult(findings=[], errors=[f"File not found: {filepath}"])
-    try:
-        too_large = file_path.stat().st_size > max_file_size
-    except OSError as exc:
-        return ScanResult(findings=[], errors=[f"Cannot access {file_path}: {exc}"])
-    if too_large:  # as in a folder scan: an error, never a silent scan of the first max_file_size bytes
-        return ScanResult(findings=[], errors=[f"Skipped large file: {file_path}"])
 
     try:
         native_backend = _resolve_native_backend(engine)
@@ -332,11 +315,11 @@ def scan_file(
                 findings = native_backend.scan_file_with_ml(
                     file_path,
                     verifier=verifier,
-                    max_bytes=max_file_size,
+                    memory_cap=memory_cap,
                     ml_threshold=ml_threshold,
                 )
             else:
-                findings = native_backend.scan_file(file_path, max_bytes=max_file_size)
+                findings = native_backend.scan_file(file_path, memory_cap=memory_cap)
         except Exception as exc:
             if engine == "rust":
                 return ScanResult(
@@ -355,11 +338,11 @@ def scan_file(
                 findings = detect_file_with_ml(
                     file_path,
                     verifier=verifier,
-                    max_bytes=max_file_size,
+                    memory_cap=memory_cap,
                     ml_threshold=ml_threshold,
                 )
             else:
-                findings = detect_file(file_path, max_bytes=max_file_size)
+                findings = detect_file(file_path, memory_cap=memory_cap)
         except Exception as exc:
             return ScanResult(
                 findings=[],
@@ -370,9 +353,8 @@ def scan_file(
             )
 
     try:
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            total_lines = sum(1 for _ in f)
-    except Exception:
+        total_lines = count_lines(file_path, memory_cap)
+    except OSError:
         total_lines = 0
 
     duration = (time.time() - start_time) * 1000

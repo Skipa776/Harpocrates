@@ -9,12 +9,17 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::fs::{self, File};
-use std::io::{Read, Take};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::thread;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+/// 2: `memory_cap` replaced the read limits `max_bytes` and `max_file_size` (FR-CORE-05).
+pub const PROTOCOL_VERSION: u32 = 2;
+/// The most bytes one file's scan holds (FR-CORE-05); every file is scanned whole, in pieces.
+pub const MEMORY_CAP: usize = 64 * 1024 * 1024;
+/// Bytes that two pieces of a long line share: longer than any token the regex and entropy tiers match.
+pub const PIECE_OVERLAP: usize = 64 * 1024;
 
 const HIGH_RISK_EXTENSIONS: &[&str] = &[".env", ".pem", ".key", ".secret", ".credentials"];
 const LOW_NOISE_EXTENSIONS: &[&str] = &[".html", ".htm", ".css", ".scss", ".sass", ".svg", ".xml"];
@@ -86,7 +91,7 @@ pub struct ScanOptions {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileScanRequest {
     pub path: PathBuf,
-    pub max_bytes: Option<usize>,
+    pub memory_cap: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,7 +121,7 @@ pub struct DirectoryScanRequest {
     pub protocol_version: u32,
     pub root: PathBuf,
     pub recursive: bool,
-    pub max_file_size: u64,
+    pub memory_cap: usize,
     pub ignore_patterns: Vec<String>,
 }
 
@@ -274,9 +279,9 @@ pub fn scan_text(text: &str, options: &ScanOptions) -> Result<Vec<RawFinding>, S
 
 pub fn scan_file(
     path: impl AsRef<Path>,
-    max_bytes: Option<usize>,
+    memory_cap: Option<usize>,
 ) -> Result<Vec<RawFinding>, ScanError> {
-    scan_file_response(path.as_ref(), max_bytes).map(|response| response.findings)
+    scan_file_response(path.as_ref(), memory_cap).map(|response| response.findings)
 }
 
 pub fn scan_batch(request: BatchScanRequest) -> Result<BatchScanResponse, ScanError> {
@@ -291,7 +296,7 @@ pub fn scan_batch(request: BatchScanRequest) -> Result<BatchScanResponse, ScanEr
         .files
         .into_iter()
         .map(
-            |file| match scan_file_response(&file.path, file.max_bytes) {
+            |file| match scan_file_response(&file.path, file.memory_cap) {
                 Ok(response) => response,
                 Err(error) => FileScanResponse {
                     path: file.path,
@@ -339,7 +344,7 @@ pub fn scan_directory(request: DirectoryScanRequest) -> Result<BatchScanResponse
     )?;
     paths.sort();
 
-    let files = scan_directory_paths(&paths, request.max_file_size)?;
+    let files = scan_directory_paths(&paths, request.memory_cap)?;
 
     Ok(BatchScanResponse {
         protocol_version: PROTOCOL_VERSION,
@@ -349,14 +354,14 @@ pub fn scan_directory(request: DirectoryScanRequest) -> Result<BatchScanResponse
 
 fn scan_directory_paths(
     paths: &[PathBuf],
-    max_file_size: u64,
+    memory_cap: usize,
 ) -> Result<Vec<FileScanResponse>, ScanError> {
     let workers = configured_worker_count(paths.len());
     if workers <= 1 {
         return Ok(paths
             .iter()
             .cloned()
-            .map(|path| scan_path_with_limit(path, max_file_size))
+            .map(|path| scan_path(path, memory_cap))
             .collect());
     }
 
@@ -369,7 +374,7 @@ fn scan_directory_paths(
                     chunk
                         .iter()
                         .cloned()
-                        .map(|path| scan_path_with_limit(path, max_file_size))
+                        .map(|path| scan_path(path, memory_cap))
                         .collect::<Vec<_>>()
                 })
             })
@@ -401,33 +406,9 @@ fn configured_worker_count(task_count: usize) -> usize {
     configured.min(available).min(8).min(task_count)
 }
 
-fn scan_path_with_limit(path: PathBuf, max_file_size: u64) -> FileScanResponse {
-    let metadata = fs::metadata(&path)
-        .map_err(|error| ScanError::new(format!("failed to inspect {}: {error}", path.display())));
-    match metadata {
-        Ok(metadata) if metadata.len() > max_file_size => FileScanResponse {
-            path,
-            findings: Vec::new(),
-            scanned: false,
-            line_count: 0,
-            bytes_scanned: 0,
-            error: Some(format!(
-                "skipped large file ({} bytes exceeds {} byte limit)",
-                metadata.len(),
-                max_file_size
-            )),
-        },
-        Ok(_) => match scan_file_response(&path, Some(max_file_size as usize)) {
-            Ok(response) => response,
-            Err(error) => FileScanResponse {
-                path,
-                findings: Vec::new(),
-                scanned: false,
-                line_count: 0,
-                bytes_scanned: 0,
-                error: Some(error.to_string()),
-            },
-        },
+fn scan_path(path: PathBuf, memory_cap: usize) -> FileScanResponse {
+    match scan_file_response(&path, Some(memory_cap)) {
+        Ok(response) => response,
         Err(error) => FileScanResponse {
             path,
             findings: Vec::new(),
@@ -538,64 +519,242 @@ fn glob_regex(pattern: &str) -> String {
 
 fn scan_file_response(
     path: &Path,
-    max_bytes: Option<usize>,
+    memory_cap: Option<usize>,
 ) -> Result<FileScanResponse, ScanError> {
-    let bytes = read_bounded(path, max_bytes)?;
-    let sample_len = bytes.len().min(1024);
-    if looks_binary(&bytes[..sample_len]) {
+    let open = || {
+        File::open(path)
+            .map_err(|error| ScanError::new(format!("failed to read {}: {error}", path.display())))
+    };
+    let read_error =
+        |error: io::Error| ScanError::new(format!("failed to read {}: {error}", path.display()));
+    let mut sample = Vec::with_capacity(1024);
+    open()?
+        .take(1024)
+        .read_to_end(&mut sample)
+        .map_err(read_error)?;
+    if looks_binary(&sample) {
         return Ok(FileScanResponse {
             path: path.to_path_buf(),
             findings: Vec::new(),
             scanned: true,
             line_count: 0,
-            bytes_scanned: bytes.len(),
+            bytes_scanned: sample.len(),
             error: None,
         });
     }
-
-    let content = String::from_utf8_lossy(&bytes);
-    let findings = scan_text(
-        &content,
-        &ScanOptions {
-            file: Some(path.to_string_lossy().into_owned()),
-        },
-    )?;
+    let file = path.to_string_lossy().into_owned();
+    let reader = BufReader::with_capacity(PIECE_OVERLAP, open()?);
+    let (findings, line_count, bytes_scanned) =
+        scan_reader(reader, memory_cap.unwrap_or(MEMORY_CAP), Some(&file)).map_err(read_error)?;
     Ok(FileScanResponse {
         path: path.to_path_buf(),
         findings,
         scanned: true,
-        line_count: content.lines().count(),
-        bytes_scanned: bytes.len(),
+        line_count,
+        bytes_scanned,
         error: None,
     })
 }
 
-fn read_bounded(path: &Path, max_bytes: Option<usize>) -> Result<Vec<u8>, ScanError> {
-    let file = File::open(path)
-        .map_err(|error| ScanError::new(format!("failed to read {}: {error}", path.display())))?;
-    let mut bytes = Vec::new();
-    match max_bytes {
-        Some(limit) => {
-            let mut reader: Take<File> = file.take(limit.saturating_add(1) as u64);
-            reader.read_to_end(&mut bytes).map_err(|error| {
-                ScanError::new(format!("failed to read {}: {error}", path.display()))
-            })?;
-            if bytes.len() > limit {
-                bytes.truncate(limit);
-                match bytes.iter().rposition(|byte| *byte == b'\n') {
-                    Some(last_newline) => bytes.truncate(last_newline + 1),
-                    None => bytes.clear(),
-                }
-            }
-        }
-        None => {
-            let mut reader = file;
-            reader.read_to_end(&mut bytes).map_err(|error| {
-                ScanError::new(format!("failed to read {}: {error}", path.display()))
-            })?;
+/// One piece of a line: its 1-based line number, the character offset where it starts in that line, and its text.
+struct Piece {
+    line: usize,
+    offset: usize,
+    text: String,
+}
+
+/// A file's lines read lazily in pieces of at most `limit` bytes (FR-CORE-05). A longer line is cut on a character
+/// boundary into pieces that share PIECE_OVERLAP bytes, so a scan of any size holds one piece at a time. Lines end at
+/// `\n`, and a `\r` before it is dropped, as `str::lines` does; invalid UTF-8 becomes U+FFFD.
+struct LinePieces<R: BufRead> {
+    reader: R,
+    limit: usize,
+    line: usize,
+    chars: usize,
+    carry: String,
+    spill: Vec<u8>,
+    bytes: usize,
+    done: bool,
+}
+
+impl<R: BufRead> LinePieces<R> {
+    fn new(reader: R, limit: usize) -> Self {
+        LinePieces {
+            reader,
+            limit,
+            line: 1,
+            chars: 0,
+            carry: String::new(),
+            spill: Vec::new(),
+            bytes: 0,
+            done: false,
         }
     }
-    Ok(bytes)
+
+    fn next_piece(&mut self) -> io::Result<Option<Piece>> {
+        if self.done {
+            return Ok(None);
+        }
+        let budget = self.limit.saturating_sub(self.carry.len()).max(4);
+        let mut raw = std::mem::take(&mut self.spill);
+        let (mut ended, mut eof) = (false, false);
+        while raw.len() < budget {
+            let available = self.reader.fill_buf()?;
+            if available.is_empty() {
+                eof = true;
+                break;
+            }
+            let window = &available[..available.len().min(budget - raw.len())];
+            let (take, newline) = match window.iter().position(|byte| *byte == b'\n') {
+                Some(index) => (index + 1, true),
+                None => (window.len(), false),
+            };
+            raw.extend_from_slice(&window[..take]);
+            self.reader.consume(take);
+            self.bytes += take;
+            if newline {
+                ended = true;
+                break;
+            }
+        }
+        if eof && raw.is_empty() {
+            self.done = true;
+            return Ok(None);
+        }
+        if ended {
+            raw.pop();
+            if raw.last() == Some(&b'\r') {
+                raw.pop();
+            }
+        } else if !eof {
+            let cut = utf8_cut(&raw);
+            self.spill = raw.split_off(cut);
+        }
+        let fresh = String::from_utf8_lossy(&raw).into_owned();
+        let carried = self.carry.chars().count();
+        let mut text = std::mem::take(&mut self.carry);
+        text.push_str(&fresh);
+        let piece = Piece {
+            line: self.line,
+            offset: self.chars - carried,
+            text,
+        };
+        if ended || eof {
+            self.line += 1;
+            self.chars = 0;
+            self.done = eof;
+        } else {
+            self.chars += fresh.chars().count();
+            let mut start = piece.text.len().saturating_sub(PIECE_OVERLAP);
+            while !piece.text.is_char_boundary(start) {
+                start += 1;
+            }
+            self.carry = piece.text[start..].to_owned();
+        }
+        Ok(Some(piece))
+    }
+}
+
+/// Where to cut bytes read from the middle of a line so that no UTF-8 character is split: before a final character
+/// whose bytes are not all there.
+fn utf8_cut(raw: &[u8]) -> usize {
+    let tail = raw.len().saturating_sub(3);
+    for start in (tail..raw.len()).rev() {
+        let byte = raw[start];
+        if byte & 0b1100_0000 == 0b1000_0000 {
+            continue;
+        }
+        let width = match byte {
+            0x00..=0x7f => 1,
+            0xc0..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf7 => 4,
+            _ => 1,
+        };
+        return if start + width > raw.len() {
+            start
+        } else {
+            raw.len()
+        };
+    }
+    raw.len()
+}
+
+/// The most bytes of a line one piece holds, for a memory cap: a quarter of it, and at least twice PIECE_OVERLAP.
+fn piece_bytes(memory_cap: usize) -> usize {
+    (memory_cap / 4).max(2 * PIECE_OVERLAP)
+}
+
+/// Scan text read from `reader` line by line, in bounded pieces (FR-CORE-05). Returns the findings, with offsets
+/// counted as in a scan of each whole line; the line count; and the bytes read. A finding in the overlap of two
+/// pieces is kept once. On a line longer than one piece, the entropy tier runs per piece, so such a line can give
+/// more candidates than a whole-line scan, never fewer regex findings.
+fn scan_reader<R: BufRead>(
+    reader: R,
+    memory_cap: usize,
+    file: Option<&str>,
+) -> io::Result<(Vec<RawFinding>, usize, usize)> {
+    let engine = engine().map_err(|error| io::Error::other(error.to_string()))?;
+    let extension = effective_extension(file);
+    let mut pieces = LinePieces::new(reader, piece_bytes(memory_cap));
+    let mut findings = Vec::new();
+    let (mut in_block_comment, mut was_in_block, mut is_comment) = (false, false, false);
+    let (mut base, mut lines) = (0usize, 0usize);
+    let mut earlier: HashSet<(String, String, Option<usize>)> = HashSet::new();
+    while let Some(piece) = pieces.next_piece()? {
+        let stripped = piece.text.trim();
+        if piece.offset == 0 {
+            lines += 1;
+            earlier.clear();
+            was_in_block = in_block_comment && !stripped.starts_with("/*");
+            (base, is_comment) = line_base(engine, &piece.text);
+        }
+        let line_findings = if piece.offset == 0 {
+            scan_line(engine, &piece.text, piece.line, &extension)
+        } else {
+            scan_prepared(
+                engine,
+                &piece.text,
+                Cow::Borrowed(&piece.text),
+                is_comment,
+                piece.line,
+                &extension,
+            )
+        };
+        let mut found = HashSet::new();
+        for mut finding in line_findings {
+            if was_in_block && finding.in_comment.is_none() {
+                finding.in_comment = Some(true);
+            }
+            if piece.offset > 0 {
+                let shift = piece.offset - base.min(piece.offset);
+                finding.token_start = finding.token_start.map(|start| start + shift);
+                finding.token_end = finding.token_end.map(|end| end + shift);
+            }
+            // A regex finding has line offsets; a candidate's count from URL-stripped text, so it is keyed by token.
+            let start = matches!(finding.evidence, Evidence::Regex)
+                .then_some(finding.token_start)
+                .flatten();
+            let key = (finding.kind.clone(), finding.token.clone(), start);
+            if !earlier.contains(&key) {
+                findings.push(finding);
+            }
+            found.insert(key);
+        }
+        earlier.extend(found);
+        let fresh = if piece.offset > 0 {
+            let mut at = PIECE_OVERLAP.min(piece.text.len());
+            while !piece.text.is_char_boundary(at) {
+                at += 1;
+            }
+            &piece.text[at..]
+        } else {
+            stripped
+        };
+        let (opens, closes) = (fresh.matches("/*").count(), fresh.matches("*/").count());
+        in_block_comment = (in_block_comment && closes == 0) || opens > closes;
+    }
+    Ok((findings, lines, pieces.bytes))
 }
 
 fn looks_binary(sample: &[u8]) -> bool {
@@ -619,22 +778,52 @@ fn looks_binary(sample: &[u8]) -> bool {
     non_text as f64 / sample.len() as f64 > 0.3
 }
 
-fn scan_line(engine: &Engine, line: &str, lineno: usize, extension: &str) -> Vec<RawFinding> {
+/// What the line scan matches against: the trimmed line without a comment prefix, and whether the line is a comment.
+/// The target is a suffix of the trimmed line, so token offsets count from where it starts.
+fn scan_target<'a>(engine: &Engine, line: &'a str) -> (&'a str, Cow<'a, str>, bool) {
     let stripped = line.trim();
-    if stripped.is_empty() {
-        return Vec::new();
-    }
-
     // PEM headers begin with five hyphens; they are not SQL comments.
     let is_comment = !stripped.starts_with("-----BEGIN ")
         && ["#", "//", "/*", "*", "<!--", "--"]
             .iter()
             .any(|prefix| stripped.starts_with(prefix));
-    let scan_target: Cow<'_, str> = if is_comment {
+    let target = if is_comment {
         engine.comment_strip.replace(stripped, "")
     } else {
         Cow::Borrowed(stripped)
     };
+    (stripped, target, is_comment)
+}
+
+/// Where a line's token offsets count from, for its later pieces (FR-CORE-05): the characters dropped before the
+/// scan target, and whether the line is a comment.
+fn line_base(engine: &Engine, line: &str) -> (usize, bool) {
+    let (stripped, target, is_comment) = scan_target(engine, line);
+    let leading = line.chars().count() - line.trim_start().chars().count();
+    (
+        leading + stripped.chars().count() - target.chars().count(),
+        is_comment,
+    )
+}
+
+fn scan_line(engine: &Engine, line: &str, lineno: usize, extension: &str) -> Vec<RawFinding> {
+    let (stripped, target, is_comment) = scan_target(engine, line);
+    scan_prepared(engine, stripped, target, is_comment, lineno, extension)
+}
+
+/// The three detection tiers over a prepared target. A later piece of a long line comes here as it is, with the
+/// line's comment flag, so its offsets count from the piece's start.
+fn scan_prepared(
+    engine: &Engine,
+    stripped: &str,
+    scan_target: Cow<'_, str>,
+    is_comment: bool,
+    lineno: usize,
+    extension: &str,
+) -> Vec<RawFinding> {
+    if stripped.trim().is_empty() {
+        return Vec::new();
+    }
     let comment_flag = is_comment.then_some(true);
     let snippet: String = stripped.chars().take(200).collect();
     let mut findings = Vec::new();

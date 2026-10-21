@@ -26,6 +26,14 @@ Cause: The commands were renamed (FR-NAME-02). The rename note near the end of t
 
 Fix: Use `harpo` and `harpo-mcp`. The old names still work for two minor releases.
 
+## Scanning
+
+**`harpo scan` reported "Skipped large file" (before Oct 21, 2026), or older versions passed a large file without a finding.**
+
+Cause: Before FR-CORE-05, `--max-size` (10 MB) was a file-size limit: a folder scan skipped a larger file with an error, and a single-file scan read only its first 10 MB. Now `--max-size` is a memory cap (default 64 MB) and every file is scanned whole, in pieces.
+
+Fix: Upgrade. `--max-size` no longer needs raising for big files.
+
 ## Tests
 
 **pytest stops at collection with `No module named 'zstandard'` or `No module named 'yaml'`.**
@@ -65,6 +73,18 @@ Fix: Install `claude` and `codex` with `npm install -g @anthropic-ai/claude-code
 Cause: The file holds something the detector flags. Reads never prompt (FR-READ-06).
 
 Fix: Let the agent use `safe_read` or `safe_grep`, which return the file with placeholders. If the file is a false alarm and must be read as it is, allow it yourself in a terminal with `harpo allow PATH`. Every use is logged to `~/.harpo/allow.log`. See [setup.md](setup.md#allowlisting-paths-and-names).
+
+**A read of a large file is refused as "unscanned (too large to check)", or with "Too many files to check for secrets in time".**
+
+Cause: A file over 10 MB is checked in chunks (FR-CORE-05). It is refused when one line, or one private-key block, is too long for a chunk (4 MiB at the default cap), or when checking it does not finish within the hook's 25-second budget; the Python detector takes about a minute per 100 MB. Nothing that was not checked is let through.
+
+Fix: Read the part you need with `safe_read` and a line range, or allowlist the file with `harpo allow PATH` if it holds no secret.
+
+**`safe_read` says "pass start_line and end_line to read part of it".**
+
+Cause: The file is over 10 MB. `safe_read` redacts it in chunks and returns only the lines asked for, since an agent cannot use a whole large file in one tool result. Output over 10 MB is refused too.
+
+Fix: Ask for a line range.
 
 **The agent's own `harpo allow` command, or its edit of `~/.harpo`, is refused.**
 

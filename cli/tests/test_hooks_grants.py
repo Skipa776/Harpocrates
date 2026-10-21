@@ -168,10 +168,17 @@ def test_fr_read_06_prompt_shows_the_real_path_and_a_safe_name(proj: Path, tmp_p
 
 
 def test_fr_read_06_unscanned_file_is_named_as_such(proj: Path, capsys, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A file over the whole-file limit that cannot be checked in chunks (a line too long for the cap) is refused
+    and named as unscanned (FR-CORE-05)."""
     import Harpocrates.read as read
 
+    def too_long(*_args: object, **_kwargs: object):
+        raise read.TooLargeToScanError("a line is too long")
+        yield  # a generator, like file_chunks
+
     monkeypatch.setattr(read, "MAX_BYTES", 10)
-    assert _decision(_edit(proj), capsys)[2] == _reason("app.py", "unscanned (over the size limit)")
+    monkeypatch.setattr(read, "file_chunks", too_long)
+    assert _decision(_edit(proj), capsys)[2] == _reason("app.py", "unscanned (too large to check)")
 
 
 def test_fr_read_06_clean_and_new_files_edit_without_a_prompt(proj: Path, home: Path, capsys) -> None:

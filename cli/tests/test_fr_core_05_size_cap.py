@@ -1,4 +1,8 @@
-"""FR-CORE-05: a file over max_file_size is skipped with an error, never scanned only up to the cap."""
+"""FR-CORE-05: the size cap bounds memory, never how much of a file is scanned.
+
+Before Oct 21, 2026 a single file over the cap was scanned only up to it, silently, so a secret after the cap was
+missed with exit 0 (also through the pre-commit hook, which passes file names). Every file is now scanned whole.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,17 +21,11 @@ ENGINES = ("python", "rust")
 runner = CommandNameRunner()
 
 
-def _secret() -> str:
-    """The generated fake GitHub token used as the canary (never printed)."""
-    return known_format(5)["github_token"]
-
-
 def _big_file(tmp_path: Path) -> tuple[Path, str]:
-    """A file of about 1.5 MiB of filler with the canary on its last line."""
-    value = _secret()
+    """A file of about 1.5 MiB of filler with a generated fake GitHub token (never printed) on its last line."""
+    value = known_format(5)["github_token"]
     path = tmp_path / "big.env"
-    body = FILLER * (int(1.5 * MIB) // len(FILLER))
-    path.write_text(body + f"GITHUB_TOKEN={value}\n", encoding="utf-8")
+    path.write_text(FILLER * (int(1.5 * MIB) // len(FILLER)) + f"GITHUB_TOKEN={value}\n", encoding="utf-8")
     return path, value
 
 
@@ -38,70 +36,28 @@ def _skip_without_rust(engine: str) -> None:
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_fr_core_05_over_cap_skipped(tmp_path: Path, engine: str) -> None:
-    """A file over the 1 MiB cap yields no findings and one Skipped large file error."""
+def test_fr_core_05_a_file_over_the_cap_is_scanned_to_its_end(tmp_path: Path, engine: str) -> None:
+    """With a 1 MiB cap, the secret on the last line of a 1.5 MiB file is found, with its line number."""
     _skip_without_rust(engine)
     path, _ = _big_file(tmp_path)
-
-    result = scanner.scan_file(path, max_file_size=MIB, engine=engine)
-
-    assert result.findings == []
-    assert result.errors == [f"Skipped large file: {path}"]
+    result = scanner.scan_file(path, memory_cap=MIB, engine=engine)
+    assert result.errors == []
+    assert [(f.type, f.line) for f in result.findings] == [("GITHUB_PAT", result.total_lines)]
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_fr_core_05_fits_under_larger_cap(tmp_path: Path, engine: str) -> None:
-    """The same file under a 4 MiB cap is scanned and the trailing secret is found."""
+def test_fr_core_05_a_folder_scan_also_scans_it_to_its_end(tmp_path: Path, engine: str) -> None:
+    """A folder scan with the same cap finds it too: the file is no longer skipped as large."""
     _skip_without_rust(engine)
-    path, _ = _big_file(tmp_path)
-
-    result = scanner.scan_file(path, max_file_size=4 * MIB, engine=engine)
-
-    assert len(result.findings) == 1
+    _big_file(tmp_path)
+    result = scanner.scan_directory(tmp_path, memory_cap=MIB, engine=engine)
     assert result.errors == []
+    assert [f.type for f in result.findings] == ["GITHUB_PAT"]
 
 
-@pytest.mark.parametrize("engine", ENGINES)
-def test_fr_core_05_small_file_not_rejected(tmp_path: Path, engine: str) -> None:
-    """A file under the cap with the secret at its start is scanned with no error."""
-    _skip_without_rust(engine)
-    value = _secret()
-    path = tmp_path / "small.env"
-    path.write_text(f"GITHUB_TOKEN={value}\n" + FILLER * 10, encoding="utf-8")
-
-    result = scanner.scan_file(path, max_file_size=MIB, engine=engine)
-
-    assert len(result.findings) == 1
-    assert result.errors == []
-
-
-def test_fr_core_05_cli_exits_2_on_skip(tmp_path: Path) -> None:
-    """harpo scan with --max-size 1 exits 2 on the skipped file and does not print the secret."""
+def test_fr_core_05_cli_reports_the_secret_past_the_cap(tmp_path: Path) -> None:
+    """`harpo scan FILE --max-size 1` exits 1 with the finding, and never prints the value."""
     path, value = _big_file(tmp_path)
-
     result = runner.invoke(app, ["scan", str(path), "--max-size", "1"])
-
-    assert result.exit_code == 2
-    assert "Skipped large file" in result.output
-    assert value not in result.output
-
-
-def test_fr_core_05_cli_scans_when_cap_fits(tmp_path: Path) -> None:
-    """harpo scan with --max-size 4 reports the secret (exit 1) and does not print it."""
-    path, value = _big_file(tmp_path)
-
-    result = runner.invoke(app, ["scan", str(path), "--max-size", "4"])
-
     assert result.exit_code == 1
-    assert "Skipped large file" not in result.output
-    assert value not in result.output
-
-
-def test_fr_core_05_folder_scan_skips_same_file(tmp_path: Path) -> None:
-    """A folder scan with the same 1 MiB cap also reports the file as an error (each engine words it its own way)."""
-    path, _ = _big_file(tmp_path)
-
-    result = scanner.scan_directory(tmp_path, max_file_size=MIB)
-
-    assert result.findings == []
-    assert len(result.errors) == 1 and str(path) in result.errors[0] and "large file" in result.errors[0].lower()
+    assert "Skipped large file" not in result.output and value not in result.output

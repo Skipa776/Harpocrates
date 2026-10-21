@@ -196,7 +196,8 @@ def scan(
         help="Scan directories recursively"
     ),
     json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
-    max_file_size: int = typer.Option(10, "--max-size", help="Max file size in MB; a larger file is an error, not a partial scan."),
+    max_file_size: int = typer.Option(64, "--max-size", min=1, help=(
+        "Memory cap per file in MB. Every file is scanned whole, in pieces, whatever its size.")),
     engine: str = typer.Option(
         "auto",
         "--engine",
@@ -245,7 +246,7 @@ def scan(
         paths: Paths to scan; no paths exits successfully without scanning.
         recursive: Whether directory scans include subdirectories.
         json_output: Whether to print structured JSON instead of a table.
-        max_file_size: Maximum file size in MiB, converted to bytes for scans.
+        max_file_size: The memory cap per file in MiB (FR-CORE-05), converted to bytes for scans.
         engine: Selected auto, python, or rust scan engine.
         ignore: Optional comma-separated ignore patterns.
         ml_threshold: Additional ML confidence floor between zero and one.
@@ -305,7 +306,7 @@ def scan(
 
     ignore_patterns = set(ignore.split(",")) if ignore else set()
 
-    max_bytes = max_file_size * 1024 * 1024
+    memory_cap = max_file_size * 1024 * 1024
 
     # The shipped model always runs. Fail closed: without it, regex and entropy alone would pass
     # secrets the model is there to catch.
@@ -339,7 +340,7 @@ def scan(
             r = scan_directory(
                 path,
                 recursive=recursive,
-                max_file_size=max_bytes,
+                memory_cap=memory_cap,
                 ignore_patterns=ignore_patterns,
                 verifier=verifier,
                 ml_threshold=ml_threshold,
@@ -349,7 +350,7 @@ def scan(
             try:
                 r = scan_file(
                     path,
-                    max_file_size=max_bytes,
+                    memory_cap=memory_cap,
                     verifier=verifier,
                     ml_threshold=ml_threshold,
                     engine=cast(ScanEngine, engine),

@@ -95,7 +95,7 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 - **Edits:** Edit, Write and NotebookEdit on a file that holds a secret ask you once per file and session ("edit without secret protection"), even in accept-edits mode. Yes allows built-in Read and Edit of that one file until the session ends. In modes with no one to answer, the edit is refused and Claude has to ask you to make it. An edit that would write a placeholder is refused. Only the target file is scanned, not the new content being written (FR-READ-04, M2).
 - **How often:** on 1,000 random files from 16 open-source repos, the hook refused 30 (3.0%). Almost all were `generic` false alarms, such as a hash or a test fixture.
 - **Speed:** about 0.05–0.15 s per call.
-- **Large files:** a binary file (a NUL byte in its first 8 KB, such as a tool in `.venv/bin`) is not scanned and passes, unless it is named like a secret store (`.env`, `*.pem`, ...). A text file over 10 MB is refused unscanned. UTF-16 text is decoded and scanned.
+- **Large files:** a binary file (a NUL byte in its first 8 KB, such as a tool in `.venv/bin`) is not scanned and passes, unless it is named like a secret store (`.env`, `*.pem`, ...). A text file over 10 MB is checked in chunks within the hook's time budget, and refused only when it holds a secret, runs out of time, or has a line too long to check; `safe_read` of such a file needs `start_line` and `end_line`. UTF-16 text is decoded and scanned.
 
 **What the hook follows in a shell command:**
 - `sh -c` bodies, including after `sudo`, `env`, or `timeout`, plus `$(...)` and backticks;

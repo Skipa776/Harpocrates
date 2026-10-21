@@ -39,21 +39,21 @@ fn run() -> Result<(), String> {
         }
         "scan-file" => {
             let path = args.next().ok_or_else(usage)?;
-            let mut max_bytes = None;
+            let mut memory_cap = None;
             while let Some(argument) = args.next() {
                 match argument.as_str() {
-                    "--max-bytes" => {
-                        max_bytes = Some(
+                    "--memory-cap" => {
+                        memory_cap = Some(
                             args.next()
                                 .ok_or_else(usage)?
                                 .parse::<usize>()
-                                .map_err(|error| format!("invalid --max-bytes: {error}"))?,
+                                .map_err(|error| format!("invalid --memory-cap: {error}"))?,
                         );
                     }
                     _ => return Err(usage()),
                 }
             }
-            let findings = scan_file(path, max_bytes).map_err(|error| error.to_string())?;
+            let findings = scan_file(path, memory_cap).map_err(|error| error.to_string())?;
             write_output(&findings)?;
         }
         "scan-batch" => {
@@ -85,6 +85,6 @@ fn write_output(value: &impl Serialize) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: harpocrates-rust-scanner scan-text [--file PATH] | scan-file PATH [--max-bytes N] | scan-batch | scan-directory"
+    "usage: harpocrates-rust-scanner scan-text [--file PATH] | scan-file PATH [--memory-cap N] | scan-batch | scan-directory"
         .to_owned()
 }

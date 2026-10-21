@@ -290,9 +290,9 @@ def _types(path: Path, redactor, grep_args: Optional[dict] = None) -> Optional[l
         ordinary binary file; unreadable stat results and risky unscanned content return markers.
         Deadline, read, stat, and detector errors may propagate for refusal.
     Notes: Secret types in a file, [] if none, None if it isn't a scannable text file (missing, a
-        directory, binary). An oversize file counts as unscannable-but-risky and is reported as
-        ["unscanned"], except for the Grep tool (grep_args), which prints only matching lines: those
-        are judged instead (_printed_types).
+        directory, binary). A file over the read tool's whole-file limit is checked in chunks within
+        the hook's time budget (FR-CORE-05; _chunked_types); for the Grep tool (grep_args), which
+        prints only matching lines, those are judged instead (_printed_types).
     """
     from Harpocrates.read import MAX_BYTES, SNIFF_BYTES, _read_text, text_encoding
 
@@ -316,12 +316,37 @@ def _types(path: Path, redactor, grep_args: Optional[dict] = None) -> Optional[l
     except OSError:
         pass  # unreadable: fall through to the size check and read below, which behave as before
     if path.stat().st_size > MAX_BYTES:
-        return _printed_types(path, grep_args, redactor) if grep_args else ["unscanned"]
+        return _printed_types(path, grep_args, redactor) if grep_args else _chunked_types(path, redactor)
     try:
         text = _read_text(path)
     except ValueError:  # binary: images and PDFs pass, as FR-GATE-07 sets for the gate
         return None
     return _found(redactor, text)
+
+
+def _chunked_types(path: Path, redactor) -> Optional[list[str]]:
+    """
+    Description: The secret types in a file over the read tool's whole-file limit, chunk by chunk, each chunk seen with
+        the lines before it (FR-CORE-05). Every chunk counts against the hook's deadline, so a file too big to check
+        in time is refused by the caller (_OutOfTimeError).
+    Parameters:
+        path: the file.
+        redactor: the detector.
+    Output: Sorted types, [] for none; ["unscanned"] when a line or key block is too long to check within the cap.
+        Every other error propagates, so the hook blocks (a binary file never gets here: _types passes it first).
+    """
+    from Harpocrates.read import CONTEXT_LINES, TooLargeToScanError, file_chunks
+
+    found: set = set()
+    tail = ""
+    try:
+        for _, text in file_chunks(path):
+            _tick()
+            found.update(_found(redactor, tail + text))
+            tail = "".join(text.splitlines(keepends=True)[-CONTEXT_LINES:])
+    except TooLargeToScanError:
+        return ["unscanned"]
+    return sorted(found)
 
 
 def _found(redactor, text: str) -> list[str]:
@@ -452,7 +477,7 @@ def _first_flagged(paths: Iterable[Path], cwd: Path, grep_args: Optional[dict] =
         found = _types(path, redactor, grep_args)
         if found:
             shown = allowlist.printable(str(path.relative_to(cwd) if path.is_relative_to(cwd) else path))
-            kinds = {"unscanned": "unscanned (over the size limit)", "unreadable": "unreadable (can't be checked)"}
+            kinds = {"unscanned": "unscanned (too large to check)", "unreadable": "unreadable (can't be checked)"}
             return (shown, kinds.get(found[0], found[0]) if len(found) == 1 else ", ".join(found), found), passed
     return None, passed
 

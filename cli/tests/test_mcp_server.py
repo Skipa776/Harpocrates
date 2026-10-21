@@ -77,15 +77,16 @@ def test_scan_file_refuses_fifo(tmp_path: Path) -> None:
         scan_file(str(fifo_path))
 
 
-def test_scan_file_respects_max_bytes_ceiling(tmp_path: Path) -> None:
-    """scan_file caps reads at _MAX_SCAN_BYTES regardless of caller-supplied max_bytes."""
+def test_scan_file_refuses_a_file_over_the_ceiling(tmp_path: Path) -> None:
+    """scan_file refuses a file over _MAX_SCAN_BYTES, whatever max_bytes says, instead of scanning only its start."""
     from Harpocrates.mcp.server import _MAX_SCAN_BYTES, scan_file
 
-    # Create a file just over the ceiling
     big_file = tmp_path / "big.txt"
     big_file.write_bytes(b"x" * (_MAX_SCAN_BYTES + 1024))
-
-    # Passing a larger max_bytes must still be capped internally
-    results = scan_file(str(big_file), max_bytes=_MAX_SCAN_BYTES * 10)
-    # Test passes if no exception is raised and result is a list
-    assert isinstance(results, list)
+    with pytest.raises(ValueError, match="harpo scan"):
+        scan_file(str(big_file), max_bytes=_MAX_SCAN_BYTES * 10)
+    small = tmp_path / "small.txt"
+    small.write_bytes(b"x" * 2048)
+    with pytest.raises(ValueError, match="not scanned"):
+        scan_file(str(small), max_bytes=1024)
+    assert scan_file(str(small)) == []
