@@ -245,8 +245,8 @@ def responses_object(turn: dict, model: str, serial: int, input_tokens: int) -> 
     """
     Description: Build an OpenAI Responses API reply (the response object) for one scripted turn.
     Parameters:
-        turn: {"text": str, "tool_calls": [{"name": str, "input": dict}]}, every key optional; an empty turn is a
-            short text reply.
+        turn: {"text": str, "tool_calls": [{"name": str, "input": dict, "namespace": str}]}, every key optional (namespace
+            names the tool group an MCP tool sits in, as Codex offers them); an empty turn is a short text reply.
         model: the model name to echo, taken from the request.
         serial: a counter that makes the ids unique per reply and identical when replayed.
         input_tokens: the figure to report as the request's input tokens.
@@ -269,6 +269,7 @@ def responses_object(turn: dict, model: str, serial: int, input_tokens: int) -> 
     for index, call in enumerate(calls):
         output.append({"type": "function_call", "id": f"fc_mock{serial:08d}{index:02d}",
                        "call_id": f"call_mock{serial:08d}{index:02d}", "name": call["name"],
+                       **({"namespace": call["namespace"]} if "namespace" in call else {}),
                        "arguments": json.dumps(call.get("input", {}), separators=(",", ":")), "status": "completed"})
     out_tokens = _output_tokens(turn)
     return {"id": f"resp_mock{serial:08d}", "object": "response", "created_at": CREATED_AT, "status": "completed",
@@ -362,7 +363,7 @@ def _check_turn(index: int, turn: object) -> None:
         index: the turn's position in the script, for the error message.
         turn: the parsed JSON value.
     Output: None. Raises ValueError naming the turn when it is not an object with only text, thinking and redacted_thinking (str), tool_calls (a list of
-        {"name": str, "input": object}) and error ({"status": 400 to 599, "message": str}).
+        {"name": str, "input": object, "namespace": str}) and error ({"status": 400 to 599, "message": str}).
     """
     where = f"turn {index}"
     if not isinstance(turn, dict) or not set(turn) <= _TURN_KEYS:
@@ -374,8 +375,9 @@ def _check_turn(index: int, turn: object) -> None:
     if not isinstance(calls, list):
         raise ValueError(f"{where}: tool_calls must be a list")
     for call in calls:
-        if not isinstance(call, dict) or not isinstance(call.get("name"), str) or not isinstance(call.get("input", {}), dict):
-            raise ValueError(f"{where}: each tool call needs a name and an optional input object")
+        if (not isinstance(call, dict) or not isinstance(call.get("name"), str) or not isinstance(call.get("input", {}), dict)
+                or not isinstance(call.get("namespace", ""), str)):
+            raise ValueError(f"{where}: each tool call needs a name, an optional input object and an optional namespace")
     if "error" in turn:
         err = turn["error"]
         ok = (isinstance(err, dict) and isinstance(err.get("status"), int) and not isinstance(err.get("status"), bool)

@@ -272,3 +272,17 @@ def test_fr_proof_04_mock_script_accepts_thinking_keys(tmp_path) -> None:
     path.write_text(json.dumps([{"redacted_thinking": ["x"]}]))
     with pytest.raises(ValueError):
         mock.load_script(path)
+
+
+def test_fr_proof_04_mock_responses_call_carries_a_namespace_only_when_scripted(tmp_path) -> None:
+    """An MCP tool sits in a namespace in Codex's tool list; the scripted call names it, and a plain call has none."""
+    turn = {"tool_calls": [{"name": "show_file", "namespace": "mcp__media", "input": {"path": "a"}},
+                           {"name": "exec_command", "input": {"cmd": "ls"}}]}
+    calls = [item for item in mock.responses_object(turn, "m", 1, 1)["output"] if item["type"] == "function_call"]
+    assert [(c["name"], c.get("namespace")) for c in calls] == [("show_file", "mcp__media"), ("exec_command", None)]
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps([turn]))
+    assert mock.load_script(path) == [turn]
+    path.write_text(json.dumps([{"tool_calls": [{"name": "x", "namespace": 3}]}]))
+    with pytest.raises(ValueError):
+        mock.load_script(path)

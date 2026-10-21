@@ -3,6 +3,7 @@
 
     python -m bench.gate_e2e --suite g3 [--out-dir bench/results]
     python -m bench.gate_e2e --suite g4 [--out-dir bench/results]
+    python -m bench.gate_e2e --suite g5 [--out-dir bench/results]
 
 Each scenario runs a real `claude -p` or `codex exec` in a throwaway HOME (bench/agent_isolation.py) with a fake API key,
 pointed at the gate on 127.0.0.1, whose upstream is bench/mock_provider.py on 127.0.0.1. The gate token goes where an
@@ -17,6 +18,12 @@ g3  The gate with the G3 scan step, which blocked everything (reproduced here as
 g4  The gate with its real scanner, in front of the scripted reads (Read .env, cat, grep): alone, and with Harpo's read hook
     installed too; plus a control with the gate off (a pass-through step), which must leak, to show the counter works. The
     mock's recording is searched for the planted canaries and for placeholders.
+g5  Media (FR-GATE-07) with Claude Code (Read) and Codex (view_image), which send an image file as a base64 block. The script reads a real
+    PNG (must pass byte-identical, with a media warning in the gate log) and then the canary .env saved as notes.png. If
+    an agent sends that as base64 media, the gate must block it (HARPO-BLOCK-MEDIA-SECRET). Both agents check image bytes
+    first (docs/gate-transport.md, T11), so the "mcp" scenarios also call bench/mcp_image_server.py, which returns any
+    file as an image or a PDF resource without that check. A gate-off control runs each script, to show whether that
+    path leaks at all. The mock's recording is also searched inside base64 payloads, at every alignment.
 
 Output: bench/results/proof/<run>.json holds counts only (checked for canary values). The mock's recording, which holds
 request bodies, goes to bench/results/mock/<run>/ and is never committed.
@@ -24,9 +31,12 @@ request bodies, goes to bench/results/mock/<run>/ and is never committed.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
+import struct
 import sys
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable, NamedTuple, Optional
@@ -62,8 +72,10 @@ class Scenario(NamedTuple):
         record: how the install record's gate entry relates to the gate: "match" (its port is the gate's), "mismatch"
             (another port), or "none" (no entry written).
         capture: keep the agent's output to look for the block message. Only for sessions that read no canary file.
-        script: "reads" for the agent runner's scripted reads of the canary repo (Read .env, cat, grep), or "sec10" for
-            three calls that read no canary file: Read README.md, cat config/settings.py, grep, as Claude Code names them.
+        script: "reads" for the agent runner's scripted reads of the canary repo (Read .env, cat, grep), "sec10" for
+            three calls that read no canary file: Read README.md, cat config/settings.py, grep, as Claude Code names them,
+            "media" for two image reads (media_script), or "mcp" for the same two files through the MCP image tool
+            (mcp_script; Claude Code only).
     Output: An immutable record.
     """
 
@@ -87,7 +99,218 @@ SUITES: dict[str, list[Scenario]] = {
            Scenario("codex-gate-and-hook", "codex", "default", True, "none"),
            Scenario("claude-gate-off-control", "claude", "passthrough", False, "none"),
            Scenario("codex-gate-off-control", "codex", "passthrough", False, "none")],
+    "g5": [Scenario("claude-media-gate", "claude", "default", False, "none", True, "media"),
+           Scenario("claude-media-gate-off-control", "claude", "passthrough", False, "none", False, "media"),
+           Scenario("codex-media-gate", "codex", "default", False, "none", True, "media"),
+           Scenario("codex-media-gate-off-control", "codex", "passthrough", False, "none", False, "media"),
+           Scenario("claude-mcp-gate", "claude", "default", False, "none", True, "mcp"),
+           Scenario("claude-mcp-gate-off-control", "claude", "passthrough", False, "none", False, "mcp"),
+           Scenario("codex-mcp-gate", "codex", "default", False, "none", True, "mcp"),
+           Scenario("codex-mcp-gate-off-control", "codex", "passthrough", False, "none", False, "mcp")],
 }
+_BASE64_RUN = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
+
+
+def tiny_png(width: int = 8, height: int = 8) -> bytes:
+    """
+    Description: Make a valid grey PNG with the standard library, so the image read needs no fixture file.
+    Parameters:
+        width: pixels across.
+        height: pixels down.
+    Output: The PNG bytes.
+    """
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        """
+        Description: Build one PNG chunk.
+        Parameters:
+            kind: the four-byte chunk type.
+            data: the chunk data.
+        Output: Length, type, data and CRC.
+        """
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    rows = b"".join(b"\x00" + b"\x80" * width for _ in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+def media_script(repo: Path) -> list[dict]:
+    """
+    Description: Two Read calls on image files for the g5 scenarios. Writes the files into the throwaway repo first.
+    Parameters:
+        repo: the canary repo.
+    Output: Three turns: Read assets/diagram.png (a real PNG), Read assets/notes.png (the canary .env under an image
+        name, which Claude Code sends as a base64 image block), then {"text": "done"}.
+    """
+    assets = repo / "assets"
+    assets.mkdir(exist_ok=True)
+    (assets / "diagram.png").write_bytes(tiny_png())
+    (assets / "notes.png").write_bytes((repo / ".env").read_bytes())
+    return [{"tool_calls": [{"name": "Read", "input": {"file_path": str(assets / "diagram.png")}}]},
+            {"tool_calls": [{"name": "Read", "input": {"file_path": str(assets / "notes.png")}}]},
+            {"text": "done"}]
+
+
+def codex_media_script(repo: Path) -> list[dict]:
+    """
+    Description: The g5 image reads for Codex, through its view_image tool. Writes the same files as media_script.
+    Parameters:
+        repo: the canary repo.
+    Output: Three turns: view_image on assets/diagram.png, view_image on assets/notes.png, then {"text": "done"}.
+    """
+    turns = media_script(repo)
+    return [{"tool_calls": [{"name": "view_image", "input": {"path": t["tool_calls"][0]["input"]["file_path"]}}]}
+            for t in turns[:2]] + [turns[-1]]
+
+
+MCP_TOOL = "mcp__media__show_file"
+MCP_SERVER = ROOT / "bench" / "mcp_image_server.py"
+
+
+def mcp_script(repo: Path) -> list[dict]:
+    """
+    Description: The g5 image reads through the MCP image tool. Writes the same files as media_script.
+    Parameters:
+        repo: the canary repo.
+    Output: Four turns: show_file on assets/diagram.png and on assets/notes.png as images, show_file on assets/notes.png
+        as a PDF resource, then {"text": "done"}.
+    """
+    diagram, notes = (t["tool_calls"][0]["input"]["file_path"] for t in media_script(repo)[:2])
+    calls = ((diagram, "image"), (notes, "image"), (notes, "pdf"))
+    return [{"tool_calls": [{"name": MCP_TOOL, "input": {"path": path, "as": kind}}]} for path, kind in calls] + [
+        {"text": "done"}]
+
+
+def codex_mcp_script(repo: Path) -> list[dict]:
+    """
+    Description: mcp_script for Codex, which offers an MCP tool as show_file inside the namespace mcp__media.
+    Parameters:
+        repo: the canary repo.
+    Output: The same turns as mcp_script, each call named show_file with namespace mcp__media.
+    """
+    return [{"tool_calls": [{"name": "show_file", "namespace": "mcp__media", "input": t["tool_calls"][0]["input"]}]}
+            if "tool_calls" in t else t for t in mcp_script(repo)]
+
+
+def codex_mcp_config(path: Path, root: Path) -> Path:
+    """
+    Description: Add the MCP image server to a Codex config.toml.
+    Parameters:
+        path: the config written by the runner.
+        root: the only folder the server may read (the throwaway repo).
+    Output: The same path, with an [mcp_servers.media] table appended that runs this interpreter in isolated mode and
+        pre-approves its one tool (codex exec runs with approval policy never, which otherwise refuses every MCP call).
+        This is the throwaway CODEX_HOME's config only.
+    """
+    with path.open("a", encoding="utf-8") as config:
+        config.write(f"\n[mcp_servers.media]\ncommand = {json.dumps(sys.executable)}\n"
+                     f"args = {json.dumps(['-I', str(MCP_SERVER), str(root)])}\n"
+                     'default_tools_approval_mode = "approve"\n')
+    return path
+
+
+def with_mcp(argv: list[str], tw: iso.Throwaway) -> list[str]:
+    """
+    Description: Add the MCP image server to a `claude -p` command line, and only that server.
+    Parameters:
+        argv: the runner's claude argv (with its --allowedTools list).
+        tw: the throwaway session; the server config is written to its root.
+    Output: A new argv: the MCP tool added to the allowed tools, then --mcp-config and --strict-mcp-config. The server
+        runs with this interpreter in isolated mode (-I) and reads only inside the throwaway repo. Raises ValueError
+        when argv has no --allowedTools list to extend.
+    """
+    if "--allowedTools" not in argv:
+        raise ValueError("the claude argv has no --allowedTools list to add the MCP tool to")
+    config = tw.root / "mcp.json"
+    server = {"command": sys.executable, "args": ["-I", str(MCP_SERVER), str(tw.repo)]}
+    config.write_text(json.dumps({"mcpServers": {"media": server}}), encoding="utf-8")
+    at = argv.index("--allowedTools") + 1
+    return argv[:at] + [MCP_TOOL] + argv[at:] + ["--mcp-config", str(config), "--strict-mcp-config"]
+
+
+def _strings(node: object) -> Iterable[str]:
+    """
+    Description: Every string in a parsed JSON value, and in JSON held inside those strings, so no escape hides a run.
+    Parameters:
+        node: the parsed value.
+    Output: The strings, depth first.
+    """
+    if isinstance(node, str):
+        yield node
+        if node[:1] in "{[":
+            try:
+                yield from _strings(json.loads(node))
+            except ValueError:
+                pass
+    elif isinstance(node, dict):
+        for value in node.values():
+            yield from _strings(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _strings(value)
+
+
+def _decodings(text: str) -> Iterable[bytes]:
+    """
+    Description: Decode every base64 run in a string at all four alignments, so a run that starts mid-encoding (glued to
+        a stray letter, or after an escape) still yields its bytes.
+    Parameters:
+        text: the string.
+    Output: The decoded bytes of each run at offsets 0 to 3; a partial last group is padded, so its bytes are kept.
+    """
+    for run in _BASE64_RUN.findall(text.replace("\n", "").replace("\r", "")):
+        run = run.rstrip("=")
+        for offset in range(4):
+            piece = run[offset:]
+            if len(piece) % 4 == 1:  # one leftover character holds no whole byte
+                piece = piece[:-1]
+            if piece:
+                yield base64.b64decode(piece + "=" * (-len(piece) % 4))
+
+
+def png_identical(records: Iterable[dict]) -> dict:
+    """
+    Description: Check the real PNG reached the mock unchanged: count its base64 payloads, and how many equal the file.
+    Parameters:
+        records: the mock's recording entries.
+    Output: {"payloads": n, "identical": n} over every recorded string that is the PNG's base64, bare or as a data URL,
+        or any other base64 that decodes to a PNG.
+    """
+    want = base64.b64encode(tiny_png()).decode("ascii")
+    seen = identical = 0
+    for rec in records:
+        try:
+            texts = list(_strings(json.loads(rec.get("body") or "")))
+        except ValueError:
+            continue
+        for text in texts:
+            payload = text.partition(";base64,")[2] if text.startswith("data:") else text
+            if payload.startswith("iVBORw0KGgo"):
+                seen += 1
+                identical += payload == want
+    return {"payloads": seen, "identical": identical}
+
+
+def received_in_base64(records: Iterable[dict], canaries: Iterable[report.Canary]) -> dict:
+    """
+    Description: Count the canaries the mock received inside base64 payloads, which the plain-text search cannot see.
+    Parameters:
+        records: the mock's recording entries.
+        canaries: the planted canaries.
+    Output: {"known_format": n, "total": n}: distinct canaries whose value is in the decoded bytes of any base64 run of
+        24 or more characters in any string of a recorded body (JSON strings, and JSON inside them; an unparsed body is
+        searched as text), at every alignment. Values are matched in memory only.
+    """
+    decoded: list[bytes] = []
+    for rec in records:
+        body = rec.get("body") or ""
+        try:
+            texts = list(_strings(json.loads(body)))
+        except ValueError:
+            texts = [body]
+        for text in texts:
+            decoded.extend(_decodings(text))
+    hits = [c for c in canaries if any(c.value.encode() in blob for blob in decoded)]
+    return {"known_format": sum(c.cls == "known-format" for c in hits), "total": len(hits)}
 
 
 def sec10_script(repo: Path) -> list[dict]:
@@ -223,11 +446,13 @@ def gate_log_summary(lines: list[str]) -> dict:
     Description: Summarise the gate's request log without any content.
     Parameters:
         lines: the JSONL lines the gate wrote.
-    Output: {"lines": n, "by_decision": {...}, "by_reason": {...}, "by_route": {...}}.
+    Output: {"lines": n, "by_decision": {...}, "by_reason": {...}, "by_route": {...}, "media": {kind: count}}.
     """
-    summary: dict = {"lines": len(lines), "by_decision": {}, "by_reason": {}, "by_route": {}}
+    summary: dict = {"lines": len(lines), "by_decision": {}, "by_reason": {}, "by_route": {}, "media": {}}
     for line in lines:
         entry = json.loads(line)
+        for note in entry.get("media", []):
+            summary["media"][note["kind"]] = summary["media"].get(note["kind"], 0) + 1
         for key, name in (("decision", "by_decision"), ("reason", "by_reason"), ("route", "by_route")):
             if key in entry:
                 summary[name][entry[key]] = summary[name].get(entry[key], 0) + 1
@@ -284,10 +509,23 @@ def run_scenario(sc: Scenario, seed: int, out_root: Path, run_id: str, timeout: 
     if out["version"] is None:
         return {**out, "status": "skipped", "reason": f"`{sc.agent}` is not on PATH", "_canaries": []}
     token_line = f'http_headers = {{ "{TOKEN_HEADER}" = "{rig.token}" }}\n'
+
+    def codex_config(tw: iso.Throwaway, url: str) -> Path:
+        """
+        Description: Write the throwaway Codex config pointed at the gate, with the MCP image server for "mcp" scenarios.
+        Parameters:
+            tw: the throwaway session.
+            url: the mock's URL, which starts the gate.
+        Output: The config path.
+        """
+        path = runner.write_codex_config(tw, rig.start(url).url, token_line)
+        return codex_mcp_config(path, tw.repo) if sc.script == "mcp" else path
     try:
         with runner.agent_session(sc.agent, seed, out_root, run_id, label=sc.label, control=not sc.hook,
-                                  script=sec10_script if sc.script == "sec10" else None,
-                                  codex_config=lambda tw, url: runner.write_codex_config(tw, rig.start(url).url, token_line),
+                                  script={"sec10": sec10_script,
+                                          "mcp": codex_mcp_script if sc.agent == "codex" else mcp_script,
+                                          "media": codex_media_script if sc.agent == "codex" else media_script}.get(sc.script),
+                                  codex_config=codex_config,
                                   before_install=lambda tw, server: rig.start(server.url)) as session:
             gate = rig.start(session.server.url)
             if sc.agent == "claude" and sc.hook:
@@ -295,7 +533,7 @@ def run_scenario(sc: Scenario, seed: int, out_root: Path, run_id: str, timeout: 
             env = session.env()
             if sc.agent == "claude":  # Codex reads the gate address and token from its config.toml
                 env.update({"ANTHROPIC_BASE_URL": gate.url, "ANTHROPIC_CUSTOM_HEADERS": f"{TOKEN_HEADER}: {rig.token}"})
-            argv = session.argv()
+            argv = with_mcp(session.argv(), session.tw) if sc.script == "mcp" and sc.agent == "claude" else session.argv()
             if sc.capture:
                 code, timed_out, seconds, stdout, stderr = session.run_captured(argv, env, timeout)
             else:
@@ -318,6 +556,7 @@ def run_scenario(sc: Scenario, seed: int, out_root: Path, run_id: str, timeout: 
         "tool_results_seen": seen, "sec10_refusals": sec10_refusals(records),
         "planted": report.counts(canaries), "received": report.received_counts(canaries, findings),
         "placeholders": placeholder_counts(records), "tool_results_with_placeholder": tool_results_with_placeholder(records)[0],
+        "received_in_base64": received_in_base64(records, canaries), "png": png_identical(records),
         "_canaries": canaries})
     return out
 
@@ -327,7 +566,7 @@ def run_suite(suite: str, seed: int, out_root: Path, run_id: str, timeout: int =
     """
     Description: Run every scenario of a suite and write the counts-only report.
     Parameters:
-        suite: g3 or g4.
+        suite: g3, g4 or g5.
         seed: the canary seed.
         out_root: the results folder; the report goes to proof/<run_id>.json.
         run_id: the run's id.
@@ -371,7 +610,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"{r['scenario']}: {r.get('status')} exit={r.get('exit_code')} mock_requests={r.get('mock_requests')} "
               f"blocked_msg={r.get('block_message_shown')} sec10_refusals={r.get('sec10_refusals')} "
               f"results_seen={r.get('tool_results_seen')} received_known={r.get('received', {}).get('known_format')} "
-              f"placeholders={r.get('placeholders', {}).get('total')}")
+              f"placeholders={r.get('placeholders', {}).get('total')} "
+              f"received_in_base64={r.get('received_in_base64', {}).get('known_format')} "
+              f"media={r.get('gate_log', {}).get('media')} reasons={r.get('gate_log', {}).get('by_reason')}")
     print(f"report: {path}")
     return 1 if data["isolation"]["real_home_changed"] else 0
 

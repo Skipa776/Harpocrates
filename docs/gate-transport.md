@@ -199,6 +199,20 @@ Results, Oct 19, 2026. Probe run `20261019T175710Z-g2` (`bench/results/proof/g2-
 | T8 | Contents of `x-codex-turn-metadata` | **VERIFIED** (probe `codex-corpus`, fake remote with a planted password). Shape: `installation_id`, `session_id`, `thread_id`, `turn_id`, `root_turn_id`, `window_id`, `window_number`, `context_window_id`, `agent_name`, `request_kind`, `history_initialization`, `thread_source`, `turn_trigger`, `turn_started_at_unix_ms`, `model`, `sandbox`, `sandbox_mode`, `analytics_enabled`, `auto_review_enabled`, `node_repl_auto_review_required`, `node_repl_disabled`, and `workspaces{<absolute path>: {has_changes, latest_git_commit_hash (40 hex), associated_remote_urls{origin}}}`. The origin URL had its userinfo stripped: the planted password was in no header and no body. The same JSON is in the body as `client_metadata["x-codex-turn-metadata"]` |
 | T9 | `x-codex-turn-state` round trip, compaction endpoint path, session-id header and rollout path for doctor | **VERIFIED.** Turn state: sent back on requests 2 to 4 with the value the mock set on response 1, not on request 1. Compaction (probe `codex-compaction`, `model_auto_compact_token_limit = 2000`): Codex compacts with `POST /v1/responses` (the same path), marked `request_kind: "compaction"` in `x-codex-turn-metadata`, with `tools: []`; no other endpoint. Because the mock's usage figures never shrink, Codex compacted in a loop (288 compaction requests in 15 s) until the probe killed it. Session id: `thread-id` header equals the id in the rollout file name `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<timestamp>-<thread-id>.jsonl`; `session-id` is also sent. Claude Code: the `session_id` inside `metadata.user_id` equals the transcript name `~/.claude/projects/<project-slug>/<session-id>.jsonl` |
 | T10 | Request bodies arrive chunked or with `Content-Length` | **VERIFIED**, same as V7: `Content-Length` on all 615 model requests, none chunked, up to 1,039,744 bytes |
+| T11 | What the agents' own image tools and MCP results put in a request (FR-GATE-07) | **VERIFIED** (suite `g5`, run `20261020-gate-e2e-g5g`; Claude Code 2.1.304, Codex 0.163.0). Details below the table. |
+
+**T11 details.**
+- **A real PNG.** Claude Code's `Read` sends it as an `image` block (base64 source) inside the `tool_result`. Codex's `view_image` sends it as an `input_image` data URL inside the `function_call_output`. Both resend it in every later request of the session.
+- **A text file saved as `notes.png`.** Neither agent base64-encodes it; both check the bytes first.
+  - Claude Code returns a text error that quotes the first 8 bytes in hex.
+  - Codex returns `unable to process image`.
+
+  Those 8 bytes reach the gate as ordinary text, which it scans.
+- **MCP results.** These came from `bench/mcp_image_server.py`, which returns any file as an image or as a PDF resource without checking it.
+  - Claude Code, given a non-image as an image, tries to resize it and then sends a text note. It saves a binary resource to disk and sends a text pointer. It never sent the bytes.
+  - Codex sends a real MCP image as an `input_image` data URL, and replaces a non-image with `image content omitted because it could not be processed`.
+  - Codex sends an embedded resource as **JSON text**: the `{"type":"resource",...,"blob":"<base64>"}` object goes inside an `input_text` part. So the one agent path that carries a file as base64 lands in a text field, where the gate's media rule does not apply. See the G5 spec's end-to-end result.
+
 
 ## Sources (all checked 2026-10-19)
 
