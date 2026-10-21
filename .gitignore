@@ -51,7 +51,6 @@ cli/tests/test_string_literal_detection.py
 cli/tests/fixtures/fake_secrets.txt
 
 # Scripts with fake secret patterns
-scripts/evaluate_stress_tests.py
 scripts/validate_training_data.py
 
 # Type checking
@@ -80,9 +79,6 @@ cli/Harpocrates/ml/artifacts/
 cli/Harpocrates/training/data/*.pkl
 cli/Harpocrates/training/data/*.json
 data_validation_report.json
-
-# One-off training scripts
-train_simple.py
 
 # Environment and secrets
 .env
@@ -130,9 +126,78 @@ comparison/
 # graphify code graph (regenerate with `graphify update .`)
 graphify-out/
 
-# OSS corpus for data generation (DATA-04); only scripts/oss_repos.tsv is committed
+# OSS corpus for data generation (DATA-04); the pinned list (oss_repos.tsv) is at tag v1.3.0
 data/oss/
 data/models/
 data/llm_slots/
 # Alarm audits hold real strings from the OSS corpus; local only
 data/audit/
+
+# R0 cleanup (FR-CLEAN-01): untracked, kept locally for reproducibility
+scripts/train_experiments.py
+scripts/train_experiments_v2.py
+scripts/train_experiments_v3.py
+scripts/train_v4.py
+scripts/analyze_fp.py
+scripts/evaluate_overfit.py
+scripts/regenerate_features.py
+scripts/generate_go_nogo_report.py
+docs/ml_feature_vector_and_synthetic_data.md
+docs/samples/TESTING_GUIDE.txt
+docs/assets/ASSETS.md
+docs/assets/divider-configuration.png
+docs/assets/divider-contributing.png
+docs/assets/divider-how-it-scans.png
+docs/assets/divider-installation.png
+docs/assets/divider-license.png
+docs/assets/divider-usage.png
+bench/build_model_improvement_nb.py
+bench/model_improvement.ipynb
+scripts/r2_audit.py
+scripts/r2_eval.py
+scripts/generate_synthetic_data.py
+scripts/train_v11.py
+scripts/calibrate.py
+scripts/convert_to_onnx.py
+scripts/r2_common.py
+cli/tests/test_r2_metrics.py
+cli/tests/test_train_pipeline_features.py
+scripts/build_eval_set.py
+scripts/build_slot_set.py
+scripts/generate_llm_slots.py
+scripts/clean_v4.py
+scripts/eda_datasets.py
+scripts/fetch_oss_corpus.py
+scripts/oss_repos.tsv
+cli/tests/test_data_07_eval_set.py
+cli/tests/test_slot_set.py
+cli/tests/test_clean_v4.py
+cli/tests/test_generate_llm_slots.py
+cli/Harpocrates/training/__init__.py
+cli/Harpocrates/training/data/.gitkeep
+cli/Harpocrates/training/dataset.py
+cli/Harpocrates/training/generators/__init__.py
+cli/Harpocrates/training/generators/context_templates.py
+cli/Harpocrates/training/generators/generate_data.py
+cli/Harpocrates/training/train_model.py
+cli/tests/test_data_generator.py
+cli/tests/test_ml_shortcuts.py
+
+# Local plan and session notes, never committed
+docs/DO_NOT_TRACK.md
+docs/cloud-session-delegation.md
+
+# Mock-provider recordings hold request bodies from agent sessions; never committed (FR-PROOF-04). Reports in bench/results/proof/ (counts only) may be.
+bench/results/mock/
+
+# Agent instructions and design notes, kept locally
+/AGENTS.md
+/CLAUDE.md
+/docs/gate-base64-text-spec.md
+/docs/gate-media-upstream-spec.md
+/docs/gate-mock-spec.md
+/docs/gate-parser-spec.md
+/docs/gate-proxy-spec.md
+/docs/gate-scan-spec.md
+/docs/r0-specs.md
+/docs/cleanup-report.md

@@ -16,10 +16,10 @@ fn temp_dir(label: &str) -> PathBuf {
     path
 }
 
-fn file(path: &Path, max_bytes: Option<usize>) -> FileScanRequest {
+fn file(path: &Path, memory_cap: Option<usize>) -> FileScanRequest {
     FileScanRequest {
         path: path.to_path_buf(),
-        max_bytes,
+        memory_cap,
     }
 }
 
@@ -80,7 +80,8 @@ fn one_unreadable_file_does_not_discard_successful_files() {
 }
 
 #[test]
-fn batch_honors_max_bytes_and_reports_counts() {
+fn batch_scans_the_whole_file_whatever_the_memory_cap_and_reports_counts() {
+    // FR-CORE-05: the cap bounds memory, never how much of a file is scanned (it was a read limit before).
     let root = temp_dir("bounds");
     let path = root.join("bounded.env");
     let first_line = "APP_NAME=Test\n";
@@ -94,9 +95,10 @@ fn batch_honors_max_bytes_and_reports_counts() {
     .expect("batch succeeds");
     let result = &response.files[0];
 
-    assert!(result.findings.is_empty());
-    assert_eq!(result.bytes_scanned, first_line.len());
-    assert_eq!(result.line_count, 1);
+    assert_eq!(result.findings.len(), 1);
+    assert_eq!(result.findings[0].kind, "AWS_ACCESS_KEY_ID");
+    assert_eq!(result.bytes_scanned, content.len());
+    assert_eq!(result.line_count, 2);
 
     fs::remove_dir_all(root).expect("temporary directory removed");
 }
@@ -142,7 +144,7 @@ fn scan_batch_binary_accepts_json_and_emits_json() {
     fs::write(&path, "AKIAIOSFODNN7EXAMPLE\n").expect("file written");
     let request = serde_json::json!({
         "protocol_version": PROTOCOL_VERSION,
-        "files": [{"path": path, "max_bytes": null}],
+        "files": [{"path": path, "memory_cap": null}],
     });
 
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_harpocrates-rust-scanner"))

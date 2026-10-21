@@ -1,0 +1,50 @@
+{
+  "data": "cli/tests/fixtures/positive_holdout_v4.jsonl",
+  "results": {
+    "ml_commit_0.5559": {
+      "fn": 211,
+      "fp": 0,
+      "precision": null,
+      "recall": 0.2966666666666667,
+      "records": 300,
+      "tn": 0,
+      "tp": 89
+    },
+    "ml_gate_0.1904": {
+      "fn": 191,
+      "fp": 0,
+      "precision": null,
+      "recall": 0.36333333333333334,
+      "records": 300,
+      "tn": 0,
+      "tp": 109
+    },
+    "pipeline_cli_default_0.19": {
+      "fn": 201,
+      "fp": 0,
+      "precision": null,
+      "recall": 0.33,
+      "records": 300,
+      "tn": 0,
+      "tp": 99
+    },
+    "pipeline_commit_0.5559": {
+      "fn": 201,
+      "fp": 0,
+      "precision": null,
+      "recall": 0.33,
+      "records": 300,
+      "tn": 0,
+      "tp": 99
+    },
+    "pipeline_gate_0.1904": {
+      "fn": 192,
+      "fp": 0,
+      "precision": null,
+      "recall": 0.36,
+      "records": 300,
+      "tn": 0,
+      "tp": 108
+    }
+  }
+}

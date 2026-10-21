@@ -3,7 +3,7 @@
 import random
 import re
 
-from Harpocrates.training.generators.secret_templates import generate_human_password
+from bench.canaries.secret_templates import generate_human_password
 
 HUMAN_SHAPE = re.compile(r"^[A-Za-z]+[A-Za-z0-9_.@!#$%&*-]*$")
 

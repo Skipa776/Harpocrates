@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Pattern, Sequence, Tuple
 
+from Harpocrates.core.classification import _VAR_NAME_WINDOW
 from Harpocrates.ml.tokens import TokenMatch
 
 if TYPE_CHECKING:
@@ -78,10 +79,20 @@ TEST_PATH_PATTERNS = [
 @dataclass
 class CodeContext:
     """
-    Contextual information around a detected secret.
-
-    Captures surrounding code and metadata to help ML models
-    distinguish between true secrets and false positives.
+    Description: Hold the surrounding code and metadata that help the ML model tell true secrets from false positives.
+    Parameters:
+        line_content: Line containing the candidate.
+        lines_before: Lines preceding the candidate.
+        lines_after: Lines following the candidate.
+        file_path: Optional source file path.
+        file_type: Optional language identifier.
+        in_test_file: Whether the path identifies a test file.
+        in_comment: Whether the current line is a comment.
+        in_string_literal: Whether the candidate is in a string literal.
+        line_number: One-based finding line number.
+        total_lines: Total source line count.
+        token_match: Optional token text and span metadata.
+    Output: Instances provide context lines, file metadata, and derived file-risk properties.
     """
 
     line_content: str
@@ -98,21 +109,36 @@ class CodeContext:
 
     @property
     def file_extension(self) -> Optional[str]:
-        """Get file extension from path."""
+        """
+        Description: Extract the lowercase path suffix for file-type checks.
+        Parameters: None
+        Output: File suffix, or None when no path is available.
+        Get file extension from path.
+        """
         if self.file_path:
             return Path(self.file_path).suffix.lower()
         return None
 
     @property
     def file_name(self) -> Optional[str]:
-        """Get file name from path."""
+        """
+        Description: Extract the final path component for filename checks.
+        Parameters: None
+        Output: File name, or None when no path is available.
+        Get file name from path.
+        """
         if self.file_path:
             return Path(self.file_path).name
         return None
 
     @property
     def is_config_file(self) -> bool:
-        """Check if file is a configuration file."""
+        """
+        Description: Recognize configuration files using extensions and filename hints.
+        Parameters: None
+        Output: True for matching configuration files, otherwise False.
+        Check if file is a configuration file.
+        """
         ext = self.file_extension
         name = self.file_name
         if ext in CONFIG_EXTENSIONS:
@@ -125,38 +151,47 @@ class CodeContext:
 
     @property
     def is_high_risk_file(self) -> bool:
-        """Check if file type indicates high risk for secrets."""
+        """
+        Description: Check the extension against high-risk secret file types.
+        Parameters: None
+        Output: True for a high-risk extension, otherwise False.
+        Check if file type indicates high risk for secrets.
+        """
         ext = self.file_extension
         return ext in HIGH_RISK_EXTENSIONS
 
     @property
     def full_context(self) -> str:
-        """Get all context lines as a single string."""
+        """
+        Description: Join the surrounding lines to supply text for context features.
+        Parameters: None
+        Output: Before, current, and after lines joined by newline characters.
+        Get all context lines as a single string.
+        """
         all_lines = self.lines_before + [self.line_content] + self.lines_after
         return "\n".join(all_lines)
 
 
-def extract_var_name(line: str, token: str) -> Optional[str]:
+def feature_var_name(line: str, token: str) -> Optional[str]:
     """
-    Extract variable name from a line containing a token.
-
-    Args:
+    Description: Search the assignment patterns just before a token to find its variable name.
+    Parameters:
         line: The line of code
         token: The detected token
-
-    Returns:
-        Variable name if found, None otherwise
+    Output: Matched variable name, or None if the token or assignment is absent.
     """
     # Find position of token in line
     token_pos = line.find(token)
     if token_pos == -1:
         return None
 
-    # Look for variable assignment before token
-    prefix = line[:token_pos]
+    # Only the text just left of the token can hold `name =`. Searching the whole prefix is
+    # quadratic in word-character runs (minified JS, inline base64). `search(line, start, end)`
+    # bounds the scan while `^` still anchors at the real line start.
+    window_start = max(0, token_pos - _VAR_NAME_WINDOW)
 
     for pattern_name, pattern in VAR_ASSIGNMENT_PATTERNS:
-        match = pattern.search(prefix)
+        match = pattern.search(line, window_start, token_pos)
         if match:
             return match.group(1)
 
@@ -164,7 +199,12 @@ def extract_var_name(line: str, token: str) -> Optional[str]:
 
 
 def is_comment_line(line: str) -> bool:
-    """Check if a line is a comment."""
+    """
+    Description: Check stripped text for supported comment prefixes to label context.
+    Parameters:
+        line: Line to inspect.
+    Output: True when a supported comment prefix matches, otherwise False.
+    """
     stripped = line.strip()
     comment_prefixes = ("#", "//", "/*", "*", "<!--", "--", ";", "rem ")
     return any(stripped.startswith(prefix) for prefix in comment_prefixes)
@@ -172,13 +212,10 @@ def is_comment_line(line: str) -> bool:
 
 def detect_file_type(file_path: Optional[str]) -> Optional[str]:
     """
-    Detect programming language from file extension.
-
-    Args:
+    Description: Map a file extension to a language identifier for context metadata.
+    Parameters:
         file_path: Path to the file
-
-    Returns:
-        Language identifier or None
+    Output: Language identifier, or None for a missing path or unknown extension.
     """
     if not file_path:
         return None
@@ -212,22 +249,15 @@ def detect_file_type(file_path: Optional[str]) -> Optional[str]:
 
 
 def is_test_file(file_path: Optional[str]) -> bool:
-    """Check if file is a test file based on path patterns."""
+    """
+    Description: Match test-path patterns to identify test context.
+    Parameters:
+        file_path: Optional source file path.
+    Output: True for a matching test path, otherwise False, including missing paths.
+    """
     if not file_path:
         return False
     return any(pattern.search(file_path) for pattern in TEST_PATH_PATTERNS)
-
-
-def has_safe_context(context: CodeContext) -> bool:
-    """Check if context suggests non-secret (safe) content."""
-    full_text = context.full_context
-    return any(pattern.search(full_text) for pattern in SAFE_CONTEXT_PATTERNS)
-
-
-def has_risky_context(context: CodeContext) -> bool:
-    """Check if context suggests secret content."""
-    full_text = context.full_context
-    return any(pattern.search(full_text) for pattern in RISKY_CONTEXT_PATTERNS)
 
 
 def extract_context(
@@ -237,16 +267,13 @@ def extract_context(
     context_lines: int = 3,
 ) -> CodeContext:
     """
-    Extract contextual information from code around a finding.
-
-    Args:
+    Description: Split content and extract the neighboring lines that describe a finding.
+    Parameters:
         content: Full file content or text blob
         line_number: 1-based line number of the finding
         file_path: Optional file path for metadata extraction
         context_lines: Number of lines before/after to include
-
-    Returns:
-        CodeContext with surrounding code and metadata
+    Output: CodeContext containing surrounding code and file metadata.
     """
     return extract_context_from_lines(
         content.splitlines(),
@@ -262,7 +289,16 @@ def extract_context_from_lines(
     file_path: Optional[str] = None,
     context_lines: int = 3,
 ) -> CodeContext:
-    """Extract context from lines already split by a batch caller."""
+    """
+    Description: Extract context from lines already split by a batch caller, so batches do not re-split the same
+        content.
+    Parameters:
+        lines: Previously split source lines.
+        line_number: One-based finding line number.
+        file_path: Optional source file path.
+        context_lines: Number of neighboring lines on each side.
+    Output: CodeContext; an out-of-bounds line produces empty line content and file metadata.
+    """
     total_lines = len(lines)
 
     # Adjust to 0-based indexing
@@ -307,15 +343,12 @@ def extract_context_from_finding(
     context_lines: int = 3,
 ) -> CodeContext:
     """
-    Extract context from a Finding object.
-
-    Args:
+    Description: Build context from a finding, reading its file when full content is unavailable.
+    Parameters:
         finding: Finding object with file/line info
         full_content: Optional full file content (reads from disk if not provided)
         context_lines: Number of lines before/after to include
-
-    Returns:
-        CodeContext with surrounding code and metadata
+    Output: CodeContext; may read a UTF-8 file, ignoring decoding errors. File I/O errors fall back to the snippet.
     """
     if finding.line is None:
         # No line info, create minimal context
@@ -349,11 +382,9 @@ __all__ = [
     "extract_context",
     "extract_context_from_lines",
     "extract_context_from_finding",
-    "extract_var_name",
+    "feature_var_name",
     "is_comment_line",
     "is_test_file",
-    "has_safe_context",
-    "has_risky_context",
     "detect_file_type",
     "SAFE_CONTEXT_PATTERNS",
     "RISKY_CONTEXT_PATTERNS",

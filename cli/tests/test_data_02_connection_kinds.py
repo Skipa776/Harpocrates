@@ -3,7 +3,7 @@
 import random
 import re
 
-from Harpocrates.training.generators import secret_templates as t
+from bench.canaries import secret_templates as t
 
 URI_WITH_PASSWORD = re.compile(r"^[a-z0-9+]+://[^:/@\s]+:[^@\s]+@[\w.-]+(:\d+)?(/[\w.-]*)?")
 PLACEHOLDER = re.compile(r"\$\{|<[a-z_]+>|\{\{|%s|changeme|\*\*\*")

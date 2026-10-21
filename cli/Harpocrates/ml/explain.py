@@ -14,10 +14,14 @@ Architectural contracts:
 - The XGBoost Booster is cached per resolved path with double-checked locking
   (thread-safe for future async/multi-threaded MCP transports).
 - model_path overrides must reside within _MODELS_DIR (cache-poisoning guard).
+- The model file is SHA-256-checked against onnx_model_hashes.json before use
+  (SEC-07), and the verified bytes are the bytes that get loaded. A missing
+  manifest, a missing entry, or a mismatch is refused, never loaded.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import threading
 from dataclasses import asdict, dataclass
@@ -60,7 +64,16 @@ _BOOSTER_LOCK = threading.Lock()
 
 @dataclass(frozen=True)
 class FeatureContribution:
-    """One feature's SHAP contribution to the model's log-odds output."""
+    """
+    Description: One feature's SHAP contribution to the model's log-odds output.
+    Parameters:
+        name: Canonical feature name.
+        index: Feature position in canonical order.
+        value: Raw feature value rounded to three decimal places.
+        contribution: SHAP log-odds delta rounded to three decimal places.
+        direction: Positive toward secrets, or negative.
+    Output: Instances provide a feature value, signed SHAP contribution, and direction.
+    """
 
     name: str
     index: int
@@ -72,18 +85,20 @@ class FeatureContribution:
 @dataclass(frozen=True)
 class Explanation:
     """
-    Structured explanation of one ML-stage finding.
-
-    `base_log_odds` + sum(c.contribution for c in contributions) ≈ raw_log_odds.
-    `predicted_probability` = sigmoid(raw_log_odds).
-
-    All floats rounded to 3 decimal places — prevents reconstruction of
-    the redacted token from high-precision entropy / length values.
-    Token-derived feature values (token_length, token_entropy, char_class_count,
-    digit_ratio, special_char_ratio) are suppressed to None in to_dict() output.
-
-    Findings produced by the regex tier (evidence != ML) return None from
-    explain_finding — they have no model decision to explain.
+    Description: Structured explanation of one ML-stage finding.
+    Parameters:
+        finding_id: Stable identifier for the finding.
+        category: Optional finding category.
+        base_log_odds: Rounded model baseline log odds.
+        raw_log_odds: Rounded prediction log odds.
+        predicted_probability: Rounded sigmoid probability.
+        contributions: All feature contributions in canonical order.
+        top_positive: Top secret-pushing contributions.
+        top_negative: Top non-secret-pushing contributions.
+    Output: Instances provide rounded model scores, feature contributions, and safe dictionary
+        serialization. base_log_odds plus the contributions gives raw_log_odds, and
+        predicted_probability is its sigmoid. Floats are rounded to 3 decimals and token-derived
+        features are None in to_dict(), so the redacted token cannot be rebuilt.
     """
 
     finding_id: str
@@ -96,6 +111,12 @@ class Explanation:
     top_negative: List[FeatureContribution]   # top-k not-secret-pushing features
 
     def to_dict(self) -> Dict[str, Any]:
+        """
+        Description: Serialize the explanation while suppressing token-derived feature values.
+        Parameters: None
+        Output: Dictionary containing scores and contribution lists; sensitive feature values become
+        None.
+        """
         return {
             "finding_id": self.finding_id,
             "category": self.category,
@@ -121,24 +142,17 @@ def explain_finding(
     top_k: int = 5,
 ) -> Optional[Explanation]:
     """
-    Compute TreeSHAP feature contributions for a single ML-stage finding.
-
-    Returns None when the finding was not produced by the ML stage (regex-tier
-    findings have no model decision to explain).
-
-    Lazy-imports xgboost — cost paid only on the first call in a process.
-    Subsequent calls use the cached Booster (~0.2ms each).
-
-    Args:
-        finding:    The Finding to explain.
-        context:    The CodeContext used during inference.
-        model_path: Override path to xgboost_model.json. Must reside within
-                    Harpocrates/ml/models/ (security: prevents cache poisoning).
-                    Defaults to the bundled artifact.
-        top_k:      Number of features to include in top_positive/top_negative.
-
-    Returns:
-        Explanation dataclass or None.
+    Description: Compute TreeSHAP feature contributions for a single ML-stage finding.
+    Parameters:
+        finding: The Finding to explain.
+        context: The CodeContext used during inference.
+        model_path: Override path to xgboost_model.json. Must reside within Harpocrates/ml/models/
+        (security: prevents cache poisoning). Defaults to the bundled artifact.
+        top_k: Number of features to include in top_positive/top_negative.
+    Output: Explanation, or None for a finding not produced by the ML stage (regex-tier findings
+        have no model decision to explain). Model loading can raise ValueError, FileNotFoundError,
+        OSError, or JSONDecodeError; inference errors propagate. The xgboost import and model load
+        happen on the first call in a process; later calls reuse the cached Booster (~0.2 ms).
     """
     import numpy as np
     import xgboost as xgb  # lazy — never executed on default scan path
@@ -199,7 +213,12 @@ def explain_finding(
 
 
 def _serialize_contribution(c: FeatureContribution) -> Dict[str, Any]:
-    """Serialize a FeatureContribution, suppressing value for token-derived features."""
+    """
+    Description: Serialize a FeatureContribution, suppressing value for token-derived features.
+    Parameters:
+        c: Feature contribution to serialize.
+    Output: New dictionary with value set to None for token-derived features.
+    """
     d = asdict(c)
     if c.name in _TOKEN_VALUE_FEATURES:
         d["value"] = None
@@ -208,13 +227,13 @@ def _serialize_contribution(c: FeatureContribution) -> Dict[str, Any]:
 
 def _load_booster(model_path: Optional[Path]) -> "xgb.Booster":
     """
-    Load and cache an XGBoost Booster. Thread-safe via double-checked locking.
-
-    Cache is keyed by resolved path so different model_path overrides each get
-    their own cache slot (prevents stale-cache bugs on test overrides).
-
-    Security: model_path, if provided, must reside within _MODELS_DIR to
-    prevent untrusted callers from poisoning the cache with a malicious model.
+    Description: Load and cache an XGBoost Booster. Thread-safe via double-checked locking.
+    Parameters:
+        model_path: Optional model path within the bundled models directory.
+    Output: Cached or newly loaded Booster, with the cache keyed by resolved path so overrides get
+        their own slot. Raises ValueError for disallowed paths or invalid hashes, FileNotFoundError for
+        missing files, and propagates file, JSON, and model-loading errors. A model_path must sit
+        inside _MODELS_DIR and match its manifest SHA-256 (SEC-07), or nothing loads.
     """
     import xgboost as xgb
 
@@ -241,29 +260,66 @@ def _load_booster(model_path: Optional[Path]) -> "xgb.Booster":
         if not path.exists():
             raise FileNotFoundError(
                 f"TreeSHAP requires {path}. "
-                "Reinstall with `pip install harpocrates` or rebuild via "
-                "`python -m Harpocrates.training.train_model`."
+                "xgboost_model.json ships with the package: reinstall with "
+                "`pip install harpocrates` (explain extra: `harpocrates[explain]`) to restore it."
             )
 
+        # SEC-07: load the exact bytes that passed the hash check, not a re-read of the path.
         booster = xgb.Booster()
-        booster.load_model(str(path))
+        booster.load_model(bytearray(_read_verified_model(path)))
         _BOOSTER_CACHE[resolved] = booster
         return booster
 
 
+def _read_verified_model(path: Path) -> bytes:
+    """
+    Description: Read a model artifact and check its SHA-256 against the manifest, failing closed.
+    Parameters:
+        path: Model file whose name is the manifest key.
+    Output: Verified file bytes; reads model and manifest files. Raises FileNotFoundError when the
+        manifest is absent, ValueError for a missing hash entry or mismatch, and propagates file and
+        JSON parsing errors.
+    """
+    from Harpocrates.ml.onnx_verifier import _verify_file_hash  # lazy: keeps module import light
+
+    if not _DEFAULT_HASHES_PATH.exists():
+        raise FileNotFoundError(
+            f"Model hash manifest not found: {_DEFAULT_HASHES_PATH}. "
+            "Refusing to load an unverified model."
+        )
+    expected: Dict[str, str] = json.loads(_DEFAULT_HASHES_PATH.read_text())
+    return _verify_file_hash(path, expected)
+
+
 def _reset_booster_cache() -> None:
-    """Reset the Booster cache. Intended for tests only."""
+    """
+    Description: Reset the Booster cache. Intended for tests only.
+    Parameters: None
+    Output: None; clears the shared Booster cache under a lock.
+    """
     with _BOOSTER_LOCK:
         _BOOSTER_CACHE.clear()
 
 
 def _finding_id(finding: "Finding") -> str:
-    """Stable 16-char hex identifier for a finding — token participates only in hashing."""
+    """
+    Description: Stable 16-char hex identifier for a finding — token participates only in hashing.
+    Parameters:
+        finding: Finding whose identity is hashed.
+    Output: Stable 16-character hexadecimal SHA-1 prefix computed from file, line, and token.
+    """
     raw = f"{finding.file}|{finding.line}|{finding.token or ''}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def _sigmoid(x: float) -> float:
+    """
+    Description: Convert log odds into a probability using the logistic function.
+    Parameters:
+        x: Log-odds value.
+    Output: Probability as a float; math.exp can raise OverflowError for a sufficiently negative
+        input.
+    """
     return 1.0 / (1.0 + math.exp(-x))
 
 

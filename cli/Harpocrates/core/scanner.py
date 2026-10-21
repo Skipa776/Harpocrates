@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, List, Literal, Optional, Set
 
 from Harpocrates.core.detector import detect_file, detect_file_with_ml, detect_text
 from Harpocrates.core.result import Finding, ScanResult
-from Harpocrates.utils.file_utils import iter_text_lines
+from Harpocrates.utils.file_utils import MEMORY_CAP, count_lines
 
 if TYPE_CHECKING:
     from Harpocrates.core.rust_backend import RustScannerBackend
@@ -94,10 +94,13 @@ DEFAULT_IGNORE_PATTERNS = {
 
 def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
     """
-    Determine if a file should be scanned.
-
-    Patterns without wildcards are matched exactly against any path component
-    (file name or directory name). Glob patterns are matched with fnmatch.
+    Description: Determine if a file should be scanned. Patterns without wildcards must match a path
+        component exactly; glob patterns use fnmatch.
+    Parameters:
+        path: File path whose components and type are checked.
+        ignore_patterns: Exact names and glob patterns to exclude.
+    Output: True for a nonsymlink regular file with no ignored path component; otherwise False. Queries
+        filesystem metadata.
     """
     if path.is_symlink():
         return False
@@ -123,42 +126,49 @@ def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
     return path.is_file()
 
 
+def _python_findings(
+    file_path: Path, verifier: Optional["Verifier"], memory_cap: int, ml_threshold: float
+) -> List[Finding]:
+    """
+    Description: Scan one file with the Python detector.
+    Parameters:
+        file_path: the file.
+        verifier: the ML verifier, or None for regex and entropy only.
+        memory_cap: the most bytes the scan may hold.
+        ml_threshold: the verifier's confidence threshold.
+    Output: The file's findings.
+    """
+    if verifier is None:
+        return detect_file(file_path, memory_cap=memory_cap)
+    return detect_file_with_ml(file_path, verifier=verifier, memory_cap=memory_cap, ml_threshold=ml_threshold)
+
+
 def scan_directory(
     directory: str | Path,
     recursive: bool = True,
-    max_file_size: int = 10 * 1024 * 1024,
+    memory_cap: int = MEMORY_CAP,
     ignore_patterns: Optional[Set[str]] = None,
     verifier: Optional["Verifier"] = None,
     ml_threshold: float = 0.5,
     engine: ScanEngine = "auto",
 ) -> ScanResult:
     """
-    Scan a directory for secrets.
-
-    Args:
-        directory: Path to directory to scan
-        recursive: If True, scan subdirectories
-        max_file_size: Maximum file size to scan (in bytes)
-        ignore_patterns: Additional patterns to ignore (merged with defaults)
-        verifier: Optional ML verifier for false positive filtering
-        ml_threshold: ML confidence threshold when verifier is enabled
-        engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it,
-            and ``python`` uses the original detector
-
-    Returns:
-        ScanResult containing all findings
-
-    Example:
-        >>> result = scan_directory("./my_project")
-        >>> print(f"Found {len(result.findings)} secrets")
-        >>> for finding in result.findings:
-        ...     print(f"{finding.file}:{finding.line} - {finding.type}")
+    Description: Scan a directory for secrets.
+    Parameters:
+        directory: Path to directory to scan.
+        recursive: If True, scan subdirectories.
+        memory_cap: The most bytes one file's scan may hold (FR-CORE-05). Every file is scanned whole.
+        ignore_patterns: Additional patterns to ignore, merged with the defaults.
+        verifier: Optional ML verifier for false positive filtering.
+        ml_threshold: ML confidence threshold when the verifier is enabled.
+        engine: Scan engine to use. auto prefers a built Rust scanner, rust requires it, and python
+            uses the original detector.
+    Output: ScanResult with findings, counts, timing, and captured scan errors; reads directory contents
+        and files and may initialize a native backend or ML verifier. Auto mode records native failures
+        and uses the Python fallback; explicit Rust failures return errors.
     """
     start_time = time.time()
     dir_path = Path(directory)
-
-    if not dir_path.exists():
-        return ScanResult(findings=[], errors=[f"Not a directory: {directory}"])
 
     if not dir_path.is_dir():
         return ScanResult(findings=[], errors=[f"Not a directory: {directory}"])
@@ -179,7 +189,6 @@ def scan_directory(
     scanned_files = 0
     total_lines = 0
     errors: List[str] = []
-    eligible_files: list[Path] = []
 
     if native_backend is not None:
         try:
@@ -187,7 +196,7 @@ def scan_directory(
                 batch = native_backend.scan_directory(
                     dir_path,
                     recursive=recursive,
-                    max_file_size=max_file_size,
+                    memory_cap=memory_cap,
                     ignore_patterns=ignore,
                 )
             else:
@@ -195,7 +204,7 @@ def scan_directory(
                     dir_path,
                     verifier=verifier,
                     recursive=recursive,
-                    max_file_size=max_file_size,
+                    memory_cap=memory_cap,
                     ignore_patterns=ignore,
                     ml_threshold=ml_threshold,
                 )
@@ -212,16 +221,12 @@ def scan_directory(
             errors.append(f"Rust directory scan failed; used Python fallback: {exc}")
             native_backend = None
         else:
-            all_findings.extend(batch.findings)
-            scanned_files += batch.scanned_files
-            total_lines += batch.total_lines
-            errors.extend(batch.errors)
             return ScanResult(
-                findings=all_findings,
-                scanned_files=scanned_files,
-                total_lines=total_lines,
+                findings=batch.findings,
+                scanned_files=batch.scanned_files,
+                total_lines=batch.total_lines,
                 duration_ms=(time.time() - start_time) * 1000,
-                errors=errors,
+                errors=[*errors, *batch.errors],
             )
 
     # Get all files and sort for deterministic ordering
@@ -235,34 +240,12 @@ def scan_directory(
             continue
 
         try:
-            if file_path.stat().st_size > max_file_size:
-                errors.append(f"Skipped large file: {file_path}")
-                continue
-        except (OSError, PermissionError) as e:
-            errors.append(f"Cannot access {file_path}: {e}")
-            continue
-
-        eligible_files.append(file_path)
-
-    for file_path in eligible_files:
-        try:
-            # Native directory scans return above; this loop is the Python
-            # engine or auto-mode fallback after a native failure.
-            if verifier is not None:
-                findings = detect_file_with_ml(
-                    file_path,
-                    verifier=verifier,
-                    max_bytes=max_file_size,
-                    ml_threshold=ml_threshold,
-                )
-            else:
-                findings = detect_file(file_path, max_bytes=max_file_size)
+            # Python engine, or the auto-mode fallback after a native failure.
+            findings = _python_findings(file_path, verifier, memory_cap, ml_threshold)
 
             all_findings.extend(findings)
             scanned_files += 1
-            total_lines += sum(
-                1 for _ in iter_text_lines(file_path, max_bytes=max_file_size)
-            )
+            total_lines += count_lines(file_path, memory_cap)
         except Exception as e:
             errors.append(f"Error scanning {file_path}: {e}")
 
@@ -279,29 +262,23 @@ def scan_directory(
 
 def scan_file(
     filepath: str | Path,
-    max_file_size: int = 10 * 1024 * 1024,
+    memory_cap: int = MEMORY_CAP,
     verifier: Optional["Verifier"] = None,
     ml_threshold: float = 0.5,
     engine: ScanEngine = "auto",
 ) -> ScanResult:
     """
-    Scan a single file for secrets.
-
-    Args:
-        filepath: Path to file
-        max_file_size: Maximum file size to scan
-        verifier: Optional ML verifier for false positive filtering
-        ml_threshold: ML confidence threshold when verifier is enabled
-        engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it,
-            and ``python`` uses the original detector
-
-    Returns:
-        ScanResult containing findings from this file
-
-    Example:
-        >>> result = scan_file("config.env")
-        >>> if result.found_secrets:
-        ...     print(f"⚠️  Found {len(result.findings)} secrets!")
+    Description: Scan a single file for secrets.
+    Parameters:
+        filepath: Path to file.
+        memory_cap: The most bytes the scan may hold (FR-CORE-05). The whole file is scanned.
+        verifier: Optional ML verifier for false positive filtering.
+        ml_threshold: ML confidence threshold when the verifier is enabled.
+        engine: Scan engine to use. auto prefers a built Rust scanner, rust requires it, and python
+            uses the original detector.
+    Output: ScanResult with findings, counts, timing, and captured errors; reads the file and may
+        initialize a native backend or ML verifier. Auto mode records native failures and falls back to
+        Python; line-count read failures produce zero lines.
     """
     start_time = time.time()
     file_path = Path(filepath)
@@ -327,11 +304,11 @@ def scan_file(
                 findings = native_backend.scan_file_with_ml(
                     file_path,
                     verifier=verifier,
-                    max_bytes=max_file_size,
+                    memory_cap=memory_cap,
                     ml_threshold=ml_threshold,
                 )
             else:
-                findings = native_backend.scan_file(file_path, max_bytes=max_file_size)
+                findings = native_backend.scan_file(file_path, memory_cap=memory_cap)
         except Exception as exc:
             if engine == "rust":
                 return ScanResult(
@@ -346,15 +323,7 @@ def scan_file(
 
     if native_backend is None:
         try:
-            if verifier is not None:
-                findings = detect_file_with_ml(
-                    file_path,
-                    verifier=verifier,
-                    max_bytes=max_file_size,
-                    ml_threshold=ml_threshold,
-                )
-            else:
-                findings = detect_file(file_path, max_bytes=max_file_size)
+            findings = _python_findings(file_path, verifier, memory_cap, ml_threshold)
         except Exception as exc:
             return ScanResult(
                 findings=[],
@@ -365,9 +334,8 @@ def scan_file(
             )
 
     try:
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            total_lines = sum(1 for _ in f)
-    except Exception:
+        total_lines = count_lines(file_path, memory_cap)
+    except OSError:
         total_lines = 0
 
     duration = (time.time() - start_time) * 1000
@@ -382,7 +350,13 @@ def scan_file(
 
 
 def _resolve_native_backend(engine: ScanEngine) -> Optional["RustScannerBackend"]:
-    """Return a native backend for auto/rust, or None for Python."""
+    """
+    Description: Return a native backend for auto or rust, or None for Python.
+    Parameters:
+        engine: Requested auto, python, or rust scan engine.
+    Output: Discovered RustScannerBackend or None; lazily imports and discovers the backend. Raises
+        ValueError for unknown engines and RuntimeError if a required backend is unavailable.
+    """
     if engine not in {"auto", "python", "rust"}:
         raise ValueError(f"Unknown scan engine: {engine}")
     if engine == "python":
@@ -400,11 +374,15 @@ _HUNK_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 def scan_git_history(repo: Path) -> ScanResult:
-    """Scan lines added in every commit of *repo* (FR-COMMIT-01).
-
-    Findings carry ``file="<sha12>:<path>"`` and the line number in that commit.
-    Merge commits are diffed against their first parent so conflict resolutions
-    are covered. Regex + entropy only; the ML stage is not applied to history.
+    """
+    Description: Scan lines added in every commit of the repository (FR-COMMIT-01). Only regex and entropy
+        checks run here; the ML stage is not applied to history.
+    Parameters:
+        repo: Repository path whose history is scanned.
+    Output: ScanResult for added lines across commits; launches a read-only git log subprocess. Merge
+        commits are diffed against their first parent so conflict resolutions are covered. Findings use
+        file "<sha12>:<path>" and the line number in that commit. Raises ValueError for nonzero Git exit
+        status and propagates subprocess startup OSError and detection failures.
     """
     start = time.perf_counter()
     cmd = [

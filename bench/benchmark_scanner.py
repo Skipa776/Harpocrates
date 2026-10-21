@@ -199,7 +199,7 @@ def benchmark_directory(
         lambda: scan_directory(
             root,
             engine=engine,
-            max_file_size=max_file_size,
+            memory_cap=max_file_size,
             ignore_patterns=ignore_patterns,
         ),
         iterations=iterations,
@@ -242,7 +242,7 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=7)
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--onnx-candidates", type=int, default=64)
-    parser.add_argument("--max-size-mb", type=int, default=10)
+    parser.add_argument("--max-size-mb", type=int, default=64, help="memory cap per file in MB (FR-CORE-05)")
     parser.add_argument("--skip-python", action="store_true")
     parser.add_argument(
         "--full-tree",

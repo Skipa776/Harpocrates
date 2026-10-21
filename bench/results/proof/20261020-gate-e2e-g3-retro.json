@@ -1,0 +1,284 @@
+{
+  "e2e_version": "1",
+  "isolation": {
+    "method": "throwaway HOME and CODEX_HOME, from-scratch environment, fake API keys, loopback gate and mock, paths.home pinned by bootstrap",
+    "real_home_changed": [],
+    "real_home_paths_snapshotted": 9
+  },
+  "run_id": "20261020-gate-e2e-g3-retro",
+  "scenarios": [
+    {
+      "agent": "claude",
+      "block_message_shown": true,
+      "block_reason_shown": "HARPO-BLOCK-SCAN-ERROR",
+      "exit_code": 1,
+      "gate_log": {
+        "by_decision": {
+          "blocked": 2
+        },
+        "by_reason": {
+          "HARPO-BLOCK-SCAN-ERROR": 2
+        },
+        "by_route": {
+          "anthropic.messages": 2
+        },
+        "lines": 2
+      },
+      "hook_installed": true,
+      "install": "ok",
+      "mock_model_requests": 0,
+      "mock_requests": 0,
+      "placeholders": {
+        "by_type": {},
+        "total": 0
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "match",
+      "scan": "default",
+      "scenario": "claude-default-scan",
+      "sec10_refusals": 0,
+      "seconds": 1.1,
+      "status": "ok",
+      "tool_results_seen": 0,
+      "version": "2.1.303 (Claude Code)"
+    },
+    {
+      "agent": "codex",
+      "block_message_shown": true,
+      "block_reason_shown": "HARPO-BLOCK-SCAN-ERROR",
+      "exit_code": 1,
+      "gate_log": {
+        "by_decision": {
+          "blocked": 1
+        },
+        "by_reason": {
+          "HARPO-BLOCK-SCAN-ERROR": 1
+        },
+        "by_route": {
+          "openai.responses": 1
+        },
+        "lines": 1
+      },
+      "hook_installed": true,
+      "install": "ok",
+      "mock_model_requests": 0,
+      "mock_requests": 0,
+      "placeholders": {
+        "by_type": {},
+        "total": 0
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "default",
+      "scenario": "codex-default-scan",
+      "sec10_refusals": 0,
+      "seconds": 0.7,
+      "status": "ok",
+      "tool_results_seen": 0,
+      "version": "codex-cli 0.163.0"
+    },
+    {
+      "agent": "claude",
+      "block_message_shown": null,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 4
+        },
+        "by_reason": {},
+        "by_route": {
+          "anthropic.messages": 4
+        },
+        "lines": 4
+      },
+      "hook_installed": true,
+      "install": "ok",
+      "mock_model_requests": 4,
+      "mock_requests": 4,
+      "placeholders": {
+        "by_type": {},
+        "total": 0
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "match",
+      "scan": "passthrough",
+      "scenario": "claude-sec10-match",
+      "sec10_refusals": 0,
+      "seconds": 1.3,
+      "status": "ok",
+      "tool_results_seen": 3,
+      "version": "2.1.303 (Claude Code)"
+    },
+    {
+      "agent": "claude",
+      "block_message_shown": false,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 4
+        },
+        "by_reason": {},
+        "by_route": {
+          "anthropic.messages": 4
+        },
+        "lines": 4
+      },
+      "hook_installed": true,
+      "install": "ok",
+      "mock_model_requests": 4,
+      "mock_requests": 4,
+      "placeholders": {
+        "by_type": {},
+        "total": 0
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "mismatch",
+      "scan": "passthrough",
+      "scenario": "claude-sec10-mismatch",
+      "sec10_refusals": 3,
+      "seconds": 1.0,
+      "status": "ok",
+      "tool_results_seen": 3,
+      "version": "2.1.303 (Claude Code)"
+    }
+  ],
+  "seed": 0,
+  "started_utc": "2026-10-20T08:27:13+00:00",
+  "suite": "g3",
+  "target": "gate -> mock",
+  "versions": {
+    "claude": "2.1.303 (Claude Code)",
+    "codex": "codex-cli 0.163.0",
+    "python": "3.12.12"
+  }
+}

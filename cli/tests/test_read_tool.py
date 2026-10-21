@@ -180,3 +180,27 @@ def test_fr_read_01_still_refuses_other_binary_with_nuls_on_both_parities(tmp_pa
     path.write_bytes((b"\x00\x01\x00\x00\x02\x00" * 200))
     with pytest.raises(ValueError, match="binary"):
         Redactor().safe_read(str(path))
+
+
+def test_sec_02_secret_values_maps_each_value_to_its_type_and_redact_uses_it(repo) -> None:
+    """The gate (G4) finds secrets with the same rules as the read tool: secret_values is the one place that turns
+    findings into {value: type}; redact replaces exactly those values."""
+    _root, canaries = repo
+    redactor = Redactor()
+    token = next(c["value"] for c in canaries if c["kind"] == "github_token")
+    pem = next(c["value"] for c in canaries if c["kind"] == "private_key")
+    text = f"GITHUB_TOKEN={token}\nkey follows\n{pem}\nplain words\n"
+    values = redactor.secret_values(text)
+    assert values[token] == "api_token" and values[pem] == "private_key"  # the whole block, not only its header line
+    assert set(values.values()) <= set(SECRET_TYPES)
+    redacted = redactor.redact(text)
+    assert token not in redacted and "plain words" in redacted and redacted.count("\n") == text.count("\n")
+    assert redactor.secret_values("nothing to see here") == {}
+
+
+def test_sec_02_secret_values_accepts_the_findings_to_use(repo) -> None:
+    """A caller that verifies findings its own way (the gate: failing on a verifier error) hands them in."""
+    _root, canaries = repo
+    token = next(c["value"] for c in canaries if c["kind"] == "github_token")
+    redactor = Redactor()
+    assert redactor.secret_values(f"x {token}", findings=[]) == {}

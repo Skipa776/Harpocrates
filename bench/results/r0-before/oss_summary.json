@@ -1,0 +1,30 @@
+{
+  "layers": {
+    "commit": {
+      "by_evidence": {
+        "hybrid": 294,
+        "regex": 39
+      },
+      "errors": [],
+      "files": 11354,
+      "findings": 333,
+      "findings_per_1k_files": 29.33,
+      "lines": 2118319,
+      "ml_threshold": 0.19
+    },
+    "gate": {
+      "by_evidence": {
+        "hybrid": 434,
+        "regex": 39
+      },
+      "errors": [],
+      "files": 11354,
+      "findings": 473,
+      "findings_per_1k_files": 41.66,
+      "lines": 2118319,
+      "ml_threshold": 0.0
+    }
+  },
+  "repos": 42,
+  "split": "test"
+}

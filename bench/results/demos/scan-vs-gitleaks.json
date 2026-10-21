@@ -1,0 +1,120 @@
+{
+  "seed": 0,
+  "tools": {
+    "harpo": "harpo 1.3.0",
+    "gitleaks": "8.30.1"
+  },
+  "canaries": [
+    {
+      "file": ".env",
+      "kind": "aws_access_key_id",
+      "harpo": true,
+      "gitleaks": false,
+      "caveat": "canary is not base32-valid (contains 0/1/8/9), so gitleaks's aws rule cannot match it; not evidence"
+    },
+    {
+      "file": ".env",
+      "kind": "aws_secret_access_key",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": ".env",
+      "kind": "openai_key",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": ".env",
+      "kind": "db_url",
+      "harpo": true,
+      "gitleaks": false
+    },
+    {
+      "file": ".env",
+      "kind": "db_password",
+      "harpo": true,
+      "gitleaks": false,
+      "caveat": "embedded in db_url; the same finding covers both"
+    },
+    {
+      "file": "config/settings.py",
+      "kind": "github_token",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": "config/settings.py",
+      "kind": "slack_token",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": "config/app.yaml",
+      "kind": "sendgrid_key",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": "config/app.yaml",
+      "kind": "stripe_key",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": "docker-compose.yml",
+      "kind": "postgres_password",
+      "harpo": false,
+      "gitleaks": false
+    },
+    {
+      "file": "src/client.js",
+      "kind": "twilio_auth_token",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": "src/client.js",
+      "kind": "gcp_api_key",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": "src/client.js",
+      "kind": "jwt",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": ".npmrc",
+      "kind": "npm_token",
+      "harpo": true,
+      "gitleaks": true
+    },
+    {
+      "file": "deploy/id_rsa",
+      "kind": "private_key",
+      "harpo": true,
+      "gitleaks": true
+    }
+  ],
+  "totals": {
+    "canaries": 15,
+    "harpo_found": 14,
+    "gitleaks_found": 11,
+    "only_harpo": [
+      "aws_access_key_id",
+      "db_url",
+      "db_password"
+    ],
+    "only_harpo_without_caveat": [
+      "db_url"
+    ],
+    "only_gitleaks": [],
+    "neither": [
+      "postgres_password"
+    ],
+    "harpo_findings_total": 17,
+    "gitleaks_findings_total": 11
+  }
+}

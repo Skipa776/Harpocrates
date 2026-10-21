@@ -1,0 +1,3 @@
+# pytest summary (cmd: .venv/bin/python -m pytest -q -p no:cacheprovider), run at b2f9873
+1157 passed, 1 skipped, 0 failed (collected 1158), 2 runs identical
+skipped: cli/tests/test_hooks.py:598: this file system rejects non-UTF-8 names

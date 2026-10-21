@@ -1,0 +1,2623 @@
+{
+  "direct": {
+    "cases": [
+      {
+        "block_type": "text",
+        "canary_class": "known-format",
+        "canary_kind": "github_token",
+        "case_id": "anthropic_text",
+        "expect": "redact",
+        "field_path": "messages[0].content[0].text",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[0].content[0].text"
+        ],
+        "planted_path": "messages[0].content[0].text",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_anthropic_text"
+      },
+      {
+        "block_type": "text.citations",
+        "canary_class": "ml-only",
+        "canary_kind": "db_password",
+        "case_id": "anthropic_text_cited_text",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].citations[0].cited_text",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].citations[0].cited_text"
+        ],
+        "planted_path": "messages[1].content[0].citations[0].cited_text",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "image",
+        "canary_class": "known-format",
+        "canary_kind": "openai_key",
+        "case_id": "anthropic_image",
+        "expect": "redact",
+        "field_path": "messages[0].content[0].source.url",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[0].content[0].source.url"
+        ],
+        "planted_path": "messages[0].content[0].source.url",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_image"
+      },
+      {
+        "block_type": "image",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "anthropic_image_base64",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "anthropic",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "document",
+        "canary_class": "known-format",
+        "canary_kind": "private_key",
+        "case_id": "anthropic_document_text",
+        "expect": "redact",
+        "field_path": "messages[0].content[0].source.data",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[0].content[0].source.data"
+        ],
+        "planted_path": "messages[0].content[0].source.data",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_document_text"
+      },
+      {
+        "block_type": "document",
+        "canary_class": "known-format",
+        "canary_kind": "stripe_key",
+        "case_id": "anthropic_document_pdf",
+        "expect": "redact",
+        "field_path": "messages[0].content[0].title",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[0].content[0].title"
+        ],
+        "planted_path": "messages[0].content[0].title",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_document_pdf"
+      },
+      {
+        "block_type": "document",
+        "canary_class": "ml-only",
+        "canary_kind": "twilio_auth_token",
+        "case_id": "anthropic_document_content",
+        "expect": "redact",
+        "field_path": "messages[0].content[0].source.content[0].text",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[0].content[0].source.content[0].text"
+        ],
+        "planted_path": "messages[0].content[0].source.content[0].text",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_document_content"
+      },
+      {
+        "block_type": "document",
+        "canary_class": "known-format",
+        "canary_kind": "slack_token",
+        "case_id": "anthropic_document_url",
+        "expect": "redact",
+        "field_path": "messages[0].content[0].source.url",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[0].content[0].source.url"
+        ],
+        "planted_path": "messages[0].content[0].source.url",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_document_url"
+      },
+      {
+        "block_type": "search_result",
+        "canary_class": "ml-only",
+        "canary_kind": "postgres_password",
+        "case_id": "anthropic_search_result",
+        "expect": "redact",
+        "field_path": "messages[0].content[0].content[0].text",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[0].content[0].content[0].text"
+        ],
+        "planted_path": "messages[0].content[0].content[0].text",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_search_result"
+      },
+      {
+        "block_type": "tool_use",
+        "canary_class": "known-format",
+        "canary_kind": "sendgrid_key",
+        "case_id": "anthropic_tool_use",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].input.command",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].input.command"
+        ],
+        "planted_path": "messages[1].content[0].input.command",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_anthropic_tool_use"
+      },
+      {
+        "block_type": "tool_result",
+        "canary_class": "known-format",
+        "canary_kind": "private_key",
+        "case_id": "anthropic_tool_result_string",
+        "expect": "redact",
+        "field_path": "messages[2].content[0].content",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[2].content[0].content"
+        ],
+        "planted_path": "messages[2].content[0].content",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_anthropic_tool_result_string"
+      },
+      {
+        "block_type": "tool_result",
+        "canary_class": "known-format",
+        "canary_kind": "gcp_api_key",
+        "case_id": "anthropic_tool_result_blocks",
+        "expect": "redact",
+        "field_path": "messages[2].content[0].content[0].text",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[2].content[0].content[0].text"
+        ],
+        "planted_path": "messages[2].content[0].content[0].text",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_anthropic_tool_result_blocks"
+      },
+      {
+        "block_type": "thinking",
+        "canary_class": "known-format",
+        "canary_kind": "aws_access_key_id",
+        "case_id": "anthropic_thinking",
+        "expect": "block",
+        "field_path": "messages[1].content[0].thinking",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].thinking"
+        ],
+        "planted_path": "messages[1].content[0].thinking",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_anthropic_thinking"
+      },
+      {
+        "block_type": "redacted_thinking",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "anthropic_redacted_thinking",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "anthropic",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_anthropic_redacted_thinking"
+      },
+      {
+        "block_type": "compaction",
+        "canary_class": "known-format",
+        "canary_kind": "npm_token",
+        "case_id": "anthropic_compaction",
+        "expect": "block",
+        "field_path": "messages[1].content[0].content",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].content"
+        ],
+        "planted_path": "messages[1].content[0].content",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_compaction"
+      },
+      {
+        "block_type": "server_tool_use",
+        "canary_class": "known-format",
+        "canary_kind": "jwt",
+        "case_id": "anthropic_server_tool_use",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].input.query",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].input.query"
+        ],
+        "planted_path": "messages[1].content[0].input.query",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_server_tool_use"
+      },
+      {
+        "block_type": "web_search_tool_result",
+        "canary_class": "known-format",
+        "canary_kind": "github_token",
+        "case_id": "anthropic_web_search_tool_result",
+        "expect": "block",
+        "field_path": "messages[1].content[0].content[0].title",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].content[0].title"
+        ],
+        "planted_path": "messages[1].content[0].content[0].title",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_web_search_tool_result"
+      },
+      {
+        "block_type": "web_fetch_tool_result",
+        "canary_class": "ml-only",
+        "canary_kind": "db_password",
+        "case_id": "anthropic_web_fetch_tool_result",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].content.content.source.data",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].content.content.source.data"
+        ],
+        "planted_path": "messages[1].content[0].content.content.source.data",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_web_fetch_tool_result"
+      },
+      {
+        "block_type": "code_execution_tool_result",
+        "canary_class": "known-format",
+        "canary_kind": "openai_key",
+        "case_id": "anthropic_code_execution_tool_result",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].content.stdout",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].content.stdout"
+        ],
+        "planted_path": "messages[1].content[0].content.stdout",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_code_execution_tool_result"
+      },
+      {
+        "block_type": "bash_code_execution_tool_result",
+        "canary_class": "ml-only",
+        "canary_kind": "aws_secret_access_key",
+        "case_id": "anthropic_bash_code_execution_tool_result",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].content.stdout",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].content.stdout"
+        ],
+        "planted_path": "messages[1].content[0].content.stdout",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "text_editor_code_execution_tool_result",
+        "canary_class": "known-format",
+        "canary_kind": "stripe_key",
+        "case_id": "anthropic_text_editor_tool_result",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].content.content",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].content.content"
+        ],
+        "planted_path": "messages[1].content[0].content.content",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_text_editor_tool_result"
+      },
+      {
+        "block_type": "tool_search_tool_result",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "anthropic_tool_search_tool_result",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "anthropic",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_tool_search_tool_result"
+      },
+      {
+        "block_type": "mcp_tool_use",
+        "canary_class": "ml-only",
+        "canary_kind": "twilio_auth_token",
+        "case_id": "anthropic_mcp_tool_use",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].input.q",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].input.q"
+        ],
+        "planted_path": "messages[1].content[0].input.q",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_mcp_tool_use"
+      },
+      {
+        "block_type": "mcp_tool_result",
+        "canary_class": "known-format",
+        "canary_kind": "slack_token",
+        "case_id": "anthropic_mcp_tool_result",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].content[0].text",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].content[0].text"
+        ],
+        "planted_path": "messages[1].content[0].content[0].text",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_mcp_tool_result"
+      },
+      {
+        "block_type": "mcp_tool_listing",
+        "canary_class": "ml-only",
+        "canary_kind": "postgres_password",
+        "case_id": "anthropic_mcp_tool_listing",
+        "expect": "block",
+        "field_path": "messages[1].content[0].tools[0].description",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].tools[0].description"
+        ],
+        "planted_path": "messages[1].content[0].tools[0].description",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_mcp_tool_listing"
+      },
+      {
+        "block_type": "container_upload",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "anthropic_container_upload",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "anthropic",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_container_upload"
+      },
+      {
+        "block_type": "unknown",
+        "canary_class": "known-format",
+        "canary_kind": "sendgrid_key",
+        "case_id": "anthropic_unknown_block_blocked",
+        "expect": "block",
+        "field_path": "messages[0].content[0].text",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[0].content[0].text"
+        ],
+        "planted_path": "messages[0].content[0].text",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "content-block",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_unknown_block_blocked"
+      },
+      {
+        "block_type": "text",
+        "canary_class": "known-format",
+        "canary_kind": "db_url",
+        "case_id": "anthropic_system_role_text",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].text",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].text"
+        ],
+        "planted_path": "messages[1].content[0].text",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "system-role",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_anthropic_system_role_text"
+      },
+      {
+        "block_type": "text",
+        "canary_class": "known-format",
+        "canary_kind": "gcp_api_key",
+        "case_id": "anthropic_system_role_string",
+        "expect": "redact",
+        "field_path": "messages[1].content",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content"
+        ],
+        "planted_path": "messages[1].content",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "system-role",
+        "source": "captured",
+        "test_name": null
+      },
+      {
+        "block_type": "tool_addition",
+        "canary_class": "known-format",
+        "canary_kind": "aws_access_key_id",
+        "case_id": "anthropic_tool_addition",
+        "expect": "redact",
+        "field_path": "messages[1].content[0].definition.description",
+        "fmt": "anthropic",
+        "found_paths": [
+          "messages[1].content[0].definition.description"
+        ],
+        "planted_path": "messages[1].content[0].definition.description",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "system-role",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_tool_addition"
+      },
+      {
+        "block_type": "tool_removal",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "anthropic_tool_removal",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "anthropic",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/messages",
+        "section": "system-role",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_tool_removal"
+      },
+      {
+        "block_type": "custom",
+        "canary_class": "known-format",
+        "canary_kind": "npm_token",
+        "case_id": "anthropic_tools_custom",
+        "expect": "redact",
+        "field_path": "tools[0].description",
+        "fmt": "anthropic",
+        "found_paths": [
+          "tools[0].description"
+        ],
+        "planted_path": "tools[0].description",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "tools",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_anthropic_tools_custom"
+      },
+      {
+        "block_type": "server",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "anthropic_tools_server",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "anthropic",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/messages",
+        "section": "tools",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_tools_server"
+      },
+      {
+        "block_type": "mcp_toolset",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "anthropic_tools_mcp_toolset",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "anthropic",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/messages",
+        "section": "tools",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_tools_mcp_toolset"
+      },
+      {
+        "block_type": "unknown",
+        "canary_class": "known-format",
+        "canary_kind": "jwt",
+        "case_id": "anthropic_tools_unknown_type_blocked",
+        "expect": "block",
+        "field_path": "tools[0].description",
+        "fmt": "anthropic",
+        "found_paths": [
+          "tools[0].description"
+        ],
+        "planted_path": "tools[0].description",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "tools",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_anthropic_tools_unknown_type_blocked"
+      },
+      {
+        "block_type": "custom",
+        "canary_class": "known-format",
+        "canary_kind": "github_token",
+        "case_id": "anthropic_tools_custom_schema_description",
+        "expect": "redact",
+        "field_path": "tools[0].input_schema.properties.q.description",
+        "fmt": "anthropic",
+        "found_paths": [
+          "tools[0].input_schema.properties.q.description"
+        ],
+        "planted_path": "tools[0].input_schema.properties.q.description",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "tools",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "system",
+        "canary_class": "ml-only",
+        "canary_kind": "db_password",
+        "case_id": "anthropic_system_string",
+        "expect": "redact",
+        "field_path": "system",
+        "fmt": "anthropic",
+        "found_paths": [
+          "system"
+        ],
+        "planted_path": "system",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "top-level",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "system",
+        "canary_class": "known-format",
+        "canary_kind": "openai_key",
+        "case_id": "anthropic_system_blocks",
+        "expect": "redact",
+        "field_path": "system[1].text",
+        "fmt": "anthropic",
+        "found_paths": [
+          "system[1].text"
+        ],
+        "planted_path": "system[1].text",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "top-level",
+        "source": "captured",
+        "test_name": null
+      },
+      {
+        "block_type": "metadata",
+        "canary_class": "ml-only",
+        "canary_kind": "aws_secret_access_key",
+        "case_id": "anthropic_metadata_user_id",
+        "expect": "redact",
+        "field_path": "metadata.user_id",
+        "fmt": "anthropic",
+        "found_paths": [
+          "metadata.user_id"
+        ],
+        "planted_path": "metadata.user_id",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "top-level",
+        "source": "captured",
+        "test_name": null
+      },
+      {
+        "block_type": "stop_sequences",
+        "canary_class": "known-format",
+        "canary_kind": "stripe_key",
+        "case_id": "anthropic_stop_sequences",
+        "expect": "redact",
+        "field_path": "stop_sequences[0]",
+        "fmt": "anthropic",
+        "found_paths": [
+          "stop_sequences[0]"
+        ],
+        "planted_path": "stop_sequences[0]",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "top-level",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "output_config",
+        "canary_class": "ml-only",
+        "canary_kind": "twilio_auth_token",
+        "case_id": "anthropic_output_config_schema",
+        "expect": "redact",
+        "field_path": "output_config.format.schema.properties.q.description",
+        "fmt": "anthropic",
+        "found_paths": [
+          "output_config.format.schema.properties.q.description"
+        ],
+        "planted_path": "output_config.format.schema.properties.q.description",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "top-level",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "mcp_servers",
+        "canary_class": "known-format",
+        "canary_kind": "slack_token",
+        "case_id": "anthropic_mcp_servers_authorization_token",
+        "expect": "pass",
+        "field_path": "mcp_servers[0].authorization_token",
+        "fmt": "anthropic",
+        "found_paths": [
+          "mcp_servers[0].authorization_token"
+        ],
+        "planted_path": "mcp_servers[0].authorization_token",
+        "received": true,
+        "route": "/v1/messages",
+        "section": "top-level",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "message",
+        "canary_class": "ml-only",
+        "canary_kind": "postgres_password",
+        "case_id": "responses_message_string",
+        "expect": "redact",
+        "field_path": "input[0].content",
+        "fmt": "responses",
+        "found_paths": [
+          "input[0].content"
+        ],
+        "planted_path": "input[0].content",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_message_string"
+      },
+      {
+        "block_type": "input_text",
+        "canary_class": "known-format",
+        "canary_kind": "sendgrid_key",
+        "case_id": "responses_input_text",
+        "expect": "redact",
+        "field_path": "input[0].content[0].text",
+        "fmt": "responses",
+        "found_paths": [
+          "input[0].content[0].text"
+        ],
+        "planted_path": "input[0].content[0].text",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_responses_input_text"
+      },
+      {
+        "block_type": "output_text",
+        "canary_class": "known-format",
+        "canary_kind": "db_url",
+        "case_id": "responses_output_text",
+        "expect": "redact",
+        "field_path": "input[1].content[0].text",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].content[0].text"
+        ],
+        "planted_path": "input[1].content[0].text",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_responses_output_text"
+      },
+      {
+        "block_type": "refusal",
+        "canary_class": "known-format",
+        "canary_kind": "gcp_api_key",
+        "case_id": "responses_refusal",
+        "expect": "redact",
+        "field_path": "input[1].content[0].refusal",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].content[0].refusal"
+        ],
+        "planted_path": "input[1].content[0].refusal",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_refusal"
+      },
+      {
+        "block_type": "input_image",
+        "canary_class": "known-format",
+        "canary_kind": "aws_access_key_id",
+        "case_id": "responses_input_image",
+        "expect": "redact",
+        "field_path": "input[0].content[0].image_url",
+        "fmt": "responses",
+        "found_paths": [
+          "input[0].content[0].image_url"
+        ],
+        "planted_path": "input[0].content[0].image_url",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_input_image"
+      },
+      {
+        "block_type": "input_image",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "responses_input_image_data_url",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "responses",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "input_file",
+        "canary_class": "known-format",
+        "canary_kind": "npm_token",
+        "case_id": "responses_input_file",
+        "expect": "redact",
+        "field_path": "input[0].content[0].filename",
+        "fmt": "responses",
+        "found_paths": [
+          "input[0].content[0].filename"
+        ],
+        "planted_path": "input[0].content[0].filename",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_input_file"
+      },
+      {
+        "block_type": "function_call",
+        "canary_class": "known-format",
+        "canary_kind": "jwt",
+        "case_id": "responses_function_call",
+        "expect": "redact",
+        "field_path": "input[1].arguments{json}.cmd",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].arguments{json}.cmd"
+        ],
+        "planted_path": "input[1].arguments{json}.cmd",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_responses_function_call"
+      },
+      {
+        "block_type": "function_call_output",
+        "canary_class": "known-format",
+        "canary_kind": "private_key",
+        "case_id": "responses_function_call_output",
+        "expect": "redact",
+        "field_path": "input[2].output",
+        "fmt": "responses",
+        "found_paths": [
+          "input[2].output"
+        ],
+        "planted_path": "input[2].output",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_responses_function_call_output"
+      },
+      {
+        "block_type": "custom_tool_call",
+        "canary_class": "ml-only",
+        "canary_kind": "db_password",
+        "case_id": "responses_custom_tool_call",
+        "expect": "redact",
+        "field_path": "input[1].input",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].input"
+        ],
+        "planted_path": "input[1].input",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_custom_tool_call"
+      },
+      {
+        "block_type": "custom_tool_call_output",
+        "canary_class": "known-format",
+        "canary_kind": "openai_key",
+        "case_id": "responses_custom_tool_call_output",
+        "expect": "redact",
+        "field_path": "input[2].output",
+        "fmt": "responses",
+        "found_paths": [
+          "input[2].output"
+        ],
+        "planted_path": "input[2].output",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_custom_tool_call_output"
+      },
+      {
+        "block_type": "reasoning",
+        "canary_class": "ml-only",
+        "canary_kind": "aws_secret_access_key",
+        "case_id": "responses_reasoning",
+        "expect": "block",
+        "field_path": "input[1].summary[0].text",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].summary[0].text"
+        ],
+        "planted_path": "input[1].summary[0].text",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_responses_reasoning"
+      },
+      {
+        "block_type": "local_shell_call",
+        "canary_class": "known-format",
+        "canary_kind": "stripe_key",
+        "case_id": "responses_local_shell_call",
+        "expect": "redact",
+        "field_path": "input[1].action.command[2]",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].action.command[2]"
+        ],
+        "planted_path": "input[1].action.command[2]",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_local_shell_call"
+      },
+      {
+        "block_type": "local_shell_call_output",
+        "canary_class": "ml-only",
+        "canary_kind": "twilio_auth_token",
+        "case_id": "responses_local_shell_call_output",
+        "expect": "redact",
+        "field_path": "input[1].output{json}.output",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].output{json}.output"
+        ],
+        "planted_path": "input[1].output{json}.output",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_local_shell_call_output"
+      },
+      {
+        "block_type": "shell_call",
+        "canary_class": "known-format",
+        "canary_kind": "slack_token",
+        "case_id": "responses_shell_call",
+        "expect": "redact",
+        "field_path": "input[1].action.commands[0]",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].action.commands[0]"
+        ],
+        "planted_path": "input[1].action.commands[0]",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_shell_call"
+      },
+      {
+        "block_type": "shell_call_output",
+        "canary_class": "ml-only",
+        "canary_kind": "postgres_password",
+        "case_id": "responses_shell_call_output",
+        "expect": "redact",
+        "field_path": "input[1].output[0].stdout",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].output[0].stdout"
+        ],
+        "planted_path": "input[1].output[0].stdout",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_shell_call_output"
+      },
+      {
+        "block_type": "apply_patch_call",
+        "canary_class": "known-format",
+        "canary_kind": "sendgrid_key",
+        "case_id": "responses_apply_patch_call",
+        "expect": "redact",
+        "field_path": "input[1].operation.diff",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].operation.diff"
+        ],
+        "planted_path": "input[1].operation.diff",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_apply_patch_call"
+      },
+      {
+        "block_type": "apply_patch_call_output",
+        "canary_class": "known-format",
+        "canary_kind": "db_url",
+        "case_id": "responses_apply_patch_call_output",
+        "expect": "redact",
+        "field_path": "input[1].output",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].output"
+        ],
+        "planted_path": "input[1].output",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_apply_patch_call_output"
+      },
+      {
+        "block_type": "computer_call",
+        "canary_class": "known-format",
+        "canary_kind": "gcp_api_key",
+        "case_id": "responses_computer_call",
+        "expect": "redact",
+        "field_path": "input[1].action.text",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].action.text"
+        ],
+        "planted_path": "input[1].action.text",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_computer_call"
+      },
+      {
+        "block_type": "computer_call_output",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "responses_computer_call_output",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "responses",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_computer_call_output"
+      },
+      {
+        "block_type": "web_search_call",
+        "canary_class": "known-format",
+        "canary_kind": "aws_access_key_id",
+        "case_id": "responses_web_search_call",
+        "expect": "redact",
+        "field_path": "input[1].action.query",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].action.query"
+        ],
+        "planted_path": "input[1].action.query",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_web_search_call"
+      },
+      {
+        "block_type": "file_search_call",
+        "canary_class": "known-format",
+        "canary_kind": "npm_token",
+        "case_id": "responses_file_search_call",
+        "expect": "redact",
+        "field_path": "input[1].queries[0]",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].queries[0]"
+        ],
+        "planted_path": "input[1].queries[0]",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_file_search_call"
+      },
+      {
+        "block_type": "code_interpreter_call",
+        "canary_class": "known-format",
+        "canary_kind": "jwt",
+        "case_id": "responses_code_interpreter_call",
+        "expect": "redact",
+        "field_path": "input[1].code",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].code"
+        ],
+        "planted_path": "input[1].code",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_code_interpreter_call"
+      },
+      {
+        "block_type": "image_generation_call",
+        "canary_class": "known-format",
+        "canary_kind": "github_token",
+        "case_id": "responses_image_generation_call",
+        "expect": "redact",
+        "field_path": "input[1].revised_prompt",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].revised_prompt"
+        ],
+        "planted_path": "input[1].revised_prompt",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_image_generation_call"
+      },
+      {
+        "block_type": "mcp_call",
+        "canary_class": "ml-only",
+        "canary_kind": "db_password",
+        "case_id": "responses_mcp_call",
+        "expect": "redact",
+        "field_path": "input[1].arguments{json}.q",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].arguments{json}.q"
+        ],
+        "planted_path": "input[1].arguments{json}.q",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_mcp_call"
+      },
+      {
+        "block_type": "mcp_list_tools",
+        "canary_class": "known-format",
+        "canary_kind": "openai_key",
+        "case_id": "responses_mcp_list_tools",
+        "expect": "redact",
+        "field_path": "input[1].tools[0].description",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].tools[0].description"
+        ],
+        "planted_path": "input[1].tools[0].description",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_mcp_list_tools"
+      },
+      {
+        "block_type": "mcp_approval_request",
+        "canary_class": "ml-only",
+        "canary_kind": "aws_secret_access_key",
+        "case_id": "responses_mcp_approval_request",
+        "expect": "redact",
+        "field_path": "input[1].arguments{json}.q",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].arguments{json}.q"
+        ],
+        "planted_path": "input[1].arguments{json}.q",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_mcp_approval_request"
+      },
+      {
+        "block_type": "mcp_approval_response",
+        "canary_class": "known-format",
+        "canary_kind": "stripe_key",
+        "case_id": "responses_mcp_approval_response",
+        "expect": "redact",
+        "field_path": "input[1].reason",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].reason"
+        ],
+        "planted_path": "input[1].reason",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_mcp_approval_response"
+      },
+      {
+        "block_type": "tool_search_call",
+        "canary_class": "ml-only",
+        "canary_kind": "twilio_auth_token",
+        "case_id": "responses_tool_search",
+        "expect": "redact",
+        "field_path": "input[1].arguments{json}.query",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].arguments{json}.query"
+        ],
+        "planted_path": "input[1].arguments{json}.query",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_tool_search"
+      },
+      {
+        "block_type": "additional_tools",
+        "canary_class": "known-format",
+        "canary_kind": "slack_token",
+        "case_id": "responses_additional_tools",
+        "expect": "redact",
+        "field_path": "input[1].tools[0].description",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].tools[0].description"
+        ],
+        "planted_path": "input[1].tools[0].description",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_additional_tools"
+      },
+      {
+        "block_type": "item_reference",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "responses_item_reference",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "responses",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_item_reference"
+      },
+      {
+        "block_type": "compaction",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "responses_compaction",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "responses",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_compaction"
+      },
+      {
+        "block_type": "unknown",
+        "canary_class": "ml-only",
+        "canary_kind": "postgres_password",
+        "case_id": "responses_unknown_item_blocked",
+        "expect": "block",
+        "field_path": "input[1].text",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].text"
+        ],
+        "planted_path": "input[1].text",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_unknown_item_blocked"
+      },
+      {
+        "block_type": "function_call",
+        "canary_class": "known-format",
+        "canary_kind": "sendgrid_key",
+        "case_id": "responses_function_call_arguments_bad_json",
+        "expect": "redact",
+        "field_path": "input[1].arguments",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].arguments"
+        ],
+        "planted_path": "input[1].arguments",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "function_call",
+        "canary_class": "known-format",
+        "canary_kind": "db_url",
+        "case_id": "responses_function_call_arguments_nested_json",
+        "expect": "redact",
+        "field_path": "input[1].arguments{json}.payload{json}.inner",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].arguments{json}.payload{json}.inner"
+        ],
+        "planted_path": "input[1].arguments{json}.payload{json}.inner",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "function_call",
+        "canary_class": "known-format",
+        "canary_kind": "gcp_api_key",
+        "case_id": "responses_function_call_arguments_key_blocked",
+        "expect": "block",
+        "field_path": "input[1].arguments{json}.<key>",
+        "fmt": "responses",
+        "found_paths": [
+          "input[1].arguments{json}.<key>"
+        ],
+        "planted_path": "input[1].arguments{json}.<key>",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "input-item",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "function",
+        "canary_class": "known-format",
+        "canary_kind": "aws_access_key_id",
+        "case_id": "responses_tools_function",
+        "expect": "redact",
+        "field_path": "tools[0].description",
+        "fmt": "responses",
+        "found_paths": [
+          "tools[0].description"
+        ],
+        "planted_path": "tools[0].description",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "tools",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_responses_tools_function"
+      },
+      {
+        "block_type": "custom",
+        "canary_class": "known-format",
+        "canary_kind": "npm_token",
+        "case_id": "responses_tools_custom",
+        "expect": "redact",
+        "field_path": "tools[0].format.definition",
+        "fmt": "responses",
+        "found_paths": [
+          "tools[0].format.definition"
+        ],
+        "planted_path": "tools[0].format.definition",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "tools",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_tools_custom"
+      },
+      {
+        "block_type": "mcp",
+        "canary_class": "known-format",
+        "canary_kind": "jwt",
+        "case_id": "responses_tools_mcp",
+        "expect": "redact",
+        "field_path": "tools[0].server_description",
+        "fmt": "responses",
+        "found_paths": [
+          "tools[0].server_description"
+        ],
+        "planted_path": "tools[0].server_description",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "tools",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_tools_mcp"
+      },
+      {
+        "block_type": "mcp",
+        "canary_class": "known-format",
+        "canary_kind": "github_token",
+        "case_id": "responses_tools_mcp_authorization",
+        "expect": "pass",
+        "field_path": "tools[0].authorization",
+        "fmt": "responses",
+        "found_paths": [
+          "tools[0].authorization"
+        ],
+        "planted_path": "tools[0].authorization",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "tools",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "namespace",
+        "canary_class": "ml-only",
+        "canary_kind": "db_password",
+        "case_id": "responses_tools_namespace",
+        "expect": "redact",
+        "field_path": "tools[0].description",
+        "fmt": "responses",
+        "found_paths": [
+          "tools[0].description"
+        ],
+        "planted_path": "tools[0].description",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "tools",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_responses_tools_namespace"
+      },
+      {
+        "block_type": "web_search",
+        "canary_class": "known-format",
+        "canary_kind": "openai_key",
+        "case_id": "responses_tools_builtin",
+        "expect": "redact",
+        "field_path": "tools[0].user_location.city",
+        "fmt": "responses",
+        "found_paths": [
+          "tools[0].user_location.city"
+        ],
+        "planted_path": "tools[0].user_location.city",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "tools",
+        "source": "captured",
+        "test_name": "test_fr_gate_02_responses_tools_builtin"
+      },
+      {
+        "block_type": "unknown",
+        "canary_class": "ml-only",
+        "canary_kind": "aws_secret_access_key",
+        "case_id": "responses_tools_unknown_type_blocked",
+        "expect": "block",
+        "field_path": "tools[0].description",
+        "fmt": "responses",
+        "found_paths": [
+          "tools[0].description"
+        ],
+        "planted_path": "tools[0].description",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "tools",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_tools_unknown_type_blocked"
+      },
+      {
+        "block_type": "instructions",
+        "canary_class": "known-format",
+        "canary_kind": "stripe_key",
+        "case_id": "responses_instructions",
+        "expect": "redact",
+        "field_path": "instructions",
+        "fmt": "responses",
+        "found_paths": [
+          "instructions"
+        ],
+        "planted_path": "instructions",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "top-level",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "input",
+        "canary_class": "ml-only",
+        "canary_kind": "twilio_auth_token",
+        "case_id": "responses_input_string",
+        "expect": "redact",
+        "field_path": "input",
+        "fmt": "responses",
+        "found_paths": [
+          "input"
+        ],
+        "planted_path": "input",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "top-level",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "prompt",
+        "canary_class": "known-format",
+        "canary_kind": "slack_token",
+        "case_id": "responses_prompt_variables",
+        "expect": "redact",
+        "field_path": "prompt.variables.name",
+        "fmt": "responses",
+        "found_paths": [
+          "prompt.variables.name"
+        ],
+        "planted_path": "prompt.variables.name",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "top-level",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "metadata",
+        "canary_class": "ml-only",
+        "canary_kind": "postgres_password",
+        "case_id": "responses_metadata",
+        "expect": "redact",
+        "field_path": "metadata.k",
+        "fmt": "responses",
+        "found_paths": [
+          "metadata.k"
+        ],
+        "planted_path": "metadata.k",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "top-level",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "client_metadata",
+        "canary_class": "known-format",
+        "canary_kind": "sendgrid_key",
+        "case_id": "responses_client_metadata",
+        "expect": "redact",
+        "field_path": "client_metadata.x-codex-turn-metadata{json}.remote",
+        "fmt": "responses",
+        "found_paths": [
+          "client_metadata.x-codex-turn-metadata{json}.remote"
+        ],
+        "planted_path": "client_metadata.x-codex-turn-metadata{json}.remote",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "top-level",
+        "source": "captured",
+        "test_name": null
+      },
+      {
+        "block_type": "text.format",
+        "canary_class": "known-format",
+        "canary_kind": "db_url",
+        "case_id": "responses_text_format_schema",
+        "expect": "redact",
+        "field_path": "text.format.description",
+        "fmt": "responses",
+        "found_paths": [
+          "text.format.description"
+        ],
+        "planted_path": "text.format.description",
+        "received": true,
+        "route": "/v1/responses",
+        "section": "top-level",
+        "source": "spec",
+        "test_name": null
+      },
+      {
+        "block_type": "previous_response_id",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "responses_previous_response_id_seen_passes",
+        "expect": "pass",
+        "field_path": null,
+        "fmt": "responses",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/responses",
+        "section": "policy",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_previous_response_id_seen_passes"
+      },
+      {
+        "block_type": "previous_response_id",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "responses_previous_response_id_unseen_blocked",
+        "expect": "block",
+        "field_path": null,
+        "fmt": "responses",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/responses",
+        "section": "policy",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_previous_response_id_unseen_blocked"
+      },
+      {
+        "block_type": "conversation",
+        "canary_class": null,
+        "canary_kind": null,
+        "case_id": "responses_conversation_blocked",
+        "expect": "block",
+        "field_path": null,
+        "fmt": "responses",
+        "found_paths": [],
+        "planted_path": null,
+        "received": false,
+        "route": "/v1/responses",
+        "section": "policy",
+        "source": "spec",
+        "test_name": "test_fr_gate_02_responses_conversation_blocked"
+      }
+    ]
+  },
+  "findings": [
+    {
+      "agent": null,
+      "block_type": "text",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_text",
+      "kind": "github_token",
+      "path": "messages[0].content[0].text",
+      "request": 0,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "char_location",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_text_cited_text",
+      "kind": "db_password",
+      "path": "messages[1].content[0].citations[0].cited_text",
+      "request": 1,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "url",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_image",
+      "kind": "openai_key",
+      "path": "messages[0].content[0].source.url",
+      "request": 2,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "text",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_document_text",
+      "kind": "private_key",
+      "path": "messages[0].content[0].source.data",
+      "request": 4,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "document",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_document_pdf",
+      "kind": "stripe_key",
+      "path": "messages[0].content[0].title",
+      "request": 5,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "text",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_document_content",
+      "kind": "twilio_auth_token",
+      "path": "messages[0].content[0].source.content[0].text",
+      "request": 6,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "url",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_document_url",
+      "kind": "slack_token",
+      "path": "messages[0].content[0].source.url",
+      "request": 7,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "text",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_search_result",
+      "kind": "postgres_password",
+      "path": "messages[0].content[0].content[0].text",
+      "request": 8,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "tool_use",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_tool_use",
+      "kind": "sendgrid_key",
+      "path": "messages[1].content[0].input.command",
+      "request": 9,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "tool_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_tool_result_string",
+      "kind": "private_key",
+      "path": "messages[2].content[0].content",
+      "request": 10,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "text",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_tool_result_blocks",
+      "kind": "gcp_api_key",
+      "path": "messages[2].content[0].content[0].text",
+      "request": 11,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "thinking",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_thinking",
+      "kind": "aws_access_key_id",
+      "path": "messages[1].content[0].thinking",
+      "request": 12,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "compaction",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_compaction",
+      "kind": "npm_token",
+      "path": "messages[1].content[0].content",
+      "request": 14,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "server_tool_use",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_server_tool_use",
+      "kind": "jwt",
+      "path": "messages[1].content[0].input.query",
+      "request": 15,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "web_search_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_web_search_tool_result",
+      "kind": "github_token",
+      "path": "messages[1].content[0].content[0].title",
+      "request": 16,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "text",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_web_fetch_tool_result",
+      "kind": "db_password",
+      "path": "messages[1].content[0].content.content.source.data",
+      "request": 17,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "code_execution_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_code_execution_tool_result",
+      "kind": "openai_key",
+      "path": "messages[1].content[0].content.stdout",
+      "request": 18,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "bash_code_execution_result",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_bash_code_execution_tool_result",
+      "kind": "aws_secret_access_key",
+      "path": "messages[1].content[0].content.stdout",
+      "request": 19,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "text_editor_code_execution_view_result",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_text_editor_tool_result",
+      "kind": "stripe_key",
+      "path": "messages[1].content[0].content.content",
+      "request": 20,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "mcp_tool_use",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_mcp_tool_use",
+      "kind": "twilio_auth_token",
+      "path": "messages[1].content[0].input.q",
+      "request": 22,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "text",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_mcp_tool_result",
+      "kind": "slack_token",
+      "path": "messages[1].content[0].content[0].text",
+      "request": 23,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "mcp_tool_listing",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_mcp_tool_listing",
+      "kind": "postgres_password",
+      "path": "messages[1].content[0].tools[0].description",
+      "request": 24,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "future_block_xyz",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_unknown_block_blocked",
+      "kind": "sendgrid_key",
+      "path": "messages[0].content[0].text",
+      "request": 26,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "text",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_system_role_text",
+      "kind": "db_url",
+      "path": "messages[1].content[0].text",
+      "request": 27,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "message(system)",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_system_role_string",
+      "kind": "gcp_api_key",
+      "path": "messages[1].content",
+      "request": 28,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "tool_addition",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_tool_addition",
+      "kind": "aws_access_key_id",
+      "path": "messages[1].content[0].definition.description",
+      "request": 29,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "tools",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_tools_custom",
+      "kind": "npm_token",
+      "path": "tools[0].description",
+      "request": 31,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "future_tool_20990101",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_tools_unknown_type_blocked",
+      "kind": "jwt",
+      "path": "tools[0].description",
+      "request": 34,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "string",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_tools_custom_schema_description",
+      "kind": "github_token",
+      "path": "tools[0].input_schema.properties.q.description",
+      "request": 35,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "system",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_system_string",
+      "kind": "db_password",
+      "path": "system",
+      "request": 36,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "text",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_system_blocks",
+      "kind": "openai_key",
+      "path": "system[1].text",
+      "request": 37,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "metadata",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_metadata_user_id",
+      "kind": "aws_secret_access_key",
+      "path": "metadata.user_id",
+      "request": 38,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "stop_sequences",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_stop_sequences",
+      "kind": "stripe_key",
+      "path": "stop_sequences[0]",
+      "request": 39,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "string",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:anthropic_output_config_schema",
+      "kind": "twilio_auth_token",
+      "path": "output_config.format.schema.properties.q.description",
+      "request": 40,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "url",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:anthropic_mcp_servers_authorization_token",
+      "kind": "slack_token",
+      "path": "mcp_servers[0].authorization_token",
+      "request": 41,
+      "route": "anthropic.messages"
+    },
+    {
+      "agent": null,
+      "block_type": "message",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_message_string",
+      "kind": "postgres_password",
+      "path": "input[0].content",
+      "request": 42,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "input_text",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_input_text",
+      "kind": "sendgrid_key",
+      "path": "input[0].content[0].text",
+      "request": 43,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "output_text",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_output_text",
+      "kind": "db_url",
+      "path": "input[1].content[0].text",
+      "request": 44,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "refusal",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_refusal",
+      "kind": "gcp_api_key",
+      "path": "input[1].content[0].refusal",
+      "request": 45,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "input_image",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_input_image",
+      "kind": "aws_access_key_id",
+      "path": "input[0].content[0].image_url",
+      "request": 46,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "input_file",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_input_file",
+      "kind": "npm_token",
+      "path": "input[0].content[0].filename",
+      "request": 48,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "function_call",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_function_call",
+      "kind": "jwt",
+      "path": "input[1].arguments{json}.cmd",
+      "request": 49,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "function_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_function_call_output",
+      "kind": "private_key",
+      "path": "input[2].output",
+      "request": 50,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "custom_tool_call",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_custom_tool_call",
+      "kind": "db_password",
+      "path": "input[1].input",
+      "request": 51,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "custom_tool_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_custom_tool_call_output",
+      "kind": "openai_key",
+      "path": "input[2].output",
+      "request": 52,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "summary_text",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_reasoning",
+      "kind": "aws_secret_access_key",
+      "path": "input[1].summary[0].text",
+      "request": 53,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "exec",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_local_shell_call",
+      "kind": "stripe_key",
+      "path": "input[1].action.command[2]",
+      "request": 54,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "local_shell_call_output",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_local_shell_call_output",
+      "kind": "twilio_auth_token",
+      "path": "input[1].output{json}.output",
+      "request": 55,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "shell_call",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_shell_call",
+      "kind": "slack_token",
+      "path": "input[1].action.commands[0]",
+      "request": 56,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "shell_call_output",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_shell_call_output",
+      "kind": "postgres_password",
+      "path": "input[1].output[0].stdout",
+      "request": 57,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "update_file",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_apply_patch_call",
+      "kind": "sendgrid_key",
+      "path": "input[1].operation.diff",
+      "request": 58,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "apply_patch_call_output",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_apply_patch_call_output",
+      "kind": "db_url",
+      "path": "input[1].output",
+      "request": 59,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "type",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_computer_call",
+      "kind": "gcp_api_key",
+      "path": "input[1].action.text",
+      "request": 60,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "search",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_web_search_call",
+      "kind": "aws_access_key_id",
+      "path": "input[1].action.query",
+      "request": 62,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "file_search_call",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_file_search_call",
+      "kind": "npm_token",
+      "path": "input[1].queries[0]",
+      "request": 63,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "code_interpreter_call",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_code_interpreter_call",
+      "kind": "jwt",
+      "path": "input[1].code",
+      "request": 64,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "image_generation_call",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_image_generation_call",
+      "kind": "github_token",
+      "path": "input[1].revised_prompt",
+      "request": 65,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "mcp_call",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_mcp_call",
+      "kind": "db_password",
+      "path": "input[1].arguments{json}.q",
+      "request": 66,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "mcp_list_tools",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_mcp_list_tools",
+      "kind": "openai_key",
+      "path": "input[1].tools[0].description",
+      "request": 67,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "mcp_approval_request",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_mcp_approval_request",
+      "kind": "aws_secret_access_key",
+      "path": "input[1].arguments{json}.q",
+      "request": 68,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "mcp_approval_response",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_mcp_approval_response",
+      "kind": "stripe_key",
+      "path": "input[1].reason",
+      "request": 69,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "tool_search_call",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_tool_search",
+      "kind": "twilio_auth_token",
+      "path": "input[1].arguments{json}.query",
+      "request": 70,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "function",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_additional_tools",
+      "kind": "slack_token",
+      "path": "input[1].tools[0].description",
+      "request": 71,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "future_item_xyz",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_unknown_item_blocked",
+      "kind": "postgres_password",
+      "path": "input[1].text",
+      "request": 74,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "function_call",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_function_call_arguments_bad_json",
+      "kind": "sendgrid_key",
+      "path": "input[1].arguments",
+      "request": 75,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "function_call",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_function_call_arguments_nested_json",
+      "kind": "db_url",
+      "path": "input[1].arguments{json}.payload{json}.inner",
+      "request": 76,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "function_call",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_function_call_arguments_key_blocked",
+      "kind": "gcp_api_key",
+      "path": "input[1].arguments{json}.<key>",
+      "request": 77,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "function",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_tools_function",
+      "kind": "aws_access_key_id",
+      "path": "tools[0].description",
+      "request": 78,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "grammar",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_tools_custom",
+      "kind": "npm_token",
+      "path": "tools[0].format.definition",
+      "request": 79,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "mcp",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_tools_mcp",
+      "kind": "jwt",
+      "path": "tools[0].server_description",
+      "request": 80,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "mcp",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_tools_mcp_authorization",
+      "kind": "github_token",
+      "path": "tools[0].authorization",
+      "request": 81,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "namespace",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_tools_namespace",
+      "kind": "db_password",
+      "path": "tools[0].description",
+      "request": 82,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "approximate",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_tools_builtin",
+      "kind": "openai_key",
+      "path": "tools[0].user_location.city",
+      "request": 83,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "future_tool_xyz",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_tools_unknown_type_blocked",
+      "kind": "aws_secret_access_key",
+      "path": "tools[0].description",
+      "request": 84,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "instructions",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_instructions",
+      "kind": "stripe_key",
+      "path": "instructions",
+      "request": 85,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "input",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_input_string",
+      "kind": "twilio_auth_token",
+      "path": "input",
+      "request": 86,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "prompt",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_prompt_variables",
+      "kind": "slack_token",
+      "path": "prompt.variables.name",
+      "request": 87,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "metadata",
+      "cls": "ml-only",
+      "form": "plain",
+      "ident": "case:responses_metadata",
+      "kind": "postgres_password",
+      "path": "metadata.k",
+      "request": 88,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "client_metadata",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_client_metadata",
+      "kind": "sendgrid_key",
+      "path": "client_metadata.x-codex-turn-metadata{json}.remote",
+      "request": 89,
+      "route": "openai.responses"
+    },
+    {
+      "agent": null,
+      "block_type": "json_schema",
+      "cls": "known-format",
+      "form": "plain",
+      "ident": "case:responses_text_format_schema",
+      "kind": "db_url",
+      "path": "text.format.description",
+      "request": 90,
+      "route": "openai.responses"
+    }
+  ],
+  "harness_version": "1",
+  "mode": "direct",
+  "planted": {
+    "by_class": {
+      "known-format": 57,
+      "ml-only": 23
+    },
+    "by_kind": {
+      "aws_access_key_id": 5,
+      "aws_secret_access_key": 5,
+      "db_password": 6,
+      "db_url": 5,
+      "gcp_api_key": 5,
+      "github_token": 5,
+      "jwt": 5,
+      "npm_token": 5,
+      "openai_key": 6,
+      "postgres_password": 6,
+      "private_key": 3,
+      "sendgrid_key": 6,
+      "slack_token": 6,
+      "stripe_key": 6,
+      "twilio_auth_token": 6
+    },
+    "total": 80
+  },
+  "protection": "none",
+  "received": {
+    "by_class": {
+      "known-format": 57,
+      "ml-only": 23
+    },
+    "by_kind": {
+      "aws_access_key_id": 5,
+      "aws_secret_access_key": 5,
+      "db_password": 6,
+      "db_url": 5,
+      "gcp_api_key": 5,
+      "github_token": 5,
+      "jwt": 5,
+      "npm_token": 5,
+      "openai_key": 6,
+      "postgres_password": 6,
+      "private_key": 3,
+      "sendgrid_key": 6,
+      "slack_token": 6,
+      "stripe_key": 6,
+      "twilio_auth_token": 6
+    },
+    "known_format": 57,
+    "total": 80
+  },
+  "requests": {
+    "by_route": {
+      "anthropic.messages": 42,
+      "openai.responses": 52
+    },
+    "total": 94
+  },
+  "run_id": "20261019T175822Z-direct-s0",
+  "seed": 0,
+  "started_utc": "2026-10-19T17:58:31+00:00",
+  "target": "mock",
+  "verdict": {
+    "exit_code": 0,
+    "reason": "ok"
+  },
+  "versions": {
+    "mock_provider": "1",
+    "python": "3.12.12"
+  }
+}

@@ -1,15 +1,16 @@
 """User-approved paths the read hook lets through even when they hold secrets (FR-READ-05).
 
-One entry per line in ~/.harpocrates/allow: an absolute path (a directory covers everything under it), or
+One entry per line in ~/.harpo/allow (the state directory, see paths.py): an absolute path (a directory covers everything under it), or
 `name:NAME`, which covers any path whose resolved real path has a component equal to NAME (exact, case-sensitive),
 so `name:graphify-out` covers that folder in every project. `#` starts a comment. Everything is compared after
 resolving symlinks: a link inside an allowed folder that points elsewhere is still checked, and a link NAMED like a
 rule but pointing elsewhere does not match (its target's components count). Every pass is appended to allow.log
 (time, tool, path; never content), as design.md's "explicit overrides, always logged" asks.
 
-Only the user edits the list: `harpocrates allow` (add, --name, --remove, --list), or the file by hand. The hook
-refuses Bash commands that change it or call `harpocrates allow` with any flags (read-only commands pass) and the
-Claude Code settings deny Edit/Write on ~/.harpocrates.
+Only the user edits the list: `harpo allow` (add, --name, --remove, --list; `harpocrates allow` still works,
+FR-NAME-02), or the file by hand. The hook refuses Bash commands that change it or call either name's `allow` with
+any flags (read-only commands pass), refuses Edit/Write-tool calls whose target is inside ~/.harpo or ~/.harpocrates
+(inside_state_dir, any mode, before any grant or prompt), and the Claude Code settings deny Edit/Write on both as well.
 Trade-off of name rules: they are broader than a path. add_name refuses names of secret stores, of system folders
 and of anything in the home path, and asks for confirmation on the likes of `src` or `secrets`. Names are compared
 NFKC-folded and case-folded (the default macOS file system treats `.AWS` as `.aws`). A name rule never covers a path
@@ -24,32 +25,73 @@ import functools
 import os
 import re
 import shlex
+import stat
 import tempfile
 import time
 import unicodedata
 from pathlib import Path
 from typing import Optional
 
+from Harpocrates import paths
 from Harpocrates.harness import SENSITIVE_FILES, SENSITIVE_HOME_DIRS
+from Harpocrates.paths import STATE_DIR_NAMES, state_dir
 
-ALLOW_FILE = Path.home() / ".harpocrates" / "allow"
-LOG_FILE = Path.home() / ".harpocrates" / "allow.log"
+# None: the file sits in the state directory (paths.state_dir(), looked up per call so a test can move HOME). A test
+# can set a Path here to point the module elsewhere.
+ALLOW_FILE: Optional[Path] = None
+LOG_FILE: Optional[Path] = None
 
-# ponytail: text match, best effort. A script that builds the path at runtime gets past it, but such a
+
+def allow_file() -> Path:
+    """
+    Description: Locate the allowlist using a test override or the current state directory.
+    Parameters: None
+    Output: Allowlist path, possibly nonexistent; may run the one-time ~/.harpocrates to ~/.harpo
+        copy through paths.state_dir.
+    """
+    return ALLOW_FILE if ALLOW_FILE is not None else state_dir() / "allow"
+
+
+def log_file() -> Path:
+    """
+    Description: Locate the allow log using a test override or the current state directory.
+    Parameters: None
+    Output: Log path, possibly nonexistent; may run the one-time ~/.harpocrates to ~/.harpo copy
+        through paths.state_dir.
+    """
+    return LOG_FILE if LOG_FILE is not None else state_dir() / "allow.log"
+
+
+# text match, best effort. A script that builds the path at runtime gets past it, but such a
 # script could just as well open the secret file itself, a gap the hook already has (hooks.py docstring).
 # The egress gate (M2) sees whatever reaches the provider either way.
-# Rule: `harpocrates ... allow` anywhere in a segment is refused (only a mid-path `harpocrates/` is
-# exempt), so a repo directory of that name over-blocks `git -C .../harpocrates log --grep allow`. A
+# Rule: `harpo ... allow` or `harpocrates ... allow` anywhere in a segment is refused (FR-NAME-02: the command is
+# `harpo` now and `harpocrates` still works; only a mid-path `harpo/` or `harpocrates/` is exempt, and `harpoon` or
+# `harpo_x` are other words), so a repo directory of that name over-blocks `git -C .../harpocrates log --grep allow`. A
 # mention of the directory (`.harp`, also `~/.harp*`) passes only when it is a plain read: no output
 # redirect, substitution or heredoc, and every command word in _READ_ONLY. Fail closed on anything else.
+# Both state folders are covered (FR-NAME-04): `.harp` is the start of `.harpo` and of `.harpocrates`, so the first
+# alternative of _DIR sees either, and the normalised patterns below take `arpo` with or without `crates`.
 # A dot-name containing a glob or brace character (`~/.*`, `~/.h*`, `.[h]arp...`, `.{a,b}`, `.?arp...`) also
 # counts as a mention, so it needs a plain read too. Known gap: a name built at runtime (variables, command
 # substitution, printf) matches nothing; that is the script gap above. Matching runs on the raw command and on
 # a normalised copy (see _normalise). Accepted over-block: `rm -rf .[a-z]*cache`.
 _ALLOW_CMD = re.compile(
-    r"\bharpocrates(?:\.cli)?\b(?!/)[^;&|\n]*\ballow\b"  # harpocrates / python -m Harpocrates.cli ... allow
-    r"|(?:\$\([^)]*\)|`[^`]*`|\$\{?\w+\}?)\s*['\"]?allow\b"  # $(which harpocrates) allow
+    r"\bharpo(?:crates)?(?:\.cli)?\b(?!/)[^;&|\n]*\ballow\b"  # harpo / harpocrates / python -m Harpocrates.cli ... allow
+    r"|(?:\$\([^)]*\)|`[^`]*`|\$\{?\w+\}?)\s*['\"]?allow\b"  # $(which harpo) allow
     r"", re.I)
+# A glob in the program word (`/usr/bin/harpocra*s allow /`): the shell expands it to the program, so the text never
+# holds the name. Refused when a word in a segment fnmatches a program name (the four console scripts) and a later word
+# of that segment is `allow`. Accepted over-blocks: `ls h* allow.txt`, and a glob that picks several files (it cannot be
+# told which exist). A word of only `*` and `?` is no mention (`git commit -m "* allow ..."`). Known gaps, as for any
+# spelling built at runtime: a glob in `allow` itself (`harpo al*` with a file named allow in the folder), a brace
+# expansion that spells the name across alternatives (`harp{o,x}`), an alias, a link or copy under another name.
+_PROGRAMS = ("harpo", "harpo-mcp", "harpocrates", "harpocrates-mcp")
+_GLOB_WORD = re.compile(r"[*?\[]")
+_ONLY_WILDCARDS = re.compile(r"[*?]+")
+_SEGMENT_END = re.compile(r"[;&|\n]")
+_WORD_END = re.compile(r"[\s()`]+")
+_ALLOW_WORD = re.compile(r"\ballow\b", re.I)
 _DIR = re.compile(r"""\.harp|(?:^|[/\s'"=~])\.[^/\s'";&|]*[*?\[{]""", re.I)
 _UNSAFE_TEXT = re.compile(r">|\$\(|`|<\(|<<")
 _READ_ONLY = frozenset(
@@ -73,50 +115,99 @@ _SECRET_WORDS = ("secret", "credential", "password", "token")
 _SYSTEM_NAMES = frozenset(
     "private tmp var etc opt usr volumes system library applications home root mnt documents desktop downloads "
     "users".split())
-_HARPOCRATES_DIR = ".harpocrates"
 
 
 class NeedsConfirmationError(ValueError):
-    """A name broad enough to cover most of a project (or machine); add_name needs confirmed=True."""
+    """
+    Description: Represent a name broad enough to cover most of a project or machine that requires
+        confirmed=True in add_name.
+    Parameters:
+        *args: Exception arguments forwarded to ValueError.
+    Output: ValueError instances identifying rules that need explicit confirmation.
+    """
 
 
 def _lines() -> list[str]:
-    if not ALLOW_FILE.exists():
+    """
+    Description: Read allowlist lines for parsing or rewriting.
+    Parameters: None
+    Output: List of lines, or an empty list if the file is absent or the state directory is unusable (a symlink or a
+        file: fail closed, SEC-09); read and decoding errors propagate.
+    """
+    path = allow_file()
+    if ALLOW_FILE is None and paths.unusable(path.parent):
         return []
-    return ALLOW_FILE.read_text(encoding="utf-8").splitlines()
+    if not path.exists():
+        return []
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def _require_usable() -> None:
+    """
+    Description: Refuse a write when the allowlist would be written into a state directory that is a symlink or a file.
+    Parameters: None
+    Output: None when the allowlist is a test override or the state directory is a plain folder or missing. Raises
+        paths.StateDirUnusableError otherwise (SEC-09).
+    """
+    if ALLOW_FILE is None:
+        paths.require_usable(state_dir())
 
 
 def _write(lines: list[str]) -> None:
-    """Atomic rewrite: temp file in the same folder (mkstemp gives 0o600), then os.replace. A reader never sees
-    a half-written list, and a file hand-edited without a final newline can't glue the next entry onto its line."""
-    ALLOW_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=ALLOW_FILE.parent, prefix=".allow.")
+    """
+    Description: Atomically replace the allowlist so readers never see partial lines or joined
+        entries.
+    Parameters:
+        lines: Complete list of lines to write with final newlines.
+    Output: None; creates the parent directory, writes a 0o600 temporary file, and replaces the
+        allowlist. Cleans up on failure and re-raises errors.
+    """
+    _require_usable()
+    target = allow_file()
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".allow.")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write("".join(f"{line}\n" for line in lines))
-        os.replace(tmp, ALLOW_FILE)
+        os.replace(tmp, target)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
 
 
 def entries() -> list[Path]:
-    """Path entries only; name rules are in names()."""
+    """
+    Description: Extract path entries separately from name rules and comments.
+    Parameters: None
+    Output: List of Path entries; allowlist read and decoding errors propagate.
+    """
     stripped = (line.strip() for line in _lines())
     return [Path(line) for line in stripped if line and not line.startswith(("#", _NAME_PREFIX))]
 
 
 def _fold(text: str) -> str:
-    """NFKC + casefold: `.ſsh`, `．ssh` and `.SSH` all read as `.ssh`, as the file system may treat them."""
+    """
+    Description: Normalize Unicode and case for security comparisons that reflect filesystem
+        equivalences.
+    Parameters:
+        text: Text to normalize using NFKC and casefold.
+    Output: Folded text, so lookalike characters (for example a long s) compare equal to ASCII.
+    """
     return unicodedata.normalize("NFKC", text).casefold()
 
 
 @functools.lru_cache(maxsize=8)
 def _home_facts(home: str, stamp: int) -> tuple[frozenset[str], frozenset[str], frozenset[tuple[int, int]]]:
-    """(folded components of the home path, folded names of the dot-directories directly in home, identities
-    (device, inode) of the directories no name rule may cover: those dot-directories, ~/Library, and
-    SENSITIVE_HOME_DIRS). Cached per home folder and its modification time, so a search over many files lists home
-    once; a folder added to home changes the stamp."""
+    """
+    Description: Collect and cache home directory facts that keep name rules away from private
+        locations, keyed on the home modification time so a search lists home once.
+    Parameters:
+        home: Home directory path used as the cache key.
+        stamp: Home modification time used to invalidate the cache.
+    Output: Tuple of folded home components, folded dot-directory names, and protected (device,
+        inode) identities of the dot-directories, ~/Library and SENSITIVE_HOME_DIRS. Ignores scan
+        and stat OSError failures, but path resolution errors may propagate.
+    """
     base = Path(home)
     try:
         dots = [e.name for e in os.scandir(base) if e.name.startswith(".") and e.is_dir()]
@@ -135,7 +226,13 @@ def _home_facts(home: str, stamp: int) -> tuple[frozenset[str], frozenset[str], 
 
 
 def _facts() -> tuple[frozenset[str], frozenset[str], frozenset[tuple[int, int]]]:
-    home = Path.home()  # looked up per call so a test can move HOME
+    """
+    Description: Look up protection facts for the current home and its modification time.
+    Parameters: None
+    Output: Cached home facts; uses stamp zero when stat fails and may propagate home lookup or path
+        resolution errors.
+    """
+    home = paths.home()  # the password database, looked up per call (SEC-08: never $HOME)
     try:
         stamp = os.stat(home).st_mtime_ns
     except OSError:
@@ -144,8 +241,14 @@ def _facts() -> tuple[frozenset[str], frozenset[str], frozenset[tuple[int, int]]
 
 
 def _refusal(name: str) -> Optional[str]:
-    """Why a name can never be a rule (None if it can). Secret-store and home checks compare _fold-ed text, since
-    the default macOS file system folds case and Unicode forms: `.ENV` is the same file as `.env`."""
+    """
+    Description: Explain why a proposed name rule is invalid or too broad to allow.
+    Parameters:
+        name: Exact file or folder name proposed for a rule.
+    Output: Refusal reason, or None for an acceptable name; consults home protection facts and may
+        propagate path resolution errors. Checks compare folded text, since macOS folds case, so
+        `.ENV` is treated as `.env`.
+    """
     if not name or name != name.strip():
         return "a name can't be empty or start or end with a space"
     if name in (".", ".."):
@@ -159,7 +262,7 @@ def _refusal(name: str) -> Optional[str]:
     folded = _fold(name)
     if _GLOB_CHARS & (set(name) | set(folded)):
         return "a name is exact; globs (* ? [ ] { }) are not supported"
-    secret_dirs = {_fold(Path(d).name) for d in SENSITIVE_HOME_DIRS} | {_fold(_HARPOCRATES_DIR)}
+    secret_dirs = {_fold(Path(d).name) for d in SENSITIVE_HOME_DIRS} | {_fold(n) for n in STATE_DIR_NAMES}
     if folded in secret_dirs or any(fnmatch.fnmatchcase(folded, _fold(pat)) for pat in SENSITIVE_FILES):
         return f"{name} names a secret store, which no name rule may cover"
     parts, dots, _ = _facts()
@@ -171,27 +274,46 @@ def _refusal(name: str) -> Optional[str]:
 
 
 def names() -> list[str]:
-    """Name rules in effect: `name:` lines that add_name would accept (a hand-edited `name:/`, `name:.env` or the
-    like matches nothing, so a typo can't open the whole disk)."""
+    """
+    Description: Read only name rules that validation accepts so malformed hand-edited rules cannot
+        open broad paths.
+    Parameters: None
+    Output: List of accepted names; read, decoding, and home resolution errors may propagate.
+    """
     found = (line.strip()[len(_NAME_PREFIX):] for line in _lines() if line.strip().startswith(_NAME_PREFIX))
     return [name for name in found if _refusal(name) is None]
 
 
 def listing() -> list[tuple[str, str]]:
-    """(kind, value) for display: path entries first, then names."""
+    """
+    Description: Combine path and name rules in display order.
+    Parameters: None
+    Output: List of (kind, value) tuples with paths first, then names; underlying rule-reading
+        errors propagate.
+    """
     return [("path", str(p)) for p in entries()] + [("name", n) for n in names()]
 
 
 def printable(text: str) -> str:
-    """Control characters (newlines, ANSI escapes) in a file name shown as '?', so a name can't fake
-    lines in a prompt or the log."""
+    """
+    Description: Replace control characters so file names cannot forge prompt or log lines.
+    Parameters:
+        text: File name or other text to make safe for display.
+    Output: Text with nonprintable characters, including newlines and ANSI escapes, replaced by
+        question marks.
+    """
     return "".join(c if c.isprintable() else "?" for c in text)
 
 
 def _in_protected(real: Path) -> bool:
-    """Whether real is, or sits under, a folder no name rule may open (_home_facts), decided by identity: each
-    ancestor is stat-ed and compared by (device, inode), so `~/.AWS` on a case-insensitive file system is the
-    credential folder whatever the spelling."""
+    """
+    Description: Check a path and its ancestors by (device, inode) identity, so any spelling of a
+        private folder (such as ~/.AWS on a case-insensitive file system) is excluded.
+    Parameters:
+        real: Resolved path to check against protected home directories.
+    Output: True for a protected directory or descendant, otherwise False; ignores stat OSError
+        failures and may propagate home resolution errors.
+    """
     ids = _facts()[2]
     for ancestor in (real, *real.parents):
         try:
@@ -204,6 +326,14 @@ def _in_protected(real: Path) -> bool:
 
 
 def allowed(path: Path) -> bool:
+    """
+    Description: Check resolved path and name rules while rejecting multiply linked files and
+        protected name-rule targets.
+    Parameters:
+        path: File or directory path to resolve and check.
+    Output: Boolean approval; hard-linked files are rejected for scanning, and name rules use
+        resolved components. Filesystem, decoding, and resolution errors may propagate.
+    """
     real = path.resolve()
     if real.is_file() and real.stat().st_nlink > 1:
         return False  # a hard link may be a secret file linked into an allowed folder: scan it
@@ -214,6 +344,13 @@ def allowed(path: Path) -> bool:
 
 
 def add(path: Path) -> Path:
+    """
+    Description: Add an existing resolved path without duplicating an existing entry.
+    Parameters:
+        path: Existing file or directory to allow.
+    Output: Resolved Path; writes a new entry when needed. Strict resolution fails for missing
+        paths; read, write, and resolution errors propagate.
+    """
     real = path.resolve(strict=True)  # a typo fails here instead of allowing nothing
     if real not in entries():
         _write([*_lines(), str(real)])
@@ -221,8 +358,16 @@ def add(path: Path) -> Path:
 
 
 def add_name(name: str, confirmed: bool = False) -> str:
-    """Allow a folder or file name in every project. ValueError if it can never be a rule; NeedsConfirmationError
-    (a ValueError) if it is broad and not confirmed."""
+    """
+    Description: Allow an exact file or folder name across projects after validating scope and
+        required confirmation.
+    Parameters:
+        name: Exact name to allow.
+        confirmed: Whether the user explicitly confirmed a broad or secret-sounding name.
+    Output: Accepted name; writes a missing rule. Raises ValueError for forbidden names,
+        NeedsConfirmationError (a ValueError) for unconfirmed broad names, and underlying filesystem
+        or decoding errors.
+    """
     reason = _refusal(name)
     if reason:
         raise ValueError(reason)
@@ -238,6 +383,14 @@ def add_name(name: str, confirmed: bool = False) -> str:
 
 
 def _drop(match) -> None:
+    """
+    Description: Remove matching allowlist lines while preserving the order of retained lines.
+    Parameters:
+        match: Predicate receiving each stripped line and selecting lines to remove.
+    Output: None; rewrites the list or raises ValueError if nothing matches. Raises StateDirUnusableError when the
+        state directory is a symlink or a file. Read, write, decoding, and predicate errors propagate.
+    """
+    _require_usable()
     lines = _lines()
     kept = [line for line in lines if not match(line.strip())]
     if len(kept) == len(lines):
@@ -246,8 +399,14 @@ def _drop(match) -> None:
 
 
 def remove(path: Path) -> Path:
-    """Drop a path entry (kept as typed or resolved: the entry may be for a folder that is gone). Comments and
-    order stay."""
+    """
+    Description: Remove a path entry by typed absolute or resolved spelling, including paths that no
+        longer exist.
+    Parameters:
+        path: Path entry to remove.
+    Output: Resolved Path; rewrites matching entries while preserving comments and order. Raises
+        ValueError if absent, and propagates filesystem, decoding, or resolution errors.
+    """
     real = path.resolve()
     forms = {real, Path(os.path.abspath(path))}
     _drop(lambda line: bool(line) and not line.startswith(("#", _NAME_PREFIX)) and Path(line) in forms)
@@ -255,19 +414,42 @@ def remove(path: Path) -> Path:
 
 
 def remove_name(name: str) -> str:
-    """Drop a name rule, matched on the raw line so a hand-edited line add_name would refuse can still go."""
+    """
+    Description: Remove an exact raw name rule even if current validation would reject it.
+    Parameters:
+        name: Name text whose raw name: line should be removed.
+    Output: Removed name; rewrites the list. Raises ValueError if absent and propagates read, write,
+        or decoding errors.
+    """
     _drop(lambda line: line == f"{_NAME_PREFIX}{name}")
     return name
 
 
 def log_use(path: Path, tool: str) -> None:
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with LOG_FILE.open("a", encoding="utf-8") as f:
+    """
+    Description: Append an audit record of an allowlist override without recording file contents.
+    Parameters:
+        path: Allowed path to resolve and display safely.
+        tool: Tool name to include in the record.
+    Output: None; creates the log directory and appends local time, tool, and printable resolved
+        path. Filesystem and resolution errors propagate.
+    """
+    if LOG_FILE is None:
+        paths.require_usable(state_dir())
+    target = log_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as f:
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\t{tool}\t{printable(str(path.resolve()))}\n")
 
 
 def _segments(command: str) -> list[list[str]]:
-    """Words of each simple command; newlines, ;&| and any token with `(` start a new one."""
+    """
+    Description: Tokenize a shell command into simple-command word lists for read-only validation.
+    Parameters:
+        command: Shell command text to split.
+    Output: Nonempty word lists separated by newlines, ;&|, or tokens containing an opening
+        parenthesis; raises ValueError for unbalanced quotes so callers can fail closed.
+    """
     lex = shlex.shlex(re.sub(r"[\r\n]", ";", command), posix=True, punctuation_chars=True)
     lex.whitespace_split, lex.commenters = True, ""
     segments: list[list[str]] = [[]]
@@ -281,8 +463,15 @@ def _segments(command: str) -> list[list[str]]:
 
 
 def _read_only(command: str) -> bool:
-    """Fail closed: redirects, substitutions, heredocs, untokenisable text or any command word outside
-    _READ_ONLY make it not read-only."""
+    """
+    Description: Recognize only provably read-only shell commands and fail closed on unsafe syntax or
+        unknown commands.
+    Parameters:
+        command: Shell command text to validate.
+    Output: True if every segment begins with a permitted command (one in _READ_ONLY) and no unsafe
+        text is present; False for redirects, substitutions, heredocs, tokenization failures, or
+        unknown commands.
+    """
     if _UNSAFE_TEXT.search(command):
         return False
     try:
@@ -295,13 +484,21 @@ _ANSI_C = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.S)
 _ESCAPE = re.compile(r"\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|[0-7]{1,3}|.)", re.S)
 _SIMPLE_ESC = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "f": "\f", "v": "\v"}
 # On the normalised text: the allow file or the grants dir (FR-READ-06) by name, a glob char right before
-# `arpocrates` (or `h?arpocrates`), or dotglob/globdots next to any glob, all count as a mention of the directory.
+# `arpo` (or `h?arpo`; `arpocrates` starts with `arpo`), or dotglob/globdots next to any glob, all count as a mention
+# of either state directory (`harpo` or `harpocrates`).
 # `grants` must end the name: the module cli/Harpocrates/grants.py is no mention.
-_MENTION_NORM = re.compile(r"arpocrates/(?:allow\b|grants(?![\w.-]))|[*?\]]h?arpocrates", re.I)
+_MENTION_NORM = re.compile(r"arpo(?:crates)?/(?:allow\b|grants(?![\w.-]))|[*?\]]h?arpo", re.I)
 _DOTGLOB = re.compile(r"dotglob|globdots", re.I)
 
 
 def _decode_escape(m: re.Match[str]) -> str:
+    """
+    Description: Decode an ANSI-C escape for spelling normalization.
+    Parameters:
+        m: Regex match whose first group contains the escape code without its backslash.
+    Output: Decoded hex, Unicode, masked octal, simple escape, or unchanged code; malformed codes
+        can raise ValueError.
+    """
     code = m.group(1)
     if code[0] in "xu" and len(code) > 1:
         return chr(int(code[1:], 16))
@@ -311,25 +508,154 @@ def _decode_escape(m: re.Match[str]) -> str:
 
 
 def _normalise(command: str) -> str:
-    """Spelling tricks undone: $'...' escapes decoded, then backslashes, quotes, braces and commas removed,
-    so `.h\\arpocrates`, `.ha""rpocrates`, `{.,}harpocrates` and `$'\\056harpocrates'` read as `.harpocrates`."""
+    """
+    Description: Undo shell spelling tricks so state-directory guards see obfuscated mentions.
+    Parameters:
+        command: Shell command text to normalize.
+    Output: Text with ANSI-C escapes decoded first, then backslash-newline line continuations joined,
+        then backslashes, quotes, braces, and commas removed, so `.h\arpocrates` and `{.,}harpocrates`
+        both read as `.harpocrates`.
+    """
     decoded = _ANSI_C.sub(lambda m: _ESCAPE.sub(_decode_escape, m.group(1)), command)
+    decoded = re.sub(r"\\\r?\n", "", decoded)  # a backslash-newline is gone before the shell reads a word
     return re.sub(r"[\\'\"{},]", "", decoded)
 
 
 def _mentions_dir(command: str, norm: str) -> bool:
+    """
+    Description: Detect state-directory mentions in original and normalized shell text, including
+        glob forms.
+    Parameters:
+        command: Original shell command.
+        norm: Command after spelling normalization.
+    Output: True for directory or protected-state mentions, or dotglob/globdots combined with a
+        glob; otherwise False.
+    """
     return bool(_DIR.search(command) or _DIR.search(norm) or _MENTION_NORM.search(norm)
                 or (_DOTGLOB.search(norm) and re.search(r"[*?\[]", norm)))
 
 
-def _inside_state_dir(cwd: Optional[Path]) -> bool:
-    """Whether the working directory is ~/.harpocrates or under it (links resolved): a command run there names
-    its files without the directory, so the text alone shows nothing."""
-    if cwd is None:
+def _homes() -> list[Path]:
+    """
+    Description: The home folders whose state directories the guards protect: the one the password database names,
+        which holds the real state (paths.home), and the $HOME-derived one when it differs, in case a tool expands `~`
+        from the environment (SEC-08, belt and braces).
+    Parameters: None
+    Output: One or two paths, the password-database home first. Raises RuntimeError when no home folder can be
+        determined (callers treat that as a refusal).
+    """
+    homes = [paths.home()]
+    from_env = Path.home()
+    if from_env != homes[0]:
+        homes.append(from_env)
+    return homes
+
+
+def inside_state_dir(path: Optional[Path]) -> bool:
+    """
+    Description: Check whether a path lies in either state directory, using resolved, NFKC- and
+        case-folded names and file identities. Case folding matters because the default macOS file
+        system treats .HARPO as .harpo.
+    Parameters:
+        path: Absolute or relative path, possibly nonexistent; None means no path.
+    Output: True when the path is inside ~/.harpo or ~/.harpocrates, False otherwise and for None.
+        Both homes are checked (SEC-08): the real one (paths.home) and the one $HOME names, using both
+        names, without running the migration. Any path whose first component under either home starts
+        with .harpo (folded) also counts as inside (SEC-09), so the migration's temp folder
+        (~/.harpo.migrating.x) and a backup (~/.harpocrates.bak) are guarded; an unrelated ~/.harpoon
+        is over-blocked on purpose. A project folder named .harpo elsewhere is not inside. A shell
+        command names its files without the directory, so the working directory is what shows it; an
+        Edit or Write call is checked by its target path. Raises OSError or RuntimeError when the path
+        cannot be resolved; callers treat that as a refusal.
+    """
+    if path is None:
         return False
-    state = (Path.home() / ".harpocrates").resolve()  # looked up per call so a test can move HOME
-    real = cwd.resolve()
-    return real == state or real.is_relative_to(state)
+    real = path.resolve()
+    folded = [_fold(part) for part in real.parts]
+    guarded = _fold(paths.NEW_DIR)  # ".harpo": also the start of ".harpocrates", ".harpo.migrating.x", ".harpocrates.bak"
+    ids = set()
+    for home in _homes():
+        under = [_fold(part) for part in home.resolve().parts]
+        if folded[:len(under)] == under and len(folded) > len(under) and folded[len(under)].startswith(guarded):
+            return True  # SEC-09: any first component under the home folder that starts with .harpo (over-blocks .harpoon)
+        for name in STATE_DIR_NAMES:
+            state = (home / name).resolve()
+            wanted = [_fold(part) for part in state.parts]
+            if folded[:len(wanted)] == wanted:
+                return True
+            try:
+                st = os.stat(state)
+            except OSError:
+                continue  # not there (yet): the name comparison above is all there is to check
+            ids.add((st.st_dev, st.st_ino))
+    for ancestor in (real, *real.parents):
+        try:
+            st = os.stat(ancestor)
+        except OSError:
+            continue
+        if (st.st_dev, st.st_ino) in ids:
+            return True
+    return False
+
+
+_MAX_STATE_FILES = 50_000  # more files than this under the state folders is not a state folder: refuse, don't walk on
+
+
+def _state_roots() -> list[Path]:
+    """
+    Description: The folders that count as state: in each home folder (SEC-08), every entry whose folded name starts with
+        .harpo (the two state folders, the migration's temp folder, a backup; SEC-09).
+    Parameters: None
+    Output: Resolved folder paths, links followed once so a ~/.harpo that is a symlink is walked where it leads. Entries
+        that cannot be listed or resolved are skipped. Raises RuntimeError when no home folder can be determined.
+    """
+    guarded = _fold(paths.NEW_DIR)
+    roots: list[Path] = []
+    for home in _homes():
+        try:
+            with os.scandir(home) as scan:
+                found = [entry.path for entry in scan if _fold(entry.name).startswith(guarded)]
+        except OSError:
+            continue
+        roots.extend(Path(os.path.realpath(path)) for path in found)
+    return roots
+
+
+def links_to_state_file(path: Optional[Path]) -> bool:
+    """
+    Description: Whether an existing file is another name (a hard link) of a file in a state folder, so editing it edits
+        the allowlist or a grant although its path is elsewhere (SEC-09). Only a file with more than one link is
+        compared, and only a match refuses: an ordinary hard link is not blocked.
+    Parameters:
+        path: the Edit or Write target, possibly nonexistent; None means no path. Symlinks are followed (the tool writes
+            to what they lead to).
+    Output: True when path is a regular file with st_nlink > 1 whose (device, inode) equals that of a regular file under a
+        state folder (see _state_roots); False for None, a missing target, a directory, a single-link file or no match.
+        Also True when a state folder holds more than _MAX_STATE_FILES files (fail closed). Raises OSError (other than
+        a missing path) when the target cannot be examined; callers treat that as a refusal.
+    """
+    if path is None:
+        return False
+    try:
+        st = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False  # nothing there yet: the tool will create it
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink <= 1:
+        return False
+    wanted, seen = (st.st_dev, st.st_ino), 0
+    for root in _state_roots():
+        for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+            for name in filenames:
+                seen += 1
+                if seen > _MAX_STATE_FILES:
+                    return True
+                try:
+                    other = os.lstat(os.path.join(dirpath, name))
+                except OSError:
+                    continue
+                if stat.S_ISREG(other.st_mode) and (other.st_dev, other.st_ino) == wanted:
+                    return True
+    return False
 
 
 # Any command naming the allowlist module together with an add/remove word (add, add_name, remove_name ...) in any
@@ -341,14 +667,77 @@ _EDIT_WORD = re.compile(r"(?<![A-Za-z0-9])(?:add|remove)(?![A-Za-z0-9])", re.I)
 
 
 def _edits_module(text: str) -> bool:
+    """
+    Description: Detect allowlist module references combined with add or remove words.
+    Parameters:
+        text: Shell text to inspect for module-edit patterns.
+    Output: True when both patterns match, otherwise False; no filesystem effects.
+    """
     return bool(_MODULE.search(text) and _EDIT_WORD.search(text))
 
 
+def _glob_runs_allow(command: str) -> bool:
+    """
+    Description: Detect a glob in the program word that the shell would expand to a Harpo program, followed by
+        `allow` in the same command.
+    Parameters:
+        command: Shell command text to inspect.
+    Output: True when a word of some segment fnmatches harpo, harpo-mcp, harpocrates or harpocrates-mcp (by its last
+        path component, case-folded) and a later word of that segment is allow; otherwise False. Words are taken from
+        the normalised text, also with braces and commas read as spaces. Words made only of * and ? never count. No
+        filesystem access.
+    """
+    for text in (_normalise(command), _normalise(re.sub(r"[{},]", " ", command))):
+        for segment in _SEGMENT_END.split(text):
+            words = [w for w in _WORD_END.split(segment) if w]
+            for i, word in enumerate(words):
+                base = word.rsplit("/", 1)[-1].casefold()
+                if (_GLOB_WORD.search(base) and not _ONLY_WILDCARDS.fullmatch(base)
+                        and any(fnmatch.fnmatchcase(program, base) for program in _PROGRAMS)
+                        and _ALLOW_WORD.search(" ".join(words[i + 1:]))):
+                    return True
+    return False
+
+
+_CD_WORDS = frozenset({"cd", "pushd", "popd"})
+
+
+def _changes_directory(command: str) -> bool:
+    """
+    Description: Whether any simple command of a shell command line is cd, pushd or popd (SEC-09): the commands that move
+        the shell into a folder so the next command names its files bare.
+    Parameters:
+        command: Shell command text to inspect.
+    Output: True when the first word of some segment (as the shell reads it: quotes and backslashes removed, so a
+        backslash or quotes inside the word do not hide it) is cd, pushd or popd, or when the command cannot be tokenised (fail closed); otherwise False.
+        No filesystem access.
+    """
+    try:
+        return any(seg[0] in _CD_WORDS for seg in _segments(command))
+    except ValueError:
+        return True
+
+
 def touches(command: str, cwd: Optional[Path] = None) -> bool:
-    """Whether a shell command could change the allowlist or the session grants: it runs `harpocrates allow`, or
-    mentions the ~/.harpocrates directory (also in a quoted, escaped, braced or globbed spelling), or runs with
-    that directory as its working directory (cwd), in anything but a provably read-only command."""
+    """
+    Description: Detect shell commands that could modify the allowlist or session grants so the hook
+        can refuse them.
+    Parameters:
+        command: Shell command text to inspect.
+        cwd: Working directory, or None when unavailable.
+    Output: True for allow commands (`harpo allow` or `harpocrates allow`, also with a glob in the
+        program word) or module-edit patterns; for non-read-only mentions of ~/.harpo or ~/.harpocrates,
+        including quoted, escaped, braced, or globbed spellings; and for non-read-only runs with either
+        folder as cwd; otherwise False. A command that mentions either folder and also runs cd, pushd, or
+        popd is True even when the rest is read-only (SEC-09), since it would leave the shell inside the
+        folder. Directory resolution errors propagate for caller refusal.
+    """
     norm = _normalise(command)
     if _ALLOW_CMD.search(command) or _ALLOW_CMD.search(norm) or _edits_module(command) or _edits_module(norm):
         return True
-    return (_mentions_dir(command, norm) or _inside_state_dir(cwd)) and not _read_only(command)
+    if _glob_runs_allow(command):
+        return True
+    mentions = _mentions_dir(command, norm)
+    if mentions and _changes_directory(command):  # cd ~/.harpo is "read-only", but the next command runs inside it
+        return True
+    return (mentions or inside_state_dir(cwd)) and not _read_only(command)

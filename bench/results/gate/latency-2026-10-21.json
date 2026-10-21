@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-21",
+  "hardware": {
+    "machine": "arm64",
+    "cpu": "Apple M3 Pro",
+    "cores": 12,
+    "os": "Darwin 27.0.0",
+    "python": "3.12.12"
+  },
+  "body_bytes": 102400,
+  "calls": 200,
+  "warmup": 20,
+  "scan_step": "pass-through",
+  "client_connection": "keep-alive",
+  "upstream_tls": false,
+  "pool": true,
+  "direct_ms": {
+    "p50": 0.269,
+    "p95": 0.311,
+    "mean": 0.274,
+    "min": 0.247,
+    "max": 0.344
+  },
+  "via_gate_ms": {
+    "p50": 0.458,
+    "p95": 0.522,
+    "mean": 0.468,
+    "min": 0.426,
+    "max": 0.66
+  },
+  "added_ms": {
+    "p50": 0.189,
+    "p95": 0.211
+  }
+}

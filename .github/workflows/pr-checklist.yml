@@ -1,0 +1,37 @@
+name: PR checklist
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  tests-ticked:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - name: Every listed test is ticked
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          # The PR text is read only from $BODY, never pasted into this script.
+          text=$(printf '%s\n' "$BODY" | tr -d '\r')
+          section=$(printf '%s\n' "$text" | awk '
+            /^## Tests[ \t]*$/ { inside = 1; next }
+            inside && /^## / { inside = 0 }
+            inside { print }
+          ')
+          unticked=$(printf '%s\n' "$section" | grep -c '^- \[ \]' || true)
+          ticked=$(printf '%s\n' "$section" | grep -c '^- \[[xX]\]' || true)
+          if [ "$((ticked + unticked))" -eq 0 ]; then
+            echo "List the new and changed tests in the Tests section" >&2
+            exit 1
+          fi
+          if [ "$unticked" -gt 0 ]; then
+            echo "$unticked test(s) not yet ticked in the Tests section" >&2
+            exit 1
+          fi
+          echo "$ticked test(s) ticked"

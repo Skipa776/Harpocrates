@@ -12,10 +12,10 @@ const KEEP = 'Keep secrets protected'
 const ALLOW = 'Allow edits this session'
 
 const reasonFor = (path: string, kinds = 'api_token, password') =>
-  `Harpocrates: Claude wants to edit ${path} without secret protection. It contains secrets (${kinds}). ` +
+  `Harpo: Claude wants to edit ${path} without secret protection. It contains secrets (${kinds}). ` +
   'Allowing lets Claude read and edit this file with its built-in tools for the rest of this session; ' +
   'these values go to the model provider as-is. Choose No to keep them protected: ' +
-  'Claude can still read it with mcp__harpocrates__safe_read.'
+  'Claude can still read it with mcp__harpo__safe_read.'
 
 const REASON = reasonFor('config/settings.py')
 
@@ -120,27 +120,43 @@ test('isSameFile: different files, and relative against absolute with no cwd, ar
 test('parse: anything else is null', () => {
   for (const garbage of [
     '',
-    'Harpocrates: something new we cannot read',
-    'Harpocrates: Claude wants to read files that contain secrets:\n  a.env (password)\nAllowing sends these values',
+    'Harpo: something new we cannot read',
+    'Harpo: Claude wants to read files that contain secrets:\n  a.env (password)\nAllowing sends these values',
     reasonFor('x.env', 'Not A Kind'),
     reasonFor('x.env', ''),
     reasonFor('', 'password'),
     REASON.replace('Allowing lets', 'Permitting lets'),
-    REASON.replace('Harpocrates: ', ''),
+    REASON.replace('Harpo: ', ''),
   ]) {
     expect(parseReason(garbage)).toBeNull()
   }
 })
 
+// A hook from before the rename words its reason "Harpocrates: ... mcp__harpocrates__safe_read": still read and drawn.
+const LEGACY_REASON = REASON.replace('Harpo: ', 'Harpocrates: ').replace('mcp__harpo__', 'mcp__harpocrates__')
+
+test('parse: a reason written by a hook from before the rename is still read', () => {
+  expect(LEGACY_REASON).not.toBe(REASON)
+  expect(parseReason(LEGACY_REASON)).toEqual({ path: 'config/settings.py', kinds: 'api_token, password' })
+})
+
+test('a pre-rename ask opens our question under the new name', async ($, on) => {
+  const w = world(on, ask(LEGACY_REASON), KEEP)
+  await edit($)
+  expect(w.asked).toEqual([
+    { question: 'Allow Claude to edit settings.py without secret protection?', header: 'Harpo', options: [KEEP, ALLOW] },
+  ])
+})
+
 // -- decisions ----------------------------------------------------------
 
-test('a Harpocrates ask opens our question with the two options', async ($, on) => {
+test('a Harpo ask opens our question with the two options', async ($, on) => {
   const w = world(on, ask(REASON), KEEP)
   await edit($)
   expect(w.asked).toEqual([
     {
       question: 'Allow Claude to edit settings.py without secret protection?',
-      header: 'Harpocrates',
+      header: 'Harpo',
       options: [KEEP, ALLOW],
     },
   ])
@@ -156,7 +172,7 @@ test('Keep secrets protected denies and names the path and safe_read', async ($,
   const r = await edit($)
   expect(r.decision).toBe('deny')
   expect(r.reason).toBe(
-    'The user kept config/settings.py protected. Read it with mcp__harpocrates__safe_read; ask the user to make the edit.',
+    'The user kept config/settings.py protected. Read it with mcp__harpo__safe_read; ask the user to make the edit.',
   )
 })
 
@@ -181,7 +197,7 @@ test('a dismissed question denies with the no-answer reason and logs only the to
   expect(logs).toEqual(['debug: harpocrates-prompt: question not answered (Edit)'])
   expect(r.decision).toBe('deny')
   expect(r.reason).toBe(
-    'No one answered the Harpocrates prompt, so config/settings.py stays protected. Read it with mcp__harpocrates__safe_read.',
+    'No one answered the Harpo prompt, so config/settings.py stays protected. Read it with mcp__harpo__safe_read.',
   )
 })
 
@@ -194,13 +210,13 @@ test('two pending asks for one file get distinct questions', async ($, on) => {
 
 // -- left to the engine -------------------------------------------------
 
-test('verdicts that are not a Harpocrates ask pass through untouched', async ($, on) => {
+test('verdicts that are not a Harpo ask pass through untouched', async ($, on) => {
   const cases: ToolCheckResult[] = [
     { decision: 'ask', reason: 'Bash needs approval', hook: 'PreToolUse' },
     { decision: 'ask', reason: REASON },
     { decision: 'ask', reason: REASON, hook: 'PostToolUse' },
     { decision: 'allow', reason: REASON, hook: 'PreToolUse' },
-    { decision: 'deny', reason: 'Harpocrates: blocked', hook: 'PreToolUse' },
+    { decision: 'deny', reason: 'Harpo: blocked', hook: 'PreToolUse' },
   ]
   let current = cases[0] as ToolCheckResult
   const w = world(on, () => current, ALLOW)
@@ -213,10 +229,10 @@ test('verdicts that are not a Harpocrates ask pass through untouched', async ($,
   expect(w.asked.length).toBe(0)
 })
 
-test('an unparseable Harpocrates reason returns the original verdict: no question', async ($, on) => {
+test('an unparseable Harpo reason returns the original verdict: no question', async ($, on) => {
   const odd = [
-    'Harpocrates: something new we cannot read',
-    'Harpocrates: Claude wants to read files that contain secrets:\n  a.env (password)\nAllowing sends these values',
+    'Harpo: something new we cannot read',
+    'Harpo: Claude wants to read files that contain secrets:\n  a.env (password)\nAllowing sends these values',
     reasonFor('x.env', 'Not A Kind'),
   ]
   let current = odd[0] as string
@@ -248,7 +264,7 @@ test('an error beneath the hook never turns into allow', async ($, on) => {
 
 // -- the card must describe the real call --------------------------------
 
-test('a Harpocrates edit reason on a tool that is not an edit is left to the engine', async ($, on) => {
+test('a Harpo edit reason on a tool that is not an edit is left to the engine', async ($, on) => {
   const w = world(on, ask(REASON), ALLOW)
   for (const [tool, input] of [
     ['Bash', { command: 'echo hi > config/settings.py' }],
@@ -298,7 +314,7 @@ test('the question and the deny text use the call\'s own path', async ($, on) =>
   const r = await edit($, './a b/(c).env')
   expect(w.asked[0]?.question).toBe('Allow Claude to edit (c).env without secret protection?')
   expect(r.reason).toBe(
-    'The user kept ./a b/(c).env protected. Read it with mcp__harpocrates__safe_read; ask the user to make the edit.',
+    'The user kept ./a b/(c).env protected. Read it with mcp__harpo__safe_read; ask the user to make the edit.',
   )
 })
 
@@ -314,7 +330,7 @@ test('a reason with any change to the template is left to the engine', async ($,
     REASON.replace('with its built-in tools', 'with any tools'),
     REASON.replace('Choose No to keep them protected', 'Choose No'),
     REASON + ' Extra.',
-    REASON.replace('mcp__harpocrates__safe_read', 'mcp__harpocrates__safe_grep'),
+    REASON.replace('mcp__harpo__safe_read', 'mcp__harpo__safe_grep'),
     REASON.replace('(api_token, password)', '(API_TOKEN)'),
     REASON.replace('(api_token, password)', '(api_token,password)'),
   ]
@@ -343,7 +359,7 @@ test('a disguised extension is drawn with the disguise removed', async ($, on) =
 
 // -- the card -----------------------------------------------------------
 
-const dialogProps = (question: string, header = 'Harpocrates') => ({
+const dialogProps = (question: string, header = 'Harpo') => ({
   tool: 'AskUserQuestion',
   questions: [
     {
@@ -375,7 +391,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     world(on, ask(reasonFor('a.env', 'password')), ALLOW, async question => {
       const { ui, has } = await card($, surface, question)
       for (const text of [
-        /Harpocrates/,
+        /Harpo/,
         /edit without secret protection/,
         /Edit\s+a\.env/,
         /Claude wants to edit a\.env, which contains secrets \(password\)\./,
@@ -433,7 +449,7 @@ test('a dialog that is not ours is drawn by the engine untouched', async ($, on)
     viewport: { columns: 100, rows: 40 },
     props: dialogProps('Allow Claude to edit foo without secret protection?'),
   } as never)
-  expect((await ui.find({ type: 'Text', text: /Harpocrates/ })) !== undefined).toBe(false)
+  expect((await ui.find({ type: 'Text', text: /Harpo/ })) !== undefined).toBe(false)
   await ui.unmount()
 })
 

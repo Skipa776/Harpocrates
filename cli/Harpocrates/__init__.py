@@ -7,7 +7,7 @@ import os
 # uploads usage events to Microsoft (default on from 1.31; see onnxruntime docs/Privacy.md).
 # ORT_DISABLE_TELEMETRY must be set BEFORE onnxruntime is first imported, and is forced
 # (not setdefault) so a user-exported 0 cannot re-enable it. Limit: this does nothing if a
-# host process imported onnxruntime before Harpocrates.
+# host process imported onnxruntime before Harpo.
 os.environ["ORT_DISABLE_TELEMETRY"] = "1"
 
 __all__ = ["__version__"]
