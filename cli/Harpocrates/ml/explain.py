@@ -96,15 +96,9 @@ class Explanation:
         top_positive: Top secret-pushing contributions.
         top_negative: Top non-secret-pushing contributions.
     Output: Instances provide rounded model scores, feature contributions, and safe dictionary
-    serialization.
-    `base_log_odds` + sum(c.contribution for c in contributions) ≈ raw_log_odds.
-    `predicted_probability` = sigmoid(raw_log_odds).
-    All floats rounded to 3 decimal places — prevents reconstruction of the redacted token from
-    high-precision entropy / length values. Token-derived feature values (token_length,
-    token_entropy, char_class_count, digit_ratio, special_char_ratio) are suppressed to None in
-    to_dict() output.
-    Findings produced by the regex tier (evidence != ML) return None from explain_finding — they
-    have no model decision to explain.
+        serialization. base_log_odds plus the contributions gives raw_log_odds, and
+        predicted_probability is its sigmoid. Floats are rounded to 3 decimals and token-derived
+        features are None in to_dict(), so the redacted token cannot be rebuilt.
     """
 
     finding_id: str
@@ -155,14 +149,10 @@ def explain_finding(
         model_path: Override path to xgboost_model.json. Must reside within Harpocrates/ml/models/
         (security: prevents cache poisoning). Defaults to the bundled artifact.
         top_k: Number of features to include in top_positive/top_negative.
-    Output: Explanation or None for non-ML findings; lazily imports dependencies and loads or reuses
-    a cached model. Model loading can raise ValueError, FileNotFoundError, OSError, or
-    JSONDecodeError; inference errors propagate.
-    Returns None when the finding was not produced by the ML stage (regex-tier findings have no
-    model decision to explain).
-    Lazy-imports xgboost — cost paid only on the first call in a process. Subsequent calls use the
-    cached Booster (~0.2ms each).
-    Explanation dataclass or None.
+    Output: Explanation, or None for a finding not produced by the ML stage (regex-tier findings
+        have no model decision to explain). Model loading can raise ValueError, FileNotFoundError,
+        OSError, or JSONDecodeError; inference errors propagate. The xgboost import and model load
+        happen on the first call in a process; later calls reuse the cached Booster (~0.2 ms).
     """
     import numpy as np
     import xgboost as xgb  # lazy — never executed on default scan path
@@ -240,15 +230,10 @@ def _load_booster(model_path: Optional[Path]) -> "xgb.Booster":
     Description: Load and cache an XGBoost Booster. Thread-safe via double-checked locking.
     Parameters:
         model_path: Optional model path within the bundled models directory.
-    Output: Cached or newly loaded Booster; updates the cache under a lock. Raises ValueError for
-    disallowed paths or invalid hashes, FileNotFoundError for missing files, and propagates file,
-    JSON, and model-loading errors.
-    Cache is keyed by resolved path so different model_path overrides each get their own cache slot
-    (prevents stale-cache bugs on test overrides).
-    Security: model_path, if provided, must reside within _MODELS_DIR to prevent untrusted callers
-    from poisoning the cache with a malicious model. The file must also match its SHA-256 entry in
-    the manifest (SEC-07); on a missing manifest, missing entry, or mismatch this raises and loads
-    nothing.
+    Output: Cached or newly loaded Booster, with the cache keyed by resolved path so overrides get
+        their own slot. Raises ValueError for disallowed paths or invalid hashes, FileNotFoundError for
+        missing files, and propagates file, JSON, and model-loading errors. A model_path must sit
+        inside _MODELS_DIR and match its manifest SHA-256 (SEC-07), or nothing loads.
     """
     import xgboost as xgb
 
@@ -292,8 +277,8 @@ def _read_verified_model(path: Path) -> bytes:
     Parameters:
         path: Model file whose name is the manifest key.
     Output: Verified file bytes; reads model and manifest files. Raises FileNotFoundError when the
-    manifest is absent, ValueError for a missing hash entry or mismatch, and propagates file and
-    JSON parsing errors.
+        manifest is absent, ValueError for a missing hash entry or mismatch, and propagates file and
+        JSON parsing errors.
     """
     from Harpocrates.ml.onnx_verifier import _verify_file_hash  # lazy: keeps module import light
 
@@ -333,7 +318,7 @@ def _sigmoid(x: float) -> float:
     Parameters:
         x: Log-odds value.
     Output: Probability as a float; math.exp can raise OverflowError for a sufficiently negative
-    input.
+        input.
     """
     return 1.0 / (1.0 + math.exp(-x))
 

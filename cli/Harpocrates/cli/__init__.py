@@ -53,8 +53,7 @@ def _resolve_fail_on(raw: str) -> Optional[Severity]:
     Description: Parse the minimum severity used to gate scan exit status.
     Parameters:
         raw: User-supplied --fail-on value, normalized by trimming and lowercasing.
-    Output: Severity or None for none; raises typer.BadParameter for unsupported values.
-    Notes: Parse --fail-on into a minimum Severity, or None to disable the gate.
+    Output: A Severity, or None when the value is none; raises typer.BadParameter for unsupported values.
     """
     normalized = raw.strip().lower()
     if normalized == _FAIL_ON_NONE:
@@ -74,7 +73,6 @@ def _fail_on_callback(value: str) -> str:
     Parameters:
         value: User-supplied severity threshold text.
     Output: Original value after validation; raises typer.BadParameter for invalid thresholds.
-    Notes: Validate --fail-on at argument-parse time so bad input fails fast.
     """
     _resolve_fail_on(value)
     return value
@@ -85,9 +83,7 @@ def _engine_callback(value: str) -> str:
     Description: Validate and normalize the scan-engine choice during argument parsing.
     Parameters:
         value: User-supplied engine name.
-    Output: Trimmed lowercase auto, python, or rust; raises typer.BadParameter for unsupported
-        names.
-    Notes: Validate the selected scan engine at argument-parse time.
+    Output: The trimmed, lowercased engine: auto, python, or rust; raises typer.BadParameter for unsupported names.
     """
     normalized = value.strip().lower()
     if normalized not in _VALID_ENGINES:
@@ -98,14 +94,12 @@ def _engine_callback(value: str) -> str:
 
 def _should_fail(findings, min_severity: Optional[Severity]) -> bool:
     """
-    Description: Determine whether findings meet the configured minimum severity for a failing exit
-        status.
+    Description: Determine whether findings meet the configured minimum severity for a failing exit status.
     Parameters:
         findings: Iterable of findings with severity values.
         min_severity: Minimum failing severity, or None to disable the gate.
-    Output: True if any finding meets the threshold, otherwise False; unknown severity keys raise
-        KeyError.
-    Notes: Return True if any finding meets or exceeds the minimum severity.
+    Output: True if any finding meets or exceeds the minimum severity, otherwise False; unknown severity
+        keys raise KeyError.
     """
     if min_severity is None:
         return False
@@ -141,7 +135,6 @@ def _main(
     Parameters:
         version: Eager version flag handled by _version_callback.
     Output: None; the callback body has no side effects.
-    Notes: Harpo - Secrets detection for code repositories.
     """
 
 
@@ -240,8 +233,8 @@ def scan(
     ),
 ) -> None:
     """
-    Description: Scan supplied files, directories, or Git history and report findings with a
-        configurable severity exit gate.
+    Description: Scan supplied files, directories, or Git history and report findings with a configurable
+        severity exit gate. History mode also finds secrets that were deleted from disk.
     Parameters:
         paths: Paths to scan; no paths exits successfully without scanning.
         recursive: Whether directory scans include subdirectories.
@@ -254,33 +247,11 @@ def scan(
         fail_on: Minimum failing severity or none to disable finding-based failure.
         history: Whether to scan added lines across Git history instead of disk files.
         explain: Whether to output JSON with per-feature TreeSHAP contributions.
-    Output: No return on handled paths; prints reports and diagnostics and raises typer.Exit with 0
-        for success, 1 for threshold findings, or 2 for handled configuration, model, or scan
-        errors. Loads the shipped model eagerly and fails closed if loading fails; scans input paths
-        and may load explanation dependencies. Unhandled scanner or explanation errors propagate.
-    Notes: Scan a file or directory for secrets.
-    Notes: By default, detected secret tokens are redacted in both table and JSON output. Pass
-        --show-secrets to display full tokens (use with caution).
-    Notes: Examples:
-    Notes:     # Scan a single file     harpo scan config.env
-    Notes:     # Scan a directory recursively     harpo scan ./my_project
-    Notes:     # Output as JSON     harpo scan ./my_project --json
-    Notes:     # Ignore specific patterns     harpo scan ./my_project --ignore
-        "*.test.js,test_*"
-    Notes:     # Fewer, higher-confidence findings     harpo scan ./my_project --ml-threshold
-        0.7
-    Notes:     # Require the native regex/entropy scanner; ML still runs in Python     harpocrates
-        scan ./my_project --engine rust
-    Notes:     # Display full token values (NOT recommended outside local debugging)     harpocrates
-        scan config.env --show-secrets
-    Notes:     # Scan every commit in git history (finds secrets deleted from disk)     harpocrates
-        scan . --history
-    Notes:     # Only fail CI on high or critical findings     harpo scan ./my_project
-        --fail-on high
-    Notes:     # Report findings but never return a non-zero exit code     harpo scan
-        ./my_project --fail-on none
-    Notes:     # XAI: emit JSON with per-feature SHAP contributions     harpo scan
-        ./my_project --explain | jq '.findings[0].explanation.top_positive'
+    Output: No return on handled paths; prints reports and diagnostics and raises typer.Exit with 0 for
+        success, 1 for threshold findings, or 2 for handled configuration, model, or scan errors. Loads the
+        shipped model eagerly and fails closed if loading fails; scans input paths and may load explanation
+        dependencies. Unhandled scanner or explanation errors propagate. Detected tokens are redacted by
+        default in table and JSON output. With the rust engine, ML still runs in Python.
     """
     # Zero-file early return — pre-commit passes no files when nothing is staged.
     if not paths:
@@ -491,7 +462,6 @@ def version() -> None:
     Description: Display the installed Harpo distribution version.
     Parameters: None
     Output: None; prints version information and propagates metadata lookup or output errors.
-    Notes: Display version information.
     """
     from importlib.metadata import version as _version
     console.print(f"Harpo version {_version('harpocrates')}")
@@ -511,7 +481,6 @@ def setup(
         harness: Optional claude-code or codex guide identifier; None lists detected harnesses.
     Output: None after printing the report or guide; prints unsupported-guide errors and raises
         typer.Exit with code 2. Detection or output errors may propagate.
-    Notes: Show each detected agent harness's support tier, or print one harness's setup.
     """
     from Harpocrates.harness import detect, setup_instructions, tier_report
 
@@ -562,17 +531,14 @@ def install_cmd(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write and run nothing."),
 ) -> None:
     """
-    Description: Install read-tool setup into selected or detected harness configuration under
-        FR-INSTALL-01.
+    Description: Install the read-tool setup into the selected or detected harness configuration
+        (FR-INSTALL-01). With no harness flag, every detected harness is used.
     Parameters:
         claude_code: Whether to explicitly select Claude Code.
         codex: Whether to explicitly select Codex CLI.
         dry_run: Whether to show proposed changes without applying them.
-    Output: None on success; prints reports, may update harness files and MCP registration, and
-        raises typer.Exit with code 1 for missing targets or failed reports. Installation errors may
-        propagate.
-    Notes: Write the read-tool setup into each harness's own config (FR-INSTALL-01). No flag: every
-        detected harness.
+    Output: None on success; prints reports, may update harness files and MCP registration, and raises
+        typer.Exit with code 1 for missing targets or failed reports. Installation errors may propagate.
     """
     _install_run(False, claude_code, codex, dry_run)
 
@@ -587,16 +553,14 @@ def uninstall_cmd(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write and run nothing."),
 ) -> None:
     """
-    Description: Remove configuration owned by Harpo installation while retaining other
-        settings and backups.
+    Description: Remove configuration owned by Harpo installation while retaining other settings and
+        backups.
     Parameters:
         claude_code: Whether to explicitly select Claude Code.
         codex: Whether to explicitly select Codex CLI.
         dry_run: Whether to show proposed removal without applying it.
-    Output: None on success; prints reports, may remove owned configuration and MCP registration,
-        and raises typer.Exit with code 1 for missing targets or failed reports. Removal errors may
-        propagate.
-    Notes: Remove exactly what `harpo install` added; everything else and the backups stay.
+    Output: None on success; prints reports, may remove owned configuration and MCP registration, and
+        raises typer.Exit with code 1 for missing targets or failed reports. Removal errors may propagate.
     """
     _install_run(True, claude_code, codex, dry_run)
 
@@ -628,8 +592,8 @@ def allow(
     as_json: bool = typer.Option(False, "--json", help="Machine-readable result on stdout, for plugins."),
 ) -> None:
     """
-    Description: Manage explicit path or name overrides for reads otherwise flagged under
-        FR-READ-05.
+    Description: Manage explicit path or name overrides that let agents read files Harpo would otherwise
+        flag (FR-READ-05).
     Parameters:
         path: File or folder path to add or remove.
         name: Exact file or folder name to allow across projects, instead of a path.
@@ -637,13 +601,10 @@ def allow(
         list_: Whether to display existing rules.
         yes: Whether to confirm a broad name without prompting.
         as_json: Whether to emit machine-readable JSON and never prompt.
-    Output: No return on handled paths; prints results and raises typer.Exit with 0 for success, 1
-        for refusal or handled error, or 3 when a broad name requires confirmation. May update the
-        allowlist or prompt interactively; uses are logged by the hook. Unhandled filesystem or
-        confirmation errors propagate.
-    Notes: Let agents read a path that Harpo would otherwise flag (FR-READ-05). Every use is
-        logged.
-    Notes: Exit code 0 ok, 1 refused or error, 3 a broad name needs confirmation (--yes).
+    Output: No return on handled paths; prints results and raises typer.Exit with 0 for success, 1 for
+        refusal or handled error, or 3 when a broad name requires confirmation (pass --yes). May update the
+        allowlist or prompt interactively; uses are logged by the hook. Unhandled filesystem or confirmation
+        errors propagate.
     """
     from Harpocrates import allowlist
 
@@ -860,7 +821,6 @@ def main() -> None:
     Parameters: None
     Output: None if the application returns; dispatches commands, prints CLI output, and may raise
         SystemExit or command errors.
-    Notes: Main entry point for CLI.
     """
     app()
 

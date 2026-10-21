@@ -11,12 +11,11 @@ PIECE_OVERLAP = 64 * 1024  # characters; longer than any token the regex and ent
 
 def _looks_binary(sample: bytes) -> bool:
     """
-    Description: Inspect a byte sample for binary content before attempting text scanning.
+    Description: Heuristically check a byte sample for binary content before text scanning.
     Parameters:
         sample: A sample of the file content.
-    Output: True for NUL bytes or over 30% nontext bytes after failed UTF-8 decoding; False for
-    empty, valid UTF-8, or a truncated final UTF-8 character.
-    Heuristic check for binary files. bool: True if the file is binary, False otherwise.
+    Output: True for NUL bytes or over 30% nontext bytes after failed UTF-8 decoding; False for empty,
+        valid UTF-8, or a truncated final UTF-8 character.
     """
     if not sample:
         return False

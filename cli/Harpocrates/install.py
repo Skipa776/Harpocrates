@@ -64,8 +64,6 @@ class RefusalError(Exception):
     Parameters:
         *args: Exception arguments forwarded to Exception.
     Output: Exception instances reporting a refusal before planned files are written.
-    Notes: The install can't proceed safely; the message says why and what to do. Nothing was
-        written.
     """
 
 
@@ -271,8 +269,6 @@ def _regions(text: str, marks: _Marks) -> list[tuple[int, int]]:
         marks: Opening and closing markers to pair.
     Output: List of (start, end) offsets including each end marker newline when present; raises
         RefusalError for lone or unpaired markers.
-    Notes: Spans of the marked blocks, each through its end marker's newline. A lone marker is a
-        refusal.
     """
     spans, pos = [], 0
     while (s := text.find(marks.start, pos)) >= 0:
@@ -295,7 +291,6 @@ def _drop(text: str, spans: list[tuple[int, int]]) -> str:
         text: Text containing the spans.
         spans: Ordered start/end offsets to remove.
     Output: Text with spans removed; performs no file writes.
-    Notes: Cut the blocks and the one blank line _put added next to each.
     """
     for s, e in reversed(spans):
         before, after = text[:s], text[e:]
@@ -339,16 +334,14 @@ def _drop_all(text: str, *marks: _Marks) -> str:
 def _upsert(text: str, marks: _Marks, blocks: Sequence[tuple[str, str]], legacy: Optional[_Marks] = None) -> str:
     """
     Description: Replace matching owned blocks in place or rebuild their placements when counts
-        differ.
+        differ; legacy blocks are rewritten in place only when they are the sole blocks and match
+        the new count.
     Parameters:
         text: Existing file text.
         marks: Ownership markers to locate.
         blocks: Sequence of (body, start or end) pairs.
         legacy: Markers of blocks an install from before the rename wrote, or None.
     Output: Updated text; raises RefusalError for unpaired markers and writes nothing.
-    Notes: Replace our blocks in place, or add them: (body, "start" | "end") each. Pre-rename blocks (`legacy`) are
-        rewritten in place under the new markers when they are the only ones and as many as the new blocks, so
-        they keep their place; otherwise they are cut and the new blocks go where a fresh install puts them.
     """
     if legacy is not None:
         old = _regions(text, legacy)
@@ -439,8 +432,6 @@ def _strip_event(entries: list, pred: Callable[[object], bool] = _is_ours) -> tu
         pred: Predicate selecting hooks to remove, defaulting to Harpo hooks.
     Output: Tuple of retained entries and the first affected insertion position, or None if
         unchanged; predicate errors propagate.
-    Notes: The event's entries without the hooks `pred` picks (an entry left empty goes), and where
-        the first sat.
     """
     kept: list = []
     pos: Optional[int] = None
@@ -457,17 +448,14 @@ def _strip_event(entries: list, pred: Callable[[object], bool] = _is_ours) -> tu
 
 def _upsert_event(entries: list, want: dict, prior: list[str]) -> tuple[list, list[str], list[str]]:
     """
-    Description: Keep exactly one desired Harpo hook entry and track ownership across
-        replacements.
+    Description: Keep exactly one desired Harpo hook entry, replacing any Harpo hook with another
+        python path or matcher.
     Parameters:
         entries: Existing event entries.
         want: Desired entry containing one hook.
         prior: Commands owned by an earlier install.
     Output: Tuple of updated entries, owned installed commands, and replaced commands not previously
         owned; malformed desired entries can raise lookup errors.
-    Notes: (entries, hook commands install added, Harpo commands it replaced). Our entry stays
-        once: a Harpo hook with another python path (or matcher) is replaced. `prior` is what
-        an earlier install added.
     """
     cmd = want["hooks"][0]["command"]
     ours = [(i, j) for i, e in enumerate(entries) if _has_hooks(e) for j, h in enumerate(e["hooks"]) if _is_ours(h)]
@@ -494,7 +482,8 @@ def _strs(value: object) -> list[str]:
 def _merge_settings(cur: dict, want: dict, where: str, prior: dict) -> tuple[dict, dict]:
     """
     Description: Merge desired permissions and hooks while recording ownership for conservative
-        uninstall.
+        uninstall; pre-rename MCP allow rules that the record lists are dropped, since the server
+        is now `harpo`.
     Parameters:
         cur: Current settings object.
         want: Desired Harpo settings.
@@ -502,10 +491,6 @@ def _merge_settings(cur: dict, want: dict, where: str, prior: dict) -> tuple[dic
         prior: Earlier installation ownership record.
     Output: Tuple of copied merged settings and ownership record; retains earlier owned entries
         still present and raises RefusalError for incompatible settings structures.
-    Notes: (merged settings, what this install added). The record is what lets uninstall leave the
-        user's own identical rules and hooks alone; entries an earlier install added stay in it
-        while they are still there. An allow rule for the pre-rename MCP tool names that the record lists
-        is dropped (the server is registered as `harpo` now); one the user wrote themselves stays.
     """
     out, added = copy.deepcopy(cur), {"permissions": {}, "hooks": {}}
     replaced = _strs(prior.get("replaced"))
@@ -536,10 +521,7 @@ def _strip_settings(cur: dict, prior: Optional[dict]) -> dict:
         cur: Current settings to copy and filter.
         prior: Earlier ownership record, or None for marker-only hook removal.
     Output: Copied settings without selected entries or newly empty affected tables; without a
-        record, permission rules remain.
-    Notes: Undo _merge_settings. With the install record (`prior`) only what it lists goes; without
-        one only Harpo hook commands go, never permission rules (they may be the user's own).
-        A list or table that ends up empty goes with them.
+        record, only Harpo hook commands go, since permission rules may be the user's own.
     """
     out = copy.deepcopy(cur)
     perms = out.get("permissions")
@@ -581,8 +563,6 @@ def _settings_edit(path: Path, remove: bool, prior: Optional[dict]) -> tuple[_Ed
         prior: Earlier ownership record, or None if absent.
     Output: Tuple of planned _Edit and new ownership record; raises RefusalError for unreadable,
         invalid, or incompatible JSON and writes nothing.
-    Notes: (the edit, this install's record for the file). `prior` is the earlier record, None if
-        there is none.
     """
     old, cur = read_json_object(path)
     added: dict = {}
@@ -690,17 +670,14 @@ def _unregister(claude: str, name: str, home: Path) -> Optional[str]:
 def _mcp_step(remove: bool, dry_run: bool, owned: Optional[str]) -> Step:
     """
     Description: Register or remove the Claude MCP server while respecting ownership and dry-run
-        mode.
+        mode; an owned pre-rename `harpocrates` is replaced by `harpo` on install, and an unowned
+        one is only mentioned.
     Parameters:
         remove: Whether to remove the registration.
         dry_run: Whether to report intended changes without invoking Claude.
         owned: The name the install record says install registered the server under, or None if it did not.
     Output: Step reporting unchanged, manual, added, updated, removed, or failed status; may query
         and change user MCP registration unless dry-run or ownership rules prevent it.
-    Notes: Only the owned name is ever removed. An install from before the rename owns `harpocrates`: installing now
-        drops that registration (so the agent does not see the tools twice) and registers `harpo`; uninstalling
-        without a reinstall removes `harpocrates`. A `harpocrates` server that install did not register is only
-        mentioned, never removed.
     """
     label = "MCP server"
     claude = shutil.which("claude")
@@ -824,8 +801,6 @@ def _plan(target: str, remove: bool, home: Path, prior: Optional[dict]) -> tuple
         prior: Earlier ownership record, or None.
     Output: Tuple of edits and target ownership record; marked blocks require no ownership record.
         RefusalError propagates from unsafe plans.
-    Notes: (edits, this install's record for the target). Marked blocks need no record: the markers
-        are theirs.
     """
     if target == "claude-code":
         base = home / ".claude"
@@ -846,8 +821,6 @@ def _load_record(path: Path) -> tuple[Optional[str], dict, Optional[str]]:
         path: Installation record path.
     Output: Tuple of file text or None, record dictionary, and problem string or None; missing files
         have no problem, while read and JSON failures are reported.
-    Notes: (file text, record, problem). A record that can't be read is a problem, not an empty
-        record.
     """
     try:
         text = _read(path)
@@ -905,9 +878,6 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
         registration, and private install state. The state lookup may copy the old state folder to the new
         one, except in a dry run, which has no side effects (SEC-09); unhandled filesystem or data-shape
         errors propagate.
-    Notes: The install record (RECORD) says what install added, so uninstall removes only that and
-        leaves the user's own identical rules, hooks and MCP registration. It is written last, after
-        the files it describes.
     """
     home = Path.home()
     state = paths.peek_state_dir() if dry_run else state_dir()  # a dry run looks at the state folder, it never moves it

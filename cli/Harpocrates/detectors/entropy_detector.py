@@ -9,16 +9,11 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_\-]{20,}")
 
 def shannon_entropy(s: str) -> float:
     """
-    Description: Compute Shannon entropy (base-2) for a string.
+    Description: Compute Shannon entropy (base-2) for a string, which is higher when its characters are spread more
+        evenly.
     Parameters:
         s: The input string.
-    Output: Base-2 Shannon entropy, with 0.0 for empty strings. The older mixed-character example
-    below has entropy log2(3), so its displayed >= 3.0 result is inaccurate.
-    Notes: - Returns 0.0 for empty strings. - Uses O(n) counting via collections.Counter - Entropy
-    is higher when character distribution is uniformly distributed
-    Examples: >>> round(shannon_entropy("aaaaaaa"), 3) 0.0 >>> round(shannon_entropy("Aa1Aa1Aa1"),
-    3) >= 3.0 True
-    float: The Shannon entropy of the input string.
+    Output: Base-2 Shannon entropy as a float, or 0.0 for an empty string.
     """
     if not s:
         return 0.0
@@ -33,26 +28,14 @@ def shannon_entropy(s: str) -> float:
 
 def looks_like_secret(s: str, threshold: float = 4.0) -> bool:
     """
-    Description: Apply length, character-class, and entropy filters to identify machine-generated
-    candidates.
+    Description: Apply length, character-class, and entropy filters to flag machine-generated candidates. They
+        suppress config-like and English-like strings while still surfacing most generated tokens.
     Parameters:
         s: The input string.
         threshold: The entropy threshold. Defaults to 4.0.
-    Output: True only when all implemented filters pass; otherwise False. The actual minimum length
-    is 20, not the older >=2 note below. Pure alphabetic strings and lowercase strings without
-    uppercase letters or digits are also rejected; the configuration-value example below remains
-    False.
-    Heuristic to decide if a string looks like a secret.
-    Conditions (all must pass): - Length >=2 - Character diversity: > 3 unique characters - At least
-    2 character classes among: [lowercase, uppercase, digits, special] - Shannon entropy >=
-    threshold (default: 4.0)
-    Rationale: These rules suppress many config-ish or English-like strings while still surfacing
-    most machine-generated tokens.
-    Examples: >>> looks_like_secret("just_a_normal_config_value", threshold=3.0) False
-    The vendor-prefixed,
-    20-character example passes at threshold=3.5; its credential-shaped value is omitted here. >>>
-    looks_like_secret("aaaaaaaaaaaaaaaaaaaaaaaa", threshold=3.0) False
-    bool: True if the string looks like a secret, False otherwise.
+    Output: True only when all filters pass: at least 20 characters, more than 3 unique characters, at least 2
+        character classes among lowercase, uppercase, digits and special, Shannon entropy at or above threshold, and
+        not alphabetic-only or lowercase-only without a digit; otherwise False.
     """
     if len(s) < 20:
         return False

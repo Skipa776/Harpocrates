@@ -130,13 +130,11 @@ SCAN_UNCHECKABLE = SCAN_REFUSAL + " (git history and --show-secrets can't be che
 
 class _ScanUncheckableError(Exception):
     """
-    Description: Represent an agent-run scan whose history or secret-display mode cannot be covered
-        by a work-tree check.
+    Description: Marks an agent-run scan that uses --history (reads commits) or --show-secrets (prints the values). No
+        work-tree check covers those modes.
     Parameters:
         *args: Exception arguments forwarded to Exception.
-    Output: Exception instances causing outright refusal of --history or --show-secrets scans.
-    Notes: An agent-run scan with --history (reads commits) or --show-secrets (prints the values):
-        no work-tree check covers it, so the call is refused outright.
+    Output: Exception instance that causes an outright refusal of the --history or --show-secrets scan.
     """
 _SHELL_C = re.compile(r"^-[a-zA-Z]*c[a-zA-Z]*$")
 _SUBSHELL = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
@@ -196,12 +194,10 @@ def _tick() -> None:
 
 def _left() -> float:
     """
-    Description: Bound each subprocess timeout by the remaining hook budget to avoid
-        timeout-as-allow behavior.
+    Description: Bounds one subprocess timeout by the hook's remaining budget. This avoids timeout-as-allow: a hook
+        that times out counts as allow, and chained full timeouts could outlast the budget.
     Parameters: None
-    Output: Seconds bounded above by MATCH_TIMEOUT and with a remaining-budget floor of 0.1 seconds.
-    Notes: Timeout for one subprocess: MATCH_TIMEOUT, or what is left of BUDGET if that is less.
-        Chained full timeouts could outlast the budget, and a hook that times out counts as allow.
+    Output: Seconds: MATCH_TIMEOUT, or what is left of the budget if that is less. Never less than 0.1 seconds.
     """
     return min(MATCH_TIMEOUT, max(_deadline - time.monotonic(), 0.1))
 
@@ -211,15 +207,12 @@ _ABSENT = {errno.ENOENT, errno.ENOTDIR, errno.ENAMETOOLONG}  # a name that can't
 
 def _mode(path: Path) -> Optional[int]:
     """
-    Description: Read file mode while distinguishing absent paths from failures that must fail
-        closed.
+    Description: Reads a path's file mode and tells an absent path apart from a failure. A failure must fail closed,
+        because the path may be the secret file.
     Parameters:
         path: Filesystem path to stat.
-    Output: st_mode or None for ENOENT, ENOTDIR, or ENAMETOOLONG; raises other OSError failures for
-        caller refusal.
-    Notes: st_mode of path, None if it names nothing (_ABSENT). Any other failure (EACCES behind a
-        mode-000 directory, ELOOP, EIO) raises: the path may be the secret file, so the caller fails
-        closed (_types: "unreadable").
+    Output: st_mode of path, or None when it names nothing (ENOENT, ENOTDIR, ENAMETOOLONG). Any other OSError (EACCES
+        behind a mode-000 directory, ELOOP, EIO) is raised, and the caller refuses the file as "unreadable" (_types).
     """
     try:
         return os.stat(path).st_mode
@@ -231,16 +224,12 @@ def _mode(path: Path) -> Optional[int]:
 
 def _isfile(path: Path) -> bool:
     """
-    Description: Treat regular files and uncertain stat failures as file candidates so unreadable
-        paths are refused.
+    Description: Says whether a path is a file to check. An uncertain stat failure counts as a file, so an unreadable
+        path is still refused later.
     Parameters:
         path: Filesystem path to probe.
-    Output: True for a regular file or nonabsence stat error, otherwise False; uncertain files
-        proceed to _types.
-    Notes: True if path is a regular file, or if the hook can't tell (a stat error that is not
-        _ABSENT): such a path goes on to _types, which refuses it as unreadable. Only the existence
-        probes use this; a read that fails on a file that is there still raises, and decide() blocks
-        on it.
+    Output: True for a regular file or for a stat error that is not an absence (_ABSENT), otherwise False. Only
+        existence probes use this. A read that fails on a file that is there still raises, and decide() blocks on it.
     """
     try:
         mode = _mode(path)
@@ -280,19 +269,16 @@ def _exists(path: Path) -> bool:
 
 def _types(path: Path, redactor, grep_args: Optional[dict] = None) -> Optional[list[str]]:
     """
-    Description: Determine which secret types a file exposes, retaining unreadable and unscanned
-        risk markers.
+    Description: Finds the secret types a file exposes, keeping risk markers for unreadable or unscanned content.
+        Files over the Read tool's whole-file limit are checked in chunks within the hook's time budget (FR-CORE-05).
     Parameters:
         path: File path to inspect.
         redactor: Redactor used to detect replaced content.
         grep_args: Optional structured Grep arguments for judging oversize matching output.
-    Output: Secret-type list, empty list for no findings, or None for an absent, nonregular, or
-        ordinary binary file; unreadable stat results and risky unscanned content return markers.
-        Deadline, read, stat, and detector errors may propagate for refusal.
-    Notes: Secret types in a file, [] if none, None if it isn't a scannable text file (missing, a
-        directory, binary). A file over the read tool's whole-file limit is checked in chunks within
-        the hook's time budget (FR-CORE-05; _chunked_types); for the Grep tool (grep_args), which
-        prints only matching lines, those are judged instead (_printed_types).
+    Output: Secret-type list, [] for no findings, or None for a missing, nonregular, or ordinary binary file.
+        Unreadable stat results and risky unscanned content return markers. Deadline, read, stat and detector errors
+        propagate for refusal. For an oversize file checked through the Grep tool (grep_args), only the matching lines
+        it would print are judged.
     """
     from Harpocrates.read import MAX_BYTES, SNIFF_BYTES, _read_text, text_encoding
 
@@ -351,16 +337,13 @@ def _chunked_types(path: Path, redactor) -> Optional[list[str]]:
 
 def _found(redactor, text: str) -> list[str]:
     """
-    Description: Find secret types introduced by redaction without counting placeholders already
-        present in text.
+    Description: Finds the secret types that redaction would replace in text. A placeholder already in the text (in
+        docs or plans, for example) is not a finding; only placeholders that redaction adds count.
     Parameters:
         redactor: Object whose redact method transforms source text.
         text: Text to scan without printing its values.
-    Output: Sorted added placeholder types, generic if changed without a new type, or an empty list
-        if unchanged; detector errors propagate.
-    Notes: Types of the secrets redaction replaces in text, [] if it changes nothing. A
-        placeholder-shaped string already in text (docs, plans) is not a finding: only the
-        placeholders redaction added count.
+    Output: Sorted list of the added placeholder types; "generic" if the text changed without a new type; [] if
+        unchanged. Detector errors propagate.
     """
     redacted = redactor.redact(text)
     if redacted == text:
@@ -371,21 +354,17 @@ def _found(redactor, text: str) -> list[str]:
 
 def _printed_types(path: Path, args: dict, redactor) -> list[str]:
     """
-    Description: Scan the bounded output an oversize Grep call could print using its flags and
-        widest context.
+    Description: Judges the bounded output that an oversize Grep call could print, using that call's flags and widest
+        context. The rest of the file is not judged, so a secret the detector only recognises from other lines (a PEM
+        body below its header) can pass; the Grep tool prints no more than that.
     Parameters:
         path: Oversize file to search.
         args: Structured Grep arguments including pattern and context.
         redactor: Redactor used to inspect matched output.
-    Output: Secret-type list or unscanned marker for unavailable rg, invalid pattern type,
-        incomplete search, timeout, or excess output; launches and bounds an rg subprocess. Invalid
-        context values, OS, deadline, or detector errors propagate for refusal.
-    Notes: Secret types in what the Grep tool would print from an oversize file: one rg run over
-        that file with the tool's flags and context lines. Anything short of a complete scan (no rg,
-        an rg error, a timeout, more output than MAX_BYTES such as a pattern matching most lines)
-        stays ["unscanned"]. Trade-off: the matched lines are judged without the rest of the file,
-        so a secret the detector only recognises from other lines (a PEM body below its header) can
-        pass; the Grep tool prints no more than that.
+    Output: Secret-type list, or ["unscanned"] for anything short of a complete scan: rg unavailable, invalid pattern
+        type, incomplete search, timeout, or output over MAX_BYTES (such as a pattern matching most lines). Runs one
+        bounded rg over the file with the Grep tool's flags and context lines. Invalid context values, OS, deadline,
+        or detector errors propagate for refusal.
     """
     from Harpocrates.read import MAX_BYTES
 
@@ -443,20 +422,17 @@ def _ask(reason: str) -> int:
 def _first_flagged(paths: Iterable[Path], cwd: Path, grep_args: Optional[dict] = None,
                    session_id: object = None) -> tuple[Optional[tuple[str, str]], list[Path]]:
     """
-    Description: Find the first risky file while honoring user allowlist entries and
-        session-specific built-in-tool grants.
+    Description: Finds the first file that holds a secret, skipping allowlisted paths and paths the user granted in
+        this session (FR-READ-06). A grant covers one real path only; a search that reaches other files still checks
+        them.
     Parameters:
         paths: Paths to deduplicate and check in order.
         cwd: Working directory used for relative display names.
         grep_args: Optional structured Grep arguments for oversize output checks.
         session_id: Session identifier for approved real paths, or None to use no session grants.
-    Output: Tuple of the first (display name, secret types, their list) hit or None and preceding
-        allowlisted paths; does not log uses. Allowlist resolution errors disable that exemption; other scan and
+    Output: Tuple of the first hit, as (display name, secret types, their list), or None, and the allowlisted paths
+        that passed before it. Does not log uses. Allowlist resolution errors disable that exemption; other scan and
         resolution errors propagate.
-    Notes: ((name to show, secret types) of the first file that holds a secret, or None), and the
-        allowlisted paths that passed on the way. Not scanned: a path on the user's allowlist, and
-        one the user granted in this session (session_id, FR-READ-06). A grant names one real path;
-        a search that reaches other files still checks them.
     """
     from Harpocrates import allowlist, grants
     from Harpocrates.read import Redactor
@@ -485,8 +461,8 @@ def _first_flagged(paths: Iterable[Path], cwd: Path, grep_args: Optional[dict] =
 def _check_files(paths: Iterable[Path], tool: str, cwd: Path, event_tool: str = "Read",
                  grep_args: Optional[dict] = None, session_id: object = None) -> int:
     """
-    Description: Refuse secret-bearing reads without prompting under FR-READ-06 and log allowlist
-        uses only on allowed calls.
+    Description: Refuses a read of a file that holds a secret, never with a prompt (FR-READ-06). Allowlist uses are
+        logged only for calls that are allowed.
     Parameters:
         paths: Paths the call could expose.
         tool: Safe MCP tool suffix recommended on refusal.
@@ -494,10 +470,9 @@ def _check_files(paths: Iterable[Path], tool: str, cwd: Path, event_tool: str = 
         event_tool: Harness tool name for allowlist audit records.
         grep_args: Optional structured Grep arguments for oversize output checks.
         session_id: Session identifier for built-in-tool grants; Bash passes none.
-    Output: Integer zero after an optional deny JSON response; allowed calls append audit records.
-        Scan, resolution, logging, and output errors propagate for fail-closed handling.
-    Notes: Refuse a read of a file that holds a secret (FR-READ-06: never a prompt). Bash passes no
-        session_id: a grant covers the built-in tools only.
+    Output: Integer 0 after an optional deny JSON response; allowed calls append audit records. Scan, resolution,
+        logging, and output errors propagate for fail-closed handling. A grant covers only the built-in tools, so Bash
+        passes no session_id.
     """
     from Harpocrates import allowlist
 
@@ -541,14 +516,11 @@ def _placeholders(text: str) -> Counter:
 
 def _current(path: Path) -> Optional[str]:
     """
-    Description: Read the text an edit starts from for comparison without printing it.
+    Description: Reads the text an edit starts from, for comparison. The text is never printed.
     Parameters:
         path: Target file path to read.
-    Output: Text preserving newline spelling, an empty string for a missing file, or None for
-        oversized or unreadable targets, including directories.
-    Notes: The text an edit starts from: "" for a file that doesn't exist yet, None if it can't be
-        compared (over the size limit, a directory, unreadable). Read here to judge the result;
-        never printed.
+    Output: The text, keeping its newline spelling; "" for a file that does not exist yet; None if it cannot be
+        compared (over the size limit, a directory, or unreadable).
     """
     from Harpocrates.read import MAX_BYTES
 
@@ -565,24 +537,19 @@ def _current(path: Path) -> Optional[str]:
 
 def _adds_placeholder(tool: str, args: dict, path: Path) -> bool:
     """
-    Description: Simulate edit results to prevent replacing real secrets with newly introduced
-        placeholder values.
+    Description: Simulates the result of an edit, so a real secret is not swapped for a new placeholder. The result is
+        judged, not the new text alone, because one placeholder can be built from two edits or two MultiEdit steps.
     Parameters:
         tool: Edit, MultiEdit, Write, or NotebookEdit tool name.
         args: Tool input including replacement text or edit steps.
         path: Target path whose current text is compared.
-    Output: True when the edit introduces a placeholder under the comparison or conservative
-        fallback rules, otherwise False; reads current content without printing it. NotebookEdit
-        checks new source directly.
-    Notes: True if the edit would leave a Harpo placeholder in the file that it did not hold
-        before: writing one swaps a real secret for a fake value. The result is judged, not the new
-        text alone, because a placeholder can be built from two edits (`<<HAR` now, the rest beside
-        it later) or from two MultiEdit steps. Edit and MultiEdit are applied as the tool does
-        (replace_all honoured, each step on the last one's result); Write is compared with the file
-        it replaces. A placeholder the file already holds may stay or move (docs that quote one); a
-        copy of it, or another, may not (compared as a multiset). A step that can't be applied here
-        (old_string absent, or the file not comparable) falls back to its new text alone, which errs
-        towards deny.
+    Output: True if the edit would leave a Harpo placeholder that the file did not hold before, otherwise False. A
+        placeholder the file already holds may stay or move (docs that quote one), but an extra copy of one, or a
+        different one, counts as new (compared as a multiset). Edit and MultiEdit are applied as the tool applies them
+        (replace_all honored, each step on the last step's result). Write is compared with the file it replaces;
+        NotebookEdit checks the new source directly. A step that cannot be applied here (old_string absent, or the
+        file not comparable) falls back to its new text alone, which errs toward deny. Current content is read, never
+        printed.
     """
     if tool == "NotebookEdit":
         source = args.get("new_source")
@@ -638,28 +605,22 @@ def _path_values(node: object, in_path_key: bool = False, depth: int = 0) -> lis
 
 def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
     """
-    Description: Check state-directory protection, placeholder introduction, then secret exposure
-        before deciding an edit.
+    Description: Decides an edit in three checks: state-directory protection, then placeholder introduction, then
+        secret exposure. The state directories (~/.harpo, ~/.harpocrates) are protected in every mode, because only
+        the user may change the allowlist and an agent-made ~/.harpo would replace the migrated one (SEC-09).
     Parameters:
-        tool: Edit tool name.
+        tool: Edit, MultiEdit, Write, or NotebookEdit tool name.
         args: Tool input containing a file or notebook path and edit content.
         cwd: Working directory for resolving the target.
         event: Hook event containing session and tool-use identifiers.
-    Output: Integer zero after allowing, denying, or asking; may log an allowlist use or save a
-        pending grant. Unplaceable state targets are refused; asking requires a human-capable mode
-        and successfully recorded identifiers. Other errors propagate for fail-closed handling.
-    Notes: Edit, MultiEdit, Write or NotebookEdit (the tool result echoes the edited file back to
-        the model). First of all, deny a target inside ~/.harpo or ~/.harpocrates
-        (allowlist.inside_state_dir; any mode, with or without --ask, granted or not; a target that
-        cannot be placed is refused too), or a hard link to a file in them
-        (allowlist.links_to_state_file, SEC-09): only the user changes the allowlist, and a ~/.harpo the
-        agent made would replace the migrated one. Every path-valued key of the call is checked, not only
-        the tool's own (_path_values; SEC-09), and a call that names two different files is refused because the
-        hook cannot know which one the tool writes. Then deny an edit that would add a placeholder
-        (_adds_placeholder; any mode, granted or not). Then a secret-bearing file asks the user when
-        a human can answer, after recording the call as pending so `--post` can turn Yes into a
-        grant; with no session_id or tool_use_id to record it under, or no human, it is refused
-        (fail closed).
+    Output: Integer 0 after allowing, denying, or asking; may log an allowlist use or save a pending grant. A target
+        inside a state directory, or a hard link to a file in one, is denied in any mode, as is a target that cannot
+        be placed. Every path-valued key of the call is checked, not only the tool's own; a call naming two different
+        files is refused, since the hook cannot tell which one the tool writes (SEC-09). An edit that would add a
+        placeholder is denied in any mode, granted or not. A secret-bearing file asks the user only when a human can
+        answer, and the call is first recorded as pending so `--post` can turn Yes into a grant. With no session_id or
+        tool_use_id to record it under, or no human to ask, it is refused (fail closed). Other errors propagate for
+        fail-closed handling.
     """
     from Harpocrates import allowlist, grants, paths
 
@@ -706,17 +667,15 @@ def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
 
 def _git(root: Path, *args: str, ok: tuple[int, ...] = (0,)) -> Optional[bytes]:
     """
-    Description: Run a bounded read-only Git query with external ignore rules disabled for vetted
-        scope decisions.
+    Description: Runs a read-only git query in a bounded time, with core.excludesFile (from repo config or the XDG
+        default) switched off. Ignore rules then come only from .gitignore files and .git/info/exclude, which the
+        scope checks vet.
     Parameters:
         root: Working directory for the Git command.
         *args: Read-only Git arguments.
         ok: Accepted exit statuses, defaulting to zero.
-    Output: Captured stdout bytes or None on an unaccepted status, timeout, or OSError; invokes Git
-        and checks the deadline in all cases, which can raise _OutOfTimeError.
-    Notes: stdout of a read-only git command run in root; None if git exits outside ok, stalls or
-        isn't installed. core.excludesFile (repo config, or the XDG default) is switched off: ignore
-        rules come from .gitignore files and .git/info/exclude only, which _scope vets.
+    Output: Captured stdout as bytes, or None if git exits with a status outside ok, stalls, or is not installed
+        (OSError). Invokes git and checks the deadline in every case, which can raise _OutOfTimeError.
     """
     try:
         proc = subprocess.run(["git", "--no-pager", "-c", "core.fsmonitor=false", "-c", f"core.excludesFile={os.devnull}",
@@ -741,16 +700,14 @@ def _in_git(root: Path) -> bool:
 
 def _git_internals(gitdir: Path) -> list[Path]:
     """
-    Description: Collect searchable Git metadata while excluding compressed objects except raw LFS
-        objects.
+    Description: Collects the files a search of .git reads, except the compressed objects/ directory, whose size would
+        exceed MAX_SCOPE_FILES in any real history. The LFS store (lfs/, including its objects/) stays in, since it
+        holds the raw content of large files.
     Parameters:
         gitdir: Git metadata directory to walk.
-    Output: List of files including config, refs, logs, hooks, and LFS content; raises
-        _OutOfTimeError on deadline or scope-cap exhaustion.
-    Notes: Files a search that descends into .git reads, except objects/ (compressed; a real history
-        would trip MAX_SCOPE_FILES on every `grep -r .`). lfs/ stays in, its objects/ too: that is
-        the raw content of large files. Trade-off: a secret committed into an object is not checked;
-        the config (a token in a remote URL), refs, logs and hooks, where one usually sits, are.
+    Output: List of files: config, refs, logs, hooks, and LFS content. Raises _OutOfTimeError on deadline or scope-cap
+        exhaustion. Trade-off: a secret committed into an object is not checked; the config (for example a token in a
+        remote URL), refs, logs, and hooks are.
     """
     files: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(gitdir):
@@ -766,12 +723,11 @@ def _git_internals(gitdir: Path) -> list[Path]:
 
 def _ident(path: str | Path) -> tuple[int, int]:
     """
-    Description: Identify a filesystem object by device and inode regardless of the symlink used to
-        reach it.
+    Description: Identifies a filesystem object by its device and inode, whatever link leads to it. This is cheaper
+        than resolving the path.
     Parameters:
         path: Path to stat.
-    Output: (device, inode) tuple; raises OSError on stat failure.
-    Notes: Which directory this is, whatever link led to it (cheaper than resolving the path).
+    Output: (device, inode) tuple. Raises OSError if the stat fails.
     """
     st = os.stat(path)
     return st.st_dev, st.st_ino
@@ -780,20 +736,18 @@ def _ident(path: str | Path) -> tuple[int, int]:
 def _walk(root: Path, secret_names: bool = False, git_dir: bool = False,
           seen: Optional[set[tuple[int, int]]] = None) -> list[Path]:
     """
-    Description: Walk directory contents conservatively with symlink-loop detection and a bounded
-        file count.
+    Description: Walks directory contents conservatively, with symlink-loop detection and a bounded file count.
+        Directory links are followed, as grep -R and rg -L do, so the scope may read more than the tool does, never
+        less.
     Parameters:
         root: Directory to walk.
         secret_names: Whether to include only names matching secret stores.
         git_dir: Whether to include Git internals when not restricted to secret names.
         seen: Shared set of visited directory identities, or None to create one.
-    Output: List of files; follows directory links, mutates seen when supplied, and skips failed
-        directory identity probes. Raises _OutOfTimeError on deadline or file-cap exhaustion.
-    Notes: Every file under root, .git excluded (git_dir: included, see _git_internals); with
-        secret_names only those named like a secret store. Links to directories are followed, as
-        `grep -R` and `rg -L` do (the scope may read more than the tool, never less): each real
-        directory is walked once (seen), so a link loop ends and a link to a place already covered
-        adds nothing. The file cap still counts.
+    Output: List of files under root, excluding .git unless git_dir is set; with secret_names, only files named like a
+        secret store. Each real directory is walked once, through seen, so a link loop ends and a link to an already
+        covered place adds nothing. Mutates seen when supplied, skips directories whose identity probe fails, and the
+        file cap still applies. Raises _OutOfTimeError on deadline or file-cap exhaustion.
     """
     files: list[Path] = []
     seen = set() if seen is None else seen
@@ -818,15 +772,13 @@ def _walk(root: Path, secret_names: bool = False, git_dir: bool = False,
 
 def _unvetted_ignore_rules(root: Path) -> bool:
     """
-    Description: Detect ignore rules an agent could have changed since the last commit so scope can
-        fall back to walking.
+    Description: Detects ignore rules an agent could have written since the last commit, so the scope can fall back to
+        a full walk.
     Parameters:
         root: Git work-tree location to inspect.
-    Output: True for dirty or untracked .gitignore files, effective info/exclude rules, or uncertain
-        Git/read results; False when no such rules are found. Deadline errors propagate.
-    Notes: True if an ignore rule an agent could have written since the last commit may be in
-        effect: a .gitignore anywhere in the work tree that is untracked or has uncommitted changes,
-        or any rule in .git/info/exclude.
+    Output: True if a .gitignore anywhere in the work tree is untracked or has uncommitted changes, if
+        .git/info/exclude has any rule, or if the Git or read results are uncertain. False when none of these apply.
+        Deadline errors propagate.
     """
     dirty = _git(root, "--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=all",
                  "--ignored=no", "--", ":(top,glob)**/.gitignore")
@@ -844,17 +796,14 @@ def _unvetted_ignore_rules(root: Path) -> bool:
 
 def _hides_shown_files(visible: bytes, ignored: bytes) -> bool:
     """
-    Description: Detect self-ignoring .gitignore files beneath directories that still have visible
-        files.
+    Description: Detects an untracked .gitignore that ignores itself (with `*`) in a directory that still shows files.
+        Such a file hides the untracked ones in that directory.
     Parameters:
         visible: NUL-separated visible Git file paths.
         ignored: NUL-separated ignored Git file paths.
-    Output: True when a self-ignored .gitignore shares an ancestor directory with visible files,
-        otherwise False; empty cache-only directories are not flagged.
-    Notes: True if an untracked .gitignore that ignores itself (`*`) sits in a directory that still
-        shows files, as `*` in config/.gitignore does to a repo with tracked files in config/: it
-        hides the untracked ones. Tool caches (.ruff_cache, .venv) write the same file into a
-        directory with nothing else shown, which is fine.
+    Output: True when a self-ignoring .gitignore shares an ancestor directory with visible files, otherwise False.
+        Empty cache-only directories are not flagged, since tool caches (.ruff_cache, .venv) write the same file into
+        them.
     """
     dirs = {os.fsdecode(e.rpartition(b"/")[0]) for e in ignored.split(b"\0") if e.rpartition(b"/")[2] == b".gitignore"}
     if not dirs:
@@ -868,29 +817,23 @@ def _hides_shown_files(visible: bytes, ignored: bytes) -> bool:
 
 def _scope(root: Path, full: bool = False, git_dir: bool = False) -> list[Path]:
     """
-    Description: Compute a bounded recursive read scope using vetted Git listings or a conservative
-        full walk.
+    Description: Computes the bounded set of files that a recursive read of root can reach, excluding .git. In a git
+        work tree this is git's listing (tracked files, and untracked files that are not ignored), plus git-ignored
+        files named like secret stores, wherever they sit.
     Parameters:
         root: File or directory being read.
         full: Whether to force a full walk.
         git_dir: Whether to include searchable Git internals.
-    Output: List of candidate files including ignored secret-store names and followed directory
-        links; errors do not shrink the fallback scope. Raises _OutOfTimeError on budget or cap
-        exhaustion; filesystem identity errors may propagate.
-    Notes: Every file a recursive search of root reads, .git excluded. In a git work tree that is
-        what git lists (tracked, and untracked but not ignored) plus git-ignored files named like
-        secret stores (SENSITIVE_FILES), wherever they sit. Trade-off: a secret in a git-ignored
-        file with an ordinary name (notes.local) can now pass a recursive shell grep; that is what
-        stops data/, .venv and target/ from making every `grep -r .` too wide to vouch for. Reading
-        such a file directly is still checked. Everything is walked instead when: full; root is
-        itself ignored (naming a directory is explicit, unlike meeting it inside `grep -r .`);
-        ignore rules were written since the last commit (_unvetted_ignore_rules,
-        _hides_shown_files); or git can't list the tree (not a work tree, missing, failing or
-        stalling): an error never shrinks the scope. RESIDUAL: a rule the agent commits still hides
-        files (same class as the script gap in the module docstring), as does `git update-index
-        --assume-unchanged` on an edited .gitignore, or a self-ignoring .gitignore in a directory
-        with no tracked files. Links to directories are followed (_walk). git_dir adds the files of
-        .git (_git_internals), for the shell searches that descend into it.
+    Output: List of candidate files, including files reached through followed directory links. Everything is walked
+        instead when full is set, when root is itself ignored (naming a directory is explicit), when ignore rules were
+        written since the last commit (_unvetted_ignore_rules, _hides_shown_files), or when git cannot list the tree
+        (not a work tree, missing, failing, or stalling). Errors never shrink the fallback scope. Raises
+        _OutOfTimeError on budget or cap exhaustion; filesystem identity errors may propagate. git_dir adds the files
+        of .git (_git_internals). Trade-off: a secret in a git-ignored file with an ordinary name (notes.local) can
+        pass a recursive shell grep, which keeps data/, .venv and target/ from making the scope too wide to vouch for;
+        a direct read of such a file is still checked. Residual gaps: a rule the agent commits, `git update-index
+        --assume-unchanged` on an edited .gitignore, or a self-ignoring .gitignore in a directory with no tracked
+        files still hides files.
     """
     if _isfile(root):
         return [root]
@@ -924,18 +867,15 @@ def _scope(root: Path, full: bool = False, git_dir: bool = False) -> list[Path]:
 
 def _matching(pattern: Optional[str], roots: list[Path], rg_flags: list[str], py_flags: int) -> list[Path]:
     """
-    Description: Find files a structured search could print, falling back to the whole scope when
-        matching is uncertain.
+    Description: Finds the files under roots whose content a search for pattern would print. When matching cannot be
+        judged exactly, every file in scope counts as a match.
     Parameters:
         pattern: Search expression, or None when exact semantics cannot be evaluated.
         roots: Search root paths.
         rg_flags: Ripgrep flags controlling matching and scope.
         py_flags: Equivalent Python regular-expression flags for fallback matching.
-    Output: Candidate file paths; runs bounded rg or isolated Python subprocesses. Matcher errors or
-        timeouts fall back to scope, while deadline and unhandled OS errors propagate for refusal.
-    Notes: Files under roots whose content a search for pattern would print. pattern None means the
-        hook can't evaluate it the way the real tool would: every file in scope counts as a match.
-        So do a timeout and a matcher error.
+    Output: Candidate file paths, from a bounded rg run or isolated Python subprocesses. A None pattern, a matcher
+        error, or a timeout falls back to the whole scope. Deadline and unhandled OS errors propagate for refusal.
     """
     from Harpocrates.read import MAX_BYTES
 
@@ -984,15 +924,14 @@ def _matching(pattern: Optional[str], roots: list[Path], rg_flags: list[str], py
 
 def _paths(output: str, roots: list[Path], full: bool = False) -> list[Path]:
     """
-    Description: Validate NUL-separated matcher output before trusting it as a file scope.
+    Description: Validates NUL-separated matcher output before it is trusted as a file scope. Output that names
+        anything other than a file cannot be trusted.
     Parameters:
         output: Matcher stdout with NUL-separated file names.
         roots: Original roots used for fallback scope.
         full: Whether fallback must walk the full tree.
-    Output: Parsed paths if all are file candidates, otherwise the whole scope; filenames may
-        contain newlines. Scope and deadline errors propagate.
-    Notes: NUL-separated matcher output (a file name may contain a newline). Anything that isn't a
-        file means the output can't be trusted: fall back to the whole scope.
+    Output: Parsed paths if all of them are file candidates, otherwise the whole scope. File names may contain
+        newlines. Scope and deadline errors propagate.
     """
     paths = [Path(p) for p in output.split("\0") if p]
     return paths if all(_isfile(p) for p in paths) else [f for r in roots for f in _scope(r, full)]
@@ -1000,12 +939,11 @@ def _paths(output: str, roots: list[Path], full: bool = False) -> list[Path]:
 
 def _grep_flags(args: dict) -> tuple[list[str], int]:
     """
-    Description: Translate structured Grep case and multiline settings into matcher flags.
+    Description: Translates the Grep tool's case and multiline settings into matcher flags. These flags decide what a
+        Grep call matches.
     Parameters:
         args: Grep input arguments.
-    Output: Tuple of rg argument list and Python re flag bits; no subprocess is launched.
-    Notes: rg flags, and the Python re flags that match them, which change what a Grep tool call
-        matches.
+    Output: Tuple of the rg argument list and the matching Python re flag bits. Launches no subprocess.
     """
     flags: list[str] = []
     py = 0
@@ -1043,15 +981,13 @@ def _grep_tool(args: dict, cwd: Path) -> list[Path]:
 
 def _recursive(args: list[str]) -> bool:
     """
-    Description: Recognize grep recursion options conservatively so ambiguous argument words cannot
-        shrink scope.
+    Description: Recognize grep recursion options conservatively, so an ambiguous argument word cannot shrink the
+        scope.
     Parameters:
         args: Grep argument words to inspect.
-    Output: True for -r/-R clusters, recursive long options or abbreviations, and recurse
-        directory-mode forms; otherwise False.
-    Notes: True if these grep arguments make it descend into directories: -r or -R (alone or in a
-        cluster), --recursive and its abbreviations, -d recurse. Over-reads: a word that looks like
-        one counts.
+    Output: True if the arguments make grep descend into directories: -r or -R (alone or in a cluster), --recursive or
+        an abbreviation of it, or -d recurse. A word that merely looks like one of these counts, so the check
+        over-reads; otherwise False.
     """
     for a in args:
         if a.startswith("--"):
@@ -1065,15 +1001,12 @@ def _recursive(args: list[str]) -> bool:
 
 def _names_pattern(flag: str) -> bool:
     """
-    Description: Recognize flags that may supply a search pattern so file operands are not mistaken
-        for it.
+    Description: Recognize flags that may supply a search pattern, so a file operand is not mistaken for the pattern.
     Parameters:
         flag: Short cluster or long option to inspect.
-    Output: True for possible -e, -f, --regexp, or --file forms, including abbreviations; otherwise
-        False.
-    Notes: True if a flag may carry the pattern (-e, -f, --regexp, --file, in a cluster or
-        abbreviated): then no positional word is the pattern. Over-reads, so a real file operand is
-        never taken for the pattern.
+    Output: True if the flag may carry the pattern (-e, -f, --regexp or --file, in a cluster or abbreviated); then no
+        positional word is taken as the pattern. The check over-reads, so a real file operand is never mistaken for
+        the pattern. Otherwise False.
     """
     if flag.startswith("--"):
         name = flag.partition("=")[0]
@@ -1083,17 +1016,16 @@ def _names_pattern(flag: str) -> bool:
 
 def _reads_git(name: str, flags: list[str], recursive: bool) -> bool:
     """
-    Description: Estimate whether search flags cause traversal into .git using a conservative
-        tool-specific policy.
+    Description: Estimate whether search flags make the search read inside .git, using a conservative policy for each
+        tool.
     Parameters:
         name: Search executable name.
         flags: Search option words.
         recursive: Whether grep recursion is enabled.
-    Output: Boolean estimate for grep, rg, ag, or ack behavior; does not execute the search.
-    Notes: True if the search, run with these flags, reads inside .git. Checked on this machine: BSD
-        grep -r/-R do; rg only with --hidden, -. or -uu; git grep never. ag and ack aren't installed
-        here, so assumed: ag with --hidden or -u, ack with --noignore-dir (it skips .git by
-        default). Over-approximation is safe.
+    Output: Boolean estimate, True if the search run with these flags reads inside .git. It does not run the search.
+        Checked on this machine: BSD grep -r/-R read .git; rg does only with --hidden, -. or -uu; git grep never. ag
+        (with --hidden or -u) and ack (with --noignore-dir) are assumed, since neither is installed here; ack skips
+        .git by default. An over-estimate is safe.
     """
     short = "".join(a[1:] for a in flags if not a.startswith("--"))
     if name in _GREPS:
@@ -1108,8 +1040,8 @@ def _reads_git(name: str, flags: list[str], recursive: bool) -> bool:
 def _search_command(argv: list[str], here: Path, piped: bool = False, tree: bool = False,
                     git: bool = False, env_opts: bool = False) -> list[Path]:
     """
-    Description: Scope shell search commands without evaluating their patterns because flags can
-        change printed content.
+    Description: Scope shell search commands without evaluating their patterns, because flags can change which lines
+        print.
     Parameters:
         argv: Search command name and arguments.
         here: Effective working directory.
@@ -1117,17 +1049,12 @@ def _search_command(argv: list[str], here: Path, piped: bool = False, tree: bool
         tree: Whether file-name input or command semantics force tree search.
         git: Whether this is git grep.
         env_opts: Whether GREP_OPTIONS may enable grep recursion.
-    Output: Files the search could print, or an empty list for names/counts-only or stdin-only
-        cases; scope, filesystem, and deadline errors may propagate for refusal.
-    Notes: Files a grep/rg-style shell command could print from. Its pattern is never evaluated:
-        attached and clustered flags (`-eX`, `--regexp=X`, `-nA 3`), inversion (`-v`), `--passthru`
-        and basic-regex syntax all change which lines print, so every file in scope counts unless
-        only names are printed. The Grep tool, with its structured input, gets the exact check
-        (_grep_tool). With no file operand it reads stdin, not the tree: grep unless it recurses,
-        rg/ag/ack after a pipe. A word that could name files the hook can't see (glob, $VAR, $(...))
-        counts as an operand. tree: it searches the work tree whatever its stdin (`git grep`) or
-        xargs feeds it file names. The scope includes .git (_scope) for the searches that descend
-        into it (_reads_git). env_opts: GREP_OPTIONS may make any grep recursive.
+    Output: Files the search could print from. An empty list when it prints only names or counts, or reads only stdin.
+        Attached or clustered flags (-eX, --regexp=X, -nA 3), -v, --passthru and basic-regex syntax change which lines
+        print, so every file in scope counts. Without a file operand, grep reads stdin unless it recurses, and rg, ag
+        or ack read stdin after a pipe. A word that could name a file the hook cannot see (glob, $VAR, $(...)) counts
+        as an operand. The scope includes .git where _reads_git says the search reads it. Scope, filesystem and
+        deadline errors may propagate and refuse the call. The Grep tool has its own exact check (_grep_tool).
     """
     name, opts = Path(argv[0]).name, argv[1:]
     if any(a in (_NAMES_ONLY - {"-L"} if name == "rg" else _NAMES_ONLY) for a in opts):  # rg -L is --follow
@@ -1150,16 +1077,14 @@ def _search_command(argv: list[str], here: Path, piped: bool = False, tree: bool
 
 def _assignments(command: str, inherited: dict[str, list[str]]) -> dict[str, list[str]]:
     """
-    Description: Collect all shell assignment alternatives without modeling control flow to
-        over-approximate possible paths.
+    Description: Collect every shell assignment alternative without modeling control flow, so the check
+        over-approximates the possible paths.
     Parameters:
         command: Shell text containing assignments in any branch or subshell.
         inherited: Previously known variable values.
-    Output: New mapping from variable names to ordered unique possible values, including appended
-        assignments.
-    Notes: Every value each variable is given anywhere in the command (`D=x`, `export D=x`, `D+=x`,
-        in any branch or subshell). Control flow isn't modelled: a later `$D` is checked against all
-        of them, so the check can see more paths than the shell reads, never fewer.
+    Output: New mapping from each variable name to its ordered, unique possible values, including appended assignments
+        (D+=x). Every value a variable is given anywhere in the command counts, so a later $D is checked against all
+        of them. The check can see more paths than the shell reads, never fewer.
     """
     values = dict(inherited)
     for name, append, raw in _ASSIGN_ANY.findall(command):
@@ -1171,17 +1096,15 @@ def _assignments(command: str, inherited: dict[str, list[str]]) -> dict[str, lis
 
 def _words(word: str, values: dict[str, list[str]], depth: int = 0) -> list[str]:
     """
-    Description: Expand command-assigned variables into possible shell-word spellings for
-        conservative path inspection.
+    Description: Expand command-assigned variables into the possible shell-word spellings, for conservative path
+        inspection.
     Parameters:
         word: Shell word to expand.
         values: Mapping of variable names to possible assigned values.
         depth: Current recursive expansion depth, initially zero.
-    Output: List of unsplit and whitespace-split spellings including assigned HOME expansion; limits
-        recursive self-reference and raises _OutOfTimeError above MAX_WORDS.
-    Notes: Every spelling `word` may take: each `$NAME` / `${NAME}` the command set replaced by each
-        value it was given, unsplit and split on whitespace (`F='a b'; cat $F` reads two files). A
-        leading `~` also counts as a `$HOME` the command set.
+    Output: List of unsplit spellings and whitespace-split spellings. Each $NAME or ${NAME} is replaced by each value
+        the command gave it, so F='a b'; cat $F reads two files. A leading ~ counts as an assigned $HOME. Limits
+        recursive self-reference, and raises _OutOfTimeError above MAX_WORDS.
     """
     if depth == 0 and word.startswith("~") and "HOME" in values:
         return [word] + _words("$HOME" + word[1:], values, 1)
@@ -1209,14 +1132,12 @@ def _resolve(word: str, here: Path) -> Path:
 
 def _expand(word: str, here: Path) -> list[Path]:
     """
-    Description: Expand a shell word and assignment-style value into candidate paths, including
-        globs.
+    Description: Expand a shell word or assignment-style value into candidate paths, including globs.
     Parameters:
-        word: Shell word to inspect after stripping surrounding quote and backtick characters.
+        word: Shell word to inspect, after stripping surrounding quote and backtick characters.
         here: Effective working directory.
-    Output: List of paths from literal, if=FILE-style, glob, home, or environment expansion; glob
-        enumeration checks the deadline and raises _OutOfTimeError at the file cap.
-    Notes: Paths a shell word may name: itself, `if=FILE`-style values, globs, `~` and `$VAR`.
+    Output: List of paths the word may name: the word itself, if=FILE-style values, globs, and ~ or $VAR expansions.
+        Glob enumeration checks the deadline and raises _OutOfTimeError at the file cap.
     """
     words = [word.strip("`'\"")]
     if "=" in words[0]:
@@ -1237,16 +1158,14 @@ def _expand(word: str, here: Path) -> list[Path]:
 
 def _cut_body(text: str, start: int, word: str, strip: bool) -> tuple[str, int]:
     """
-    Description: Extract a heredoc body up to its delimiter or the end of the command.
+    Description: Extract a heredoc body up to its delimiter, or to the end of the command.
     Parameters:
         text: Complete shell text.
         start: Offset where the body starts.
         word: Terminating delimiter.
         strip: Whether to ignore leading tabs when matching the delimiter.
-    Output: Tuple of body text and offset after the terminating line, or end-of-text offset for an
-        unclosed body.
-    Notes: (heredoc body, index after its terminating line) for a body starting at start. A body
-        that is never closed runs to the end of the text.
+    Output: Tuple of (body text, offset just after the terminating line). A body that is never closed runs to the end
+        of the text, and its offset is the end of the text.
     """
     lines: list[str] = []
     while True:
@@ -1262,19 +1181,15 @@ def _cut_body(text: str, start: int, word: str, strip: bool) -> tuple[str, int]:
 
 def _heredocs(command: str) -> tuple[list[str], str, list[str]]:
     """
-    Description: Separate logical shell lines, expansion-search text, and heredoc bodies without
-        discarding content.
+    Description: Separate logical shell lines, expansion-search text, and heredoc bodies without discarding any
+        content.
     Parameters:
         command: Shell command text to split.
-    Output: Tuple of logical lines retaining heredoc operators, text searched for substitutions, and
-        separate bodies; quoted bodies are excluded from expansion search and unquoted bodies remain
-        in it.
-    Notes: Split command into logical lines (at newlines outside quotes) and cut every heredoc body
-        out of them. Returns the lines (the `<<WORD` operators stay), the text `$(...)` and
-        backticks are searched in (an unquoted delimiter's body expands them before the command
-        runs; a quoted one's is read as lines instead), and the bodies, which _bash_files reads
-        apart (_prose): an apostrophe in a body would break the tokeniser. Nothing is ever dropped,
-        so a `<<` that is no heredoc (`$((1<<X))`) hides nothing.
+    Output: Tuple of (logical lines, text searched for substitutions, bodies). Lines are split at newlines outside
+        quotes and keep their <<WORD operators. An unquoted delimiter's body expands before the command runs, so it is
+        searched for $(...) and backticks; a quoted delimiter's body is read as lines instead. Bodies are kept, not
+        dropped, so a << that is no heredoc (e.g. $((1<<X))) hides nothing. _bash_files reads bodies as prose
+        (_prose), because an apostrophe would break the tokenizer.
     """
     lines: list[str] = []
     scan: list[str] = []
@@ -1304,18 +1219,14 @@ def _heredocs(command: str) -> tuple[list[str], str, list[str]]:
 
 def _prose(body: str) -> list[tuple[list[str], bool, bool]]:
     """
-    Description: Read heredoc bodies as conservative command segments without rejecting stray prose
-        quotes.
+    Description: Read heredoc bodies as conservative command segments, whatever reads them, without rejecting stray
+        prose quotes.
     Parameters:
         body: Heredoc body to split into lines and words.
-    Output: List of (words, pipe-fed, True) tuples; splits at shell separators and strips word
-        quotes without shlex. The True marker suppresses cd failure and eval/-c recursion on body
-        lines.
-    Notes: A heredoc body as command segments, whatever reads it (a shell down a pipe, `source
-        /dev/stdin`, xargs, or plain cat): split at ; & | ( ) and backticks, words by str.split with
-        their quotes stripped. Never shlex: prose has stray quotes and must not raise. It over-reads
-        (a python comment naming grep is a search) and never under-reads a script. The True marks a
-        body line: no cd failure, no eval or -c recursion on it.
+    Output: List of (words, pipe-fed, True) tuples. Splits at ; & | ( ) and backticks, and strips word quotes with
+        str.split, never shlex, which would raise on prose. The True marks a body line: no cd failure, and no eval or
+        -c recursion on it. Over-reads (a Python comment naming grep counts as a search), but never under-reads a
+        script.
     """
     out: list[tuple[list[str], bool, bool]] = []
     piped = False  # the separator before the words being read was a pipe
@@ -1333,15 +1244,11 @@ def _prose(body: str) -> list[tuple[list[str], bool, bool]]:
 
 def _feeds_a_shell(segs: list[tuple[list[str], bool, bool]]) -> bool:
     """
-    Description: Detect input execution so names inside echo or printf arguments receive no
-        naming-only exemption.
+    Description: Detect input execution, so names inside echo or printf arguments get no naming-only exemption.
     Parameters:
         segs: Command segments containing words, pipe-input flags, and prose markers.
-    Output: True for eval or a pipe feeding an execution sink, including xargs-fed commands;
-        otherwise False.
-    Notes: True if a command evals its input or a pipe feeds text to a shell, `source`, `.`, `eval`
-        or xargs: what looks like an argument of echo or printf may then run, so _NAMING excuses
-        nothing.
+    Output: True if a command evals its input, or a pipe feeds text to a shell, source, ., eval or xargs, including
+        xargs-fed commands. Arguments of echo or printf may then run, so _NAMING excuses nothing. Otherwise False.
     """
     for argv, piped, _prose_line in segs:
         i, fed = _command_word(argv)
@@ -1353,15 +1260,13 @@ def _feeds_a_shell(segs: list[tuple[list[str], bool, bool]]) -> bool:
 
 def _command_word(argv: list[str]) -> tuple[int, bool]:
     """
-    Description: Locate the executable command after assignments, shell keywords, and supported
-        wrappers.
+    Description: Locate the executable command after assignments, shell keywords, and supported wrappers.
     Parameters:
         argv: Segment words to inspect.
-    Output: Tuple of command index and whether xargs feeds it; returns len(argv) for naming-only
-        command -v/-V, and may reach or exceed the end when wrapper options consume missing values.
-    Notes: (index of the command a segment runs, whether xargs feeds it): skips `VAR=x` words, shell
-        keywords (`do`, `then`) and the wrappers in _PREFIXES with their options. len(argv) if it
-        runs none (`command -v rg` only looks a name up).
+    Output: Tuple of (index of the command, whether xargs feeds it). Skips VAR=x words, shell keywords (do, then) and
+        the wrappers in _PREFIXES with their options. Returns len(argv) for a naming-only command -v or -V, which only
+        looks a name up, and for a segment that runs no command. Wrapper options can consume missing values, so the
+        index may reach or exceed the end.
     """
     i, fed = 0, False
     while i < len(argv):
@@ -1392,13 +1297,10 @@ def _command_word(argv: list[str]) -> tuple[int, bool]:
 
 def _find_paths(args: list[str]) -> list[str]:
     """
-    Description: Extract find starting paths before the first search expression.
+    Description: Extract the find starting paths, before the first search expression.
     Parameters:
         args: Words following find.
-    Output: List of path words, skipping -H/-L/-P and stopping at another option, !, or an opening
-        parenthesis.
-    Notes: The start paths of a `find` command line (args: the words after `find`), up to its first
-        expression.
+    Output: List of path words. Skips -H, -L and -P, and stops at any other option, !, or an opening parenthesis.
     """
     paths: list[str] = []
     for a in args:
@@ -1412,15 +1314,12 @@ def _find_paths(args: list[str]) -> list[str]:
 
 def _search_word(argv: list[str], start: int) -> Optional[tuple[int, bool]]:
     """
-    Description: Identify direct search commands and git grep after Git options.
+    Description: Identify direct search commands, and git grep after Git options.
     Parameters:
         argv: Segment words.
         start: Index of the actual command word.
-    Output: Tuple of search-command index and git-grep boolean, or None; searches behind unknown
-        wrappers are handled by _bash_files.
-    Notes: (index of the search command in argv, whether it is `git grep`) for a segment whose
-        command word is at start; None if that command is not one. A search behind another command
-        is _bash_files' business.
+    Output: Tuple of (index of the search command in argv, whether it is git grep), or None if the command at start is
+        not a search. Searches behind other wrappers are handled by _bash_files.
     """
     if start >= len(argv):
         return None
@@ -1438,14 +1337,11 @@ def _search_word(argv: list[str], start: int) -> Optional[tuple[int, bool]]:
 
 def _segments(lines: list[str]) -> list[tuple[list[str], bool]]:
     """
-    Description: Tokenize logical shell lines into command segments while retaining pipe-input
-        information.
+    Description: Tokenize logical shell lines into command segments, keeping pipe-input information.
     Parameters:
         lines: Logical lines produced by heredoc separation.
-    Output: List of (words, pipe-fed) tuples split at ; & | ( ); raises ValueError on unbalanced
-        quotes so decide blocks the call.
-    Notes: (words, whether a pipe feeds it) for each command in the logical lines (_heredocs), split
-        at ; & | ( ).
+    Output: List of (words, pipe-fed) tuples, one per command, split at ; & | ( ). Raises ValueError on unbalanced
+        quotes, so decide blocks the call.
     """
     out: list[tuple[list[str], bool]] = []
     piped = False  # the separator before the command being read was a pipe
@@ -1469,14 +1365,13 @@ def _segments(lines: list[str]) -> list[tuple[list[str], bool]]:
 
 def _git_blobs(argv: list[str], here: Path) -> Optional[str]:
     """
-    Description: Fetch content named by git show revision:path operands through read-only Git
-        commands for scanning.
+    Description: Fetch the content named by git show revision:path operands, using read-only Git commands, so it can
+        be scanned.
     Parameters:
-        argv: Git command argument words to inspect from index two.
+        argv: Git command argument words to inspect, from index two.
         here: Effective Git working directory.
-    Output: Joined decoded blob text or None for no successful content; invokes Git without text
-        conversion or external diffs. Subprocess, OS, and deadline errors propagate for refusal.
-    Notes: Content `git show rev:path` would print, fetched read-only so it can be scanned.
+    Output: Joined, decoded blob text, or None if no content was read. Git runs without text conversion or external
+        diffs. Subprocess, OS and deadline errors propagate and refuse the call.
     """
     texts = []
     for tok in argv[2:]:
@@ -1493,23 +1388,17 @@ def _git_blobs(argv: list[str], here: Path) -> Optional[str]:
 
 def _copy_dirs(name: str, args: list[str], here: Path) -> list[Path]:
     """
-    Description: Scope directory sources of copy, move, link, and archive commands to prevent
-        allowlist laundering.
+    Description: Scope the source directories of copy, move, link and archive commands to prevent allowlist
+        laundering: a secret copied into an allowlisted folder would otherwise go unscanned.
     Parameters:
         name: Copy or archive executable name.
         args: Arguments after the command name.
         here: Effective working directory.
-    Output: List of source-directory files using recursive scope and the same cap and fail-closed
-        behavior; generally omits the last destination word unless target-directory flags change its
-        meaning. Expansion and scope errors propagate.
-    Notes: Files under the directories a copy, move, link or archive command takes in, judged like a
-        recursive search of each (same _scope, same cap, same fail-closed): `cp -r DIR
-        graphify-out/y` would otherwise launder a secret into an allowlisted folder, since only
-        files named as arguments were read. Every non-option word counts, option values included
-        (over-reads: `tar -C DIR` scans DIR). A copy's last word is its target, left out unless a
-        -t/--target-directory (or any short cluster holding t) may have moved it; trade-off: `cp x
-        existing-dir` is not scanned for the secrets already in existing-dir, which this command
-        doesn't read.
+    Output: List of files under those directories, judged like a recursive search of each (same scope, cap and
+        fail-closed rules). Every non-option word counts, option values included, so it over-reads (tar -C DIR scans
+        DIR). A copy's last word is its target and is left out, unless a -t or --target-directory flag (or any short
+        cluster holding t) may have moved it. Trade-off: cp x existing-dir does not scan secrets already in
+        existing-dir. Expansion and scope errors propagate.
     """
     words = [a for a in args if not a.startswith("-")]
     targeted = any(a.startswith("--target") or (a[:1] == "-" and a[1:2] != "-" and "t" in a[1:]) for a in args)
@@ -1519,15 +1408,13 @@ def _copy_dirs(name: str, args: list[str], here: Path) -> list[Path]:
 
 def _scan_operands(argv: list[str]) -> Optional[list[str]]:
     """
-    Description: Identify agent-run Harpo scan operands while refusing modes a work-tree check
-        cannot cover.
+    Description: Identify the operands of an agent-run Harpo scan, and refuse modes that a work-tree check cannot
+        cover.
     Parameters:
-        argv: Command words including possible wrappers or Python module invocation.
-    Output: Non-option words after scan, or None when no scan runs or help is requested; raises
-        _ScanUncheckableError for --history or --show-secrets.
-    Notes: The non-option words after `scan` if this command runs `harpo scan` or `harpocrates scan` (the
-        script, in any letter case since the default macOS file system folds it, or `python -m
-        Harpocrates[.cli]`, behind any wrapper); None if it doesn't, or only asks for --help.
+        argv: Command words, including possible wrappers or a Python module invocation.
+    Output: Non-option words after scan, when the command runs harpo scan or harpocrates scan (in any letter case,
+        since macOS folds case), or python -m Harpocrates[.cli] behind any wrapper. None if no scan runs or only
+        --help is asked for. Raises _ScanUncheckableError for --history or --show-secrets.
     """
     for i, tok in enumerate(argv):
         if Path(tok).name.casefold() in _CLI_NAMES:
@@ -1547,26 +1434,21 @@ def _scan_operands(argv: list[str]) -> Optional[list[str]]:
 def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dict[str, list[str]]] = None,
                 named_ok: bool = True, scans: Optional[list[Path]] = None) -> tuple[list[Path], list[str]]:
     """
-    Description: Collect files and extra text a shell command could expose using conservative
-        parsing and bounded recursion.
+    Description: Collect the files and extra text a shell command could expose, using conservative parsing and bounded
+        recursion.
     Parameters:
         command: Shell command text to inspect.
         cwd: Initial working directory.
         depth: Shell recursion depth, initially zero.
         inherited: Inherited variable alternatives, or None.
-        named_ok: Whether naming-only commands can be exempted; False for executed substitution
-            output.
-        scans: Optional list to receive files whose values an agent-run Harpo scan could
-            print.
-    Output: Tuple of candidate files and extra text such as Git blobs; may read Git blobs and mutate
-        scans. Raises ValueError for excessive nesting, ambiguous cd, or invalid quoting,
-        _ScanUncheckableError for unsafe scan modes, and scope, deadline, or filesystem errors for
-        refusal.
-    Notes: (files the command could print, extra text it could print such as git blobs). named_ok
-        False: the text is run as a command (a substitution's output), so _NAMING excuses nothing.
-        scans: collects the files an agent-run `harpocrates scan` would print values from (a
-        recursive reader of its operands, default `.`: scoped like a recursive search, same cap);
-        _bash refuses those with its own message.
+        named_ok: Whether naming-only commands can be exempted. False for executed substitution output, which runs as
+            a command, so _NAMING excuses nothing.
+        scans: Optional list that receives the files an agent-run harpocrates scan could print values from.
+            That scan reads its operands recursively (default .), so it is scoped and capped like a recursive search.
+    Output: Tuple of (candidate files, extra text such as Git blobs). May read Git blobs and add to scans; _bash
+        refuses the files in scans with its own message. Raises ValueError for excessive nesting, an ambiguous cd, or
+        invalid quoting, and _ScanUncheckableError for unsafe scan modes. Scope, deadline and filesystem errors
+        propagate and refuse the call.
     """
     files: list[Path] = []
     texts: list[str] = []
@@ -1652,12 +1534,11 @@ def _bash_files(command: str, cwd: Path, depth: int = 0, inherited: Optional[dic
 
 def _env_secrets() -> list[str]:
     """
-    Description: Identify environment variable names whose assignments the detector would redact
-        without returning values.
+    Description: Identify the environment variables whose values the detector would redact, without returning any
+        values.
     Parameters: None
-    Output: List of flagged variable names in sorted environment order; invokes redaction and
-        propagates detector errors.
-    Notes: Names of environment variables whose value the detector would redact (never the values).
+    Output: List of flagged variable names, in sorted environment order. Runs the redaction detector, and detector
+        errors propagate.
     """
     from Harpocrates.read import Redactor
 
@@ -1738,16 +1619,15 @@ def _from_codex(event: dict) -> bool:
 
 def decide(raw: str, ask: bool = False) -> int:
     """
-    Description: Dispatch a PreToolUse event under a fixed budget and fail closed on errors.
+    Description: Hook entry point: dispatch a PreToolUse event under a fixed budget, and fail closed on errors.
     Parameters:
         raw: JSON hook event text.
         ask: Whether supported human-answerable modes may prompt for edits.
-    Output: Zero after a deny/ask decision or an allowed call, or 2 on other errors; sets deadline
-        and ask mode, may read files or update audit/grant state, and prints only safe decisions or
+    Output: Zero after a deny or ask decision, or after an allowed call; 2 (block) on any other error. Sets the
+        deadline and ask mode, may read files, and may update audit or grant state. Prints only safe decisions or
         exception types. Budget exhaustion emits a deny decision. SEC-10: when the gate is on and a Claude Code
-        setting sends requests around it (gatecheck.refusal), every tool call gets a deny, before anything else is
-        looked at and whatever `ask` and the permission mode are; this never prompts.
-    Notes: Hook entry point: print a deny or ask decision, or nothing; 2 (block) on any error.
+        setting sends requests around it (gatecheck.refusal), every tool call is denied before anything else is
+        checked, whatever ask and the permission mode are. This never prompts.
     """
     global _deadline, _can_ask, _session
     _deadline = time.monotonic() + BUDGET
@@ -1782,19 +1662,15 @@ def decide(raw: str, ask: bool = False) -> int:
 
 def post(raw: str) -> int:
     """
-    Description: Record completed approved edits as grants or clear a session on SessionEnd without
-        blocking the harness.
+    Description: Hook entry point for --post: record completed, approved edits as grants, or clear a session on
+        SessionEnd, without blocking the harness.
     Parameters:
         raw: JSON PostToolUse, PostToolUseFailure, or SessionEnd event text.
-    Output: Integer zero; may promote a matching pending edit or delete session grants. Prints
-        nothing and suppresses ordinary exceptions; interrupts and nonedit or stray PreToolUse
-        events never grant.
-    Notes: `--post` entry point (PostToolUse, PostToolUseFailure, SessionEnd): turn the pending edit
-        of this tool_use_id into a grant, or drop the session's grants. A failed tool still ran, so
-        it grants (an Edit that fails on "not read yet" is what lets the Read through); an interrupt
-        does not. Only the event name decides (a stray PreToolUse event never grants), and the event
-        must name an edit tool, the one the hook asked about (grants.promote). It only records: it
-        prints nothing and never raises (a crash here must not reach the harness).
+    Output: Integer zero. Turns the pending edit with this tool_use_id into a grant, or drops the session's grants on
+        SessionEnd. Only the event name decides: a stray PreToolUse event never grants, and the event must name the
+        edit tool the hook asked about (grants.promote). A failed tool still ran, so its edit is granted; an Edit that
+        fails with "not read yet" grants, which lets the Read through. An interrupt never grants. Prints nothing and
+        suppresses ordinary exceptions, so a crash here cannot reach the harness.
     """
     try:
         from Harpocrates import grants

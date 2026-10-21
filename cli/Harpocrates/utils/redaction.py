@@ -33,19 +33,13 @@ _MIN_CUT_LEN = 4  # shortest piece of a token, cut off at the end of a snippet, 
 
 def redact_token(token: Optional[str]) -> Optional[str]:
     """
-    Description: Return a redacted display form of ``token``.
+    Description: Return a redacted display form of token.
     Parameters:
         token: Optional token to render for display.
-    Output: None for absent/blank input, the full redaction placeholder below eight characters, or
-    an ellipsis with 1, 2, or 4 characters from each end at lengths 8, 9-10, or 11+. No side
-    effects.
-    Returns ``None`` when ``token`` is ``None``, empty, or whitespace-only so callers can cleanly
-    distinguish "no token to show" from a redacted value. Tokens shorter than ``_MIN_SAFE_LEN`` are
-    replaced entirely with ``"[REDACTED]"`` because slicing them would disclose a disproportionate
-    fraction of the original (e.g. a 2-char token would leak both chars).
-    Examples: >>> redact_token(None) >>> redact_token("") >>> redact_token(" ") >>>
-    redact_token("ab") '[REDACTED]' >>> redact_token("abcdefgh") 'a...h' >>>
-    redact_token("abcdefghij") 'ab...ij' >>> redact_token("abcdefghijklmnopqr") 'abcd...opqr'
+    Output: None when token is None, empty, or whitespace-only, so callers can tell "no token to show" from a redacted
+        value. Tokens shorter than eight characters (_MIN_SAFE_LEN) become "[REDACTED]" whole, since slicing would
+        disclose a disproportionate share of the original. Longer tokens keep 1, 2, or 4 characters at each end for
+        lengths 8, 9-10, or 11 and up, joined by an ellipsis. No side effects.
     """
     if token is None or not token.strip():
         return None

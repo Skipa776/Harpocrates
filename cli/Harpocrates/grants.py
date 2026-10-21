@@ -46,9 +46,8 @@ def _file(session_id: object) -> Optional[Path]:
     Description: Choose a grant file only when the session identifier is a safe file name.
     Parameters:
         session_id: Untrusted session identifier to validate.
-    Output: Grant file path, or None for an invalid identifier; state directory lookup may migrate
+    Output: Grant file path, or None for an invalid identifier; the state directory lookup may migrate
         legacy state.
-    Notes: The grant file of a session, None if the id could not be a safe file name.
     """
     if isinstance(session_id, str) and _SESSION.fullmatch(session_id):
         return _dir() / f"{session_id}.json"
@@ -69,14 +68,13 @@ def _fresh(ts: object, now: float) -> bool:
 
 def _load(path: Path, now: float) -> dict:
     """
-    Description: Load grant state and discard malformed or expired entries so unusable state
-        provides no grants.
+    Description: Load grant state and discard malformed or expired entries so unusable state provides
+        no grants.
     Parameters:
         path: Session grant file to read.
         now: Current time in seconds used to check expiration.
-    Output: Dictionary containing pending and granted mappings; missing, unreadable, or corrupt
-        files yield empty mappings (fail closed).
-    Notes: {"pending": ..., "granted": ...} with every malformed or expired entry dropped.
+    Output: Dictionary with pending and granted mappings, every malformed or expired entry dropped;
+        missing, unreadable, or corrupt files yield empty mappings (fail closed).
     """
     try:
         if paths.unusable(state_dir()):  # a symlink or a file where the folder should be: no grants (SEC-09)
@@ -124,10 +122,7 @@ def _sweep(now: float) -> None:
     Description: Remove stale session files to clean up sessions without a SessionEnd event.
     Parameters:
         now: Current time in seconds for comparing file modification times.
-    Output: None; deletes files older than TTL and ignores directory, stat, and unlink OSError
-        failures.
-    Notes: Delete grant files nothing has touched for TTL (a session that ended without a
-        SessionEnd).
+    Output: None; deletes files older than TTL and ignores directory, stat, and unlink OSError failures.
     """
     if paths.unusable(state_dir()):
         return
@@ -144,18 +139,15 @@ def _sweep(now: float) -> None:
 
 def add_pending(session_id: object, tool_use_id: object, path: Path, tool: str) -> bool:
     """
-    Description: Record the edit awaiting user approval so only a recorded pending request can
-        become a grant.
+    Description: Record the edit awaiting user approval so only a recorded pending request can become a
+        grant.
     Parameters:
         session_id: Session identifier used to select the grant file.
         tool_use_id: Nonempty identifier of the tool call awaiting approval.
         path: Target path to record as a real path.
         tool: Name of the tool requesting approval.
-    Output: True after saving and sweeping stale grants; False for unusable identifiers or an
-        OSError while saving. The caller must refuse instead of asking if recording fails.
-    Notes: Record the edit the hook is about to ask about. False when it can't be recorded (no
-        usable ids, an unwritable directory): the caller then refuses instead of asking, so no
-        prompt can lead to a grant that was never recorded as pending.
+    Output: True after saving and sweeping stale grants; False for unusable identifiers or an OSError
+        while saving. The caller must refuse instead of asking if recording fails.
     """
     file = _file(session_id)
     if file is None or not isinstance(tool_use_id, str) or not tool_use_id:
@@ -178,12 +170,8 @@ def promote(session_id: object, tool_use_id: object, tool: object) -> None:
         session_id: Session identifier selecting the grant file.
         tool_use_id: Identifier of the completed tool call.
         tool: Tool name reported by the Post event.
-    Output: None; moves a fresh matching pending entry into granted and saves it. Invalid
-        identifiers, unknown or expired calls, and tool mismatches do nothing; save errors
-        propagate.
-    Notes: The tool ran: its pending path becomes a grant. Nothing changes for an unknown or expired
-        tool_use_id, or when `tool` (the tool the Post event names) is not the one the hook asked
-        about.
+    Output: None; moves a fresh matching pending entry into granted and saves it. Invalid identifiers,
+        unknown or expired calls, and tool mismatches do nothing; save errors propagate.
     """
     file = _file(session_id)
     if file is None or not isinstance(tool_use_id, str):
@@ -202,9 +190,8 @@ def granted(session_id: object) -> frozenset[str]:
     Description: Read the real paths approved by the user for this session.
     Parameters:
         session_id: Session identifier selecting the grant file.
-    Output: Frozen set of unexpired granted paths; invalid identifiers or missing, unreadable, or
-        corrupt state yield an empty set.
-    Notes: Real paths the user approved in this session.
+    Output: Frozen set of unexpired granted paths; invalid identifiers or missing, unreadable, or corrupt
+        state yield an empty set.
     """
     file = _file(session_id)
     return frozenset(_load(file, time.time())["granted"]) if file is not None else frozenset()
@@ -215,9 +202,8 @@ def clear(session_id: object) -> None:
     Description: Forget session grants when SessionEnd arrives.
     Parameters:
         session_id: Session identifier selecting the grant file.
-    Output: None; deletes the grant file if present, ignores invalid identifiers, and propagates
-        unlink errors other than a missing file.
-    Notes: SessionEnd: forget the session's grants.
+    Output: None; deletes the grant file if present, ignores invalid identifiers, and propagates unlink
+        errors other than a missing file.
     """
     file = _file(session_id)
     if file is not None and not paths.unusable(state_dir()):

@@ -79,8 +79,7 @@ TEST_PATH_PATTERNS = [
 @dataclass
 class CodeContext:
     """
-    Description: Represent surrounding code and metadata used to distinguish secrets from false
-    positives.
+    Description: Hold the surrounding code and metadata that help the ML model tell true secrets from false positives.
     Parameters:
         line_content: Line containing the candidate.
         lines_before: Lines preceding the candidate.
@@ -94,9 +93,6 @@ class CodeContext:
         total_lines: Total source line count.
         token_match: Optional token text and span metadata.
     Output: Instances provide context lines, file metadata, and derived file-risk properties.
-    Contextual information around a detected secret.
-    Captures surrounding code and metadata to help ML models distinguish between true secrets and
-    false positives.
     """
 
     line_content: str
@@ -178,14 +174,11 @@ class CodeContext:
 
 def feature_var_name(line: str, token: str) -> Optional[str]:
     """
-    Description: Search assignment patterns immediately before a token to identify its variable
-    name.
+    Description: Search the assignment patterns just before a token to find its variable name.
     Parameters:
         line: The line of code
         token: The detected token
     Output: Matched variable name, or None if the token or assignment is absent.
-    Extract variable name from a line containing a token.
-    Returns: Variable name if found, None otherwise
     """
     # Find position of token in line
     token_pos = line.find(token)
@@ -211,7 +204,6 @@ def is_comment_line(line: str) -> bool:
     Parameters:
         line: Line to inspect.
     Output: True when a supported comment prefix matches, otherwise False.
-    Check if a line is a comment.
     """
     stripped = line.strip()
     comment_prefixes = ("#", "//", "/*", "*", "<!--", "--", ";", "rem ")
@@ -224,8 +216,6 @@ def detect_file_type(file_path: Optional[str]) -> Optional[str]:
     Parameters:
         file_path: Path to the file
     Output: Language identifier, or None for a missing path or unknown extension.
-    Detect programming language from file extension.
-    Returns: Language identifier or None
     """
     if not file_path:
         return None
@@ -264,7 +254,6 @@ def is_test_file(file_path: Optional[str]) -> bool:
     Parameters:
         file_path: Optional source file path.
     Output: True for a matching test path, otherwise False, including missing paths.
-    Check if file is a test file based on path patterns.
     """
     if not file_path:
         return False
@@ -278,15 +267,13 @@ def extract_context(
     context_lines: int = 3,
 ) -> CodeContext:
     """
-    Description: Split content and extract neighboring lines to describe a finding.
+    Description: Split content and extract the neighboring lines that describe a finding.
     Parameters:
         content: Full file content or text blob
         line_number: 1-based line number of the finding
         file_path: Optional file path for metadata extraction
         context_lines: Number of lines before/after to include
     Output: CodeContext containing surrounding code and file metadata.
-    Extract contextual information from code around a finding.
-    Returns: CodeContext with surrounding code and metadata
     """
     return extract_context_from_lines(
         content.splitlines(),
@@ -303,14 +290,14 @@ def extract_context_from_lines(
     context_lines: int = 3,
 ) -> CodeContext:
     """
-    Description: Extract context from already split lines to avoid repeated splitting in batches.
+    Description: Extract context from lines already split by a batch caller, so batches do not re-split the same
+        content.
     Parameters:
         lines: Previously split source lines.
         line_number: One-based finding line number.
         file_path: Optional source file path.
         context_lines: Number of neighboring lines on each side.
     Output: CodeContext; an out-of-bounds line produces empty line content and file metadata.
-    Extract context from lines already split by a batch caller.
     """
     total_lines = len(lines)
 
@@ -361,10 +348,7 @@ def extract_context_from_finding(
         finding: Finding object with file/line info
         full_content: Optional full file content (reads from disk if not provided)
         context_lines: Number of lines before/after to include
-    Output: CodeContext; may read a UTF-8 file, ignoring decoding errors. File I/O errors fall back
-    to the snippet.
-    Extract context from a Finding object.
-    Returns: CodeContext with surrounding code and metadata
+    Output: CodeContext; may read a UTF-8 file, ignoring decoding errors. File I/O errors fall back to the snippet.
     """
     if finding.line is None:
         # No line info, create minimal context

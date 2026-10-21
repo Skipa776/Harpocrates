@@ -41,11 +41,10 @@ _DEFAULT_THRESHOLD_HIGH = 0.85
 
 class OnnxModelSchemaError(ValueError):
     """
-    Description: Represent disagreement between model, configuration, and runtime feature contracts.
+    Description: Represent disagreement between the model, configuration, and runtime feature contracts, raised when
+        their feature widths differ.
     Parameters: None
-    Output: Instances provide a ValueError subtype for reporting schema or policy validation
-    failures.
-    Raised when model, config, and runtime feature widths disagree.
+    Output: A ValueError subtype reporting schema or policy validation failures.
     """
 
 
@@ -56,8 +55,8 @@ def _validate_model_config(
     Description: Validate routing policy before it can influence model decisions.
     Parameters:
         config: Parsed model configuration.
-    Output: Tuple of low/high thresholds, Platt coefficients, and optional feature count; raises
-    OnnxModelSchemaError for invalid policy values.
+    Output: Tuple of low/high thresholds, Platt coefficients, and optional feature count; raises OnnxModelSchemaError
+        for invalid policy values.
     """
 
     def finite_number(key: str, default: float) -> float:
@@ -90,14 +89,14 @@ def _validate_model_config(
 
 def _layer_threshold(config: dict[str, Any], layer: str, threshold_high: float) -> float:
     """
-    Description: The per-layer decision threshold; a missing or invalid entry is a config error,
-    never a default.
+    Description: Return the decision threshold for one routing layer. A missing or invalid entry is a config error,
+        never a default.
     Parameters:
         config: Parsed model configuration.
         layer: Optional commit or gate routing layer (FR-CORE-06).
         threshold_high: Exclusive upper bound for a layer threshold.
-    Output: Layer threshold as a float; raises OnnxModelSchemaError for a missing or invalid entry.
-    A malformed thresholds container can raise AttributeError.
+    Output: Layer threshold as a float; raises OnnxModelSchemaError for a missing or invalid entry, and AttributeError
+        when the thresholds container is malformed.
     """
     value = config.get("thresholds", {}).get(layer)
     if type(value) not in (int, float) or not 0.0 <= value < threshold_high:
@@ -111,8 +110,8 @@ def _verify_file_hash(path: Path, expected: Dict[str, str]) -> bytes:
     Parameters:
         path: Artifact path whose basename identifies the manifest entry.
         expected: Manifest mapping artifact names to expected SHA-256 digests.
-    Output: Verified bytes; reads the file and raises ValueError for a missing manifest entry or
-    hash mismatch, or OSError for read failures.
+    Output: Verified bytes; reads the file and raises ValueError for a missing manifest entry or hash mismatch, or
+        OSError for read failures.
     """
     key = path.name
     if key not in expected:
@@ -137,8 +136,8 @@ def _validate_model_schema(session, configured_feature_count: Optional[int]) -> 
     Parameters:
         session: ONNX inference session.
         configured_feature_count: Optional feature width declared in the configuration.
-    Output: Validated model feature width; raises OnnxModelSchemaError for nonfixed or mismatched
-    widths, or IndexError if no model input exists.
+    Output: Validated model feature width; raises OnnxModelSchemaError when the width is not fixed or does not match,
+        and IndexError if the model has no input.
     """
     model_input = session.get_inputs()[0]
     model_width = model_input.shape[-1]
@@ -165,12 +164,12 @@ def _validate_model_schema(session, configured_feature_count: Optional[int]) -> 
 
 def _calibration_map(config: dict[str, Any]) -> Optional[Tuple[List[float], List[float]]]:
     """
-    Description: Validate the validation-fitted isotonic calibration map for FR-CORE-03 reporting.
+    Description: Validate the isotonic calibration map, fit on validation data, that maps raw score to P(secret)
+        (FR-CORE-03).
     Parameters:
         config: Parsed model configuration.
-    Output: Float x/y lists, or None to report raw scores; raises OnnxModelSchemaError for malformed
-    maps or simultaneous Platt scaling.
-    Isotonic map raw score -> P(secret), fit on validation (FR-CORE-03). None reports raw scores.
+    Output: Float x/y lists, or None to report raw scores; raises OnnxModelSchemaError for malformed maps or when
+        Platt scaling is set at the same time.
     """
     cal = config.get("calibration")
     if cal is None:
@@ -217,8 +216,8 @@ def _apply_platt(raw_prob: float, a: float, b: float) -> float:
         raw_prob: Raw positive-class probability.
         a: Platt slope coefficient.
         b: Platt intercept coefficient.
-    Output: Calibrated probability, or unchanged raw probability when both coefficients are zero;
-    may raise OverflowError from exponentiation.
+    Output: Calibrated probability, or unchanged raw probability when both coefficients are zero; may raise
+        OverflowError from exponentiation.
     """
     if a == 0.0 and b == 0.0:
         return raw_prob
@@ -227,13 +226,12 @@ def _apply_platt(raw_prob: float, a: float, b: float) -> float:
 
 def _run_session(session: Any, features: List[List[float]]) -> List[float]:
     """
-    Description: Run ONNX InferenceSession and extract positive-class probabilities.
+    Description: Run the ONNX inference session and extract the positive-class probabilities.
     Parameters:
         session: ONNX inference session.
         features: Feature vectors to evaluate.
-    Output: Positive-class probabilities; runs inference and lazily imports NumPy. Raises ValueError
-    for invalid output count or probabilities; runtime and malformed-output indexing errors
-    propagate.
+    Output: Positive-class probabilities. NumPy is imported lazily. Raises ValueError for an invalid output count or
+        invalid probabilities; runtime and malformed-output indexing errors propagate.
     """
     import numpy as np
 
@@ -281,10 +279,9 @@ class OnnxVerifier(Verifier):
         config_path: Optional routing configuration path; defaults to the bundled configuration.
         lazy_load: Whether to defer artifact loading until use.
         layer: Optional commit or gate routing layer (FR-CORE-06).
-    Output: Instances load verified ONNX artifacts and provide single/batch verification with SAFE,
-    REVIEW, or SECRET routing. Eager construction propagates loading errors.
-    Decision logic: P(secret) < threshold_low -> SAFE (exit 0, silent) P(secret) > threshold_high ->
-    SECRET (exit 1, hard block) otherwise -> REVIEW (exit 1, override available)
+    Output: Instances load verified ONNX artifacts and provide single and batch verification. P(secret) below
+        threshold_low routes to SAFE (exit 0, silent), above threshold_high to SECRET (exit 1, hard block), and
+        anything between to REVIEW (exit 1, override available). Eager construction propagates loading errors.
     """
 
     _instance: Optional["OnnxVerifier"] = None

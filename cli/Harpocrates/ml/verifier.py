@@ -27,8 +27,8 @@ class VerificationResult:
         features_used: Optional feature-name/value mapping.
         explanation: Optional human-readable verification reason.
         calibrated: Optional validation-calibrated P(secret), per FR-CORE-03.
-    Output: Instances provide classification, confidence scores, optional features/explanation, and
-    a confidence delta.
+    Output: Instances provide the classification, confidence scores, optional features and explanation, and a
+        confidence delta.
     """
 
     is_secret: bool  # Final classification
@@ -53,8 +53,8 @@ class Verifier(ABC):
     """
     Description: Abstract base class for finding verification.
     Parameters: None
-    Output: Concrete subclasses provide single and batch verification plus model readiness; direct
-    instantiation raises TypeError because methods are abstract.
+    Output: Concrete subclasses provide single and batch verification plus model readiness; direct instantiation
+        raises TypeError because methods are abstract.
     """
 
     @abstractmethod

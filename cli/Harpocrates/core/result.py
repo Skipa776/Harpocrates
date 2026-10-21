@@ -13,7 +13,6 @@ class EvidenceType(Enum):
     Description: Represent the evidence source that triggered detection.
     Parameters: None
     Output: Enum members provide regex, entropy, ML, LLM, and hybrid evidence labels.
-    Type of evidence that triggered the detection.
     """
     REGEX = "regex"
     ENTROPY = "entropy"
@@ -26,7 +25,6 @@ class Severity(Enum):
     Description: Represent the severity assigned to a finding.
     Parameters: None
     Output: Enum members provide critical, high, medium, low, and informational levels.
-    Severity level of the finding.
     """
     CRITICAL = 'critical'
     HIGH = "high"
@@ -38,8 +36,7 @@ class Severity(Enum):
 @dataclass
 class Finding:
     """
-    Description: Represent a single secret detection with evidence, location, and optional
-    classification metadata.
+    Description: Represent a single secret detection with evidence, location, and optional classification metadata.
     Parameters:
         type: Type of detected secret, such as AWS_ACCESS_KEY or GITHUB_TOKEN.
         snippet: Source snippet containing the secret, potentially truncated.
@@ -55,15 +52,8 @@ class Finding:
         in_comment: Optional flag for commented-out findings.
         category: Optional violation-category value.
         category_reason: Optional category inference trace.
-    Output: Instances provide finding fields, redacted display, and serialization; raw token and
-    snippet fields require care.
-    Represents a single secret detection finding.
-    Attributes: type: Type of secret detected (e.g., "AWS_ACCESS_KEY", "GITHUB_TOKEN") file: Path to
-    the file where secret was found (None for text scans) line: Line number in the file (None for
-    text scans) snippet: Code snippet containing the secret (truncated) entropy: Shannon entropy of
-    the detected token (if applicable) evidence: How the secret was detected (regex, entropy, ml,
-    etc.) severity: Severity level of the finding confidence: Confidence score (0.0-1.0) for
-    ML-based detection token: The actual detected token (use with caution)
+    Output: Instances provide finding fields, redacted display, and serialization; raw token and snippet
+        fields require care.
     """
     type: str
     snippet: str
@@ -184,10 +174,6 @@ class ScanResult:
         duration_ms: Scan duration in milliseconds.
         errors: Optional list of scanning errors, normalized to an empty list if absent.
     Output: Instances provide findings, counts, errors, and serialization helpers.
-    Represents the complete result of a scan operation.
-    Attributes: findings: List of all findings detected scanned_files: Number of files scanned
-    total_lines: Total lines of code scanned duration_ms: Scan duration in milliseconds errors: List
-    of errors encountered during scanning
     """
     findings: List[Finding]
     scanned_files: int = 0

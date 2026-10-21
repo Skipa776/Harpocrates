@@ -93,15 +93,13 @@ HARNESSES = (
 def detect(home: Optional[Path] = None, which: Callable[[str], Optional[str]] = shutil.which,
            apps: Path = Path("/Applications")) -> dict[str, bool]:
     """
-    Description: Detect harness installations using executables, configuration paths, and
-        application directories.
+    Description: Detect which harnesses are installed, by a command on PATH or a config or app directory.
     Parameters:
         home: Home directory to inspect, defaulting to Path.home().
         which: Executable lookup callable, defaulting to shutil.which.
         apps: Applications directory used for .app paths.
-    Output: Mapping of harness display names to installation booleans; home lookup, filesystem, and
-        lookup callable errors may propagate.
-    Notes: Which harnesses look installed: a command on PATH, or a config or app directory.
+    Output: Mapping of harness display names to installation booleans. Errors from the home lookup, the filesystem, or
+        the lookup callable may propagate.
     """
     home = home or Path.home()
 
@@ -121,13 +119,12 @@ def detect(home: Optional[Path] = None, which: Callable[[str], Optional[str]] = 
 
 def tier_report(found: dict[str, bool]) -> str:
     """
-    Description: Describe detected harness support and remaining exposure for FR-INSTALL-03.
+    Description: Describe detected harness support and remaining exposure for FR-INSTALL-03, with what each tier
+        leaves unprotected.
     Parameters:
         found: Mapping of harness names to detection booleans.
-    Output: Human-readable report including setup availability and the unreleased M2 gate
-        limitation, or a no-supported-harness message.
-    Notes: Support tier per detected harness, with what each tier leaves unprotected
-        (FR-INSTALL-03).
+    Output: Human-readable report with setup availability and the unreleased M2 gate limitation, or a
+        no-supported-harness message.
     """
     rows = [h for h in HARNESSES if found.get(h.name)]
     if not rows:
@@ -173,23 +170,14 @@ def _choose_flag(user_site: bool, has_p: bool) -> str:
 
 def python_flag() -> str:
     """
-    Description: Select the interpreter flags every generated `python -m Harpo...` command carries, so neither an
-        agent-controlled working directory nor an environment variable can put code in front of Harpo (SEC-08).
+    Description: Select the interpreter flags for every generated `python -m Harpo...` command, so neither an
+        agent-controlled working directory nor an environment variable can put code ahead of Harpo (SEC-08).
     Parameters: None
-    Output: "-I" (isolated mode), or "-E -P" when the package is installed in the user site-packages and this Python is
-        3.11 or later; a string that may hold two flags separated by a space (python_flags() splits it). No process
-        is launched.
-    Notes: `python -m` puts the current directory first on sys.path, and the current directory is the
-        agent-controlled project, so a planted `Harpocrates/` package there would run in place of
-        ours (a hook that exits 0 is an allow). PYTHONPATH, PYTHONSTARTUP, PYTHONHOME and the user site
-        are the same kind of door, and a project's settings can set environment variables. -I (isolated
-        mode: -E -P -s) closes all of them, and is the choice for every install that keeps the package in
-        the interpreter's own site-packages. A `pip install --user` install needs the user site, which -I
-        drops, so there -E (ignore PYTHON* variables) and -P (3.11+: drop only the cwd entry) are used instead;
-        older Pythons have no -P and get -I, so a user-site install is not found there and the hook
-        fails closed (exit 2). RESIDUAL RISK of "-E -P": the user site is found from $HOME, so a hook whose
-        $HOME an agent controls would load a package planted in that user site. Install into a virtual
-        environment (or the interpreter's own site-packages) to avoid it; docs/threat-model.md lists it.
+    Output: "-I" (isolated mode), or "-E -P" when the package is installed in the user site-packages and this Python
+        is 3.11 or later, because -I drops the user site; returned as one string that python_flags() splits. No
+        process is launched. Older Pythons get -I, so a user-site install is not found there and the hook fails closed
+        (exit 2). The -E -P form has a residual risk: $HOME locates the user site, so a planted package there would
+        load; a virtual environment avoids it (docs/threat-model.md).
     """
     return _choose_flag(_in_user_site(), sys.version_info >= (3, 11))
 
@@ -206,31 +194,24 @@ def python_flags() -> list[str]:
 
 def mcp_server() -> tuple[str, list[str]]:
     """
-    Description: Build the MCP server invocation using this interpreter for virtual-environment and
-        IDE compatibility.
+    Description: Build the MCP server command with this interpreter, so it works from any virtual environment and from
+        IDE-launched agents.
     Parameters: None
-    Output: Tuple of interpreter path and argument list with the protective Python flag; does not
-        launch the server.
-    Notes: This interpreter running the MCP server, so it works from any venv and from IDE-launched
-        agents.
+    Output: Tuple of the interpreter path and an argument list carrying the protective Python flag; does not launch
+        the server.
     """
     return sys.executable, [*python_flags(), "-m", "Harpocrates.mcp.server"]
 
 
 def guarded_hook(python: str, *flags: str) -> str:
     """
-    Description: Build a PreToolUse hook invocation that maps execution failures to a blocking exit
-        status.
+    Description: Build a PreToolUse hook command that fails closed. Harnesses read only exit 2 as a block, so a
+        removed venv (exit 127) or a crash (exit 1) would otherwise let the call through.
     Parameters:
-        python: Interpreter path passed safely as shell argument zero.
+        python: Interpreter path, passed as shell argument zero so spaces and quotes in it are safe.
         *flags: Additional hook flags inserted into the shell script.
-    Output: Shell command using sh -c and || exit 2 to fail closed; does not execute it. Post hooks
-        must remain bare because they must never block.
-    Notes: A PreToolUse hook command that fails closed. Harnesses read only exit 2 as a block, so a
-        removed venv (exit 127) or a crash (1) would let the call through. The hook itself exits 0
-        or 2, so `|| exit 2` changes nothing else. The explicit `sh -c` works whether the harness
-        runs the string in a shell or splits it into argv; the python path travels as $0, so spaces
-        and quotes in it are safe. --post hooks stay bare: they must never block.
+    Output: Shell command using sh -c and `|| exit 2`, which works whether the harness runs the string in a shell or
+        splits it into argv; does not execute it. Post hooks stay bare because they must never block.
     """
     script = " ".join(['"$0"', *python_flags(), "-m", "Harpocrates.hooks", *flags, "||", "exit", "2"])
     return shlex.join(["sh", "-c", script, python])
@@ -238,12 +219,11 @@ def guarded_hook(python: str, *flags: str) -> str:
 
 def claude_code_settings() -> dict:
     """
-    Description: Build Claude Code permissions and hooks that protect secret reads and
-        state-directory edits.
+    Description: Build the Claude Code permissions and hooks, for ~/.claude/settings.json, that protect secret reads
+        and state-directory edits.
     Parameters: None
-    Output: Settings dictionary for ~/.claude/settings.json containing root-anchored denies, allowed
-        MCP tools, a guarded asking PreToolUse hook, and bare post/session hooks; writes nothing.
-    Notes: Lines for ~/.claude/settings.json. `//**/` anchors at the filesystem root, so a rule in
+    Output: Settings dictionary with root-anchored denies, allowed MCP tools, a guarded asking PreToolUse hook, and
+        bare post and session hooks; writes nothing. The `//**/` anchor starts at the filesystem root, so a rule in
         user settings covers every project and any file outside the working directory.
     """
     deny = [f"Read(//**/{name})" for name in SENSITIVE_FILES] + [f"Read({d}/**)" for d in SENSITIVE_HOME_DIRS]
@@ -265,15 +245,12 @@ def claude_code_settings() -> dict:
 
 def codex_config_parts() -> tuple[str, str]:
     """
-    Description: Build Codex MCP, sandbox, and content-aware hook configuration as separate root and
-        table sections.
+    Description: Build the Codex MCP, sandbox, and content-aware hook settings for ~/.codex/config.toml, as separate
+        root and table sections.
     Parameters: None
-    Output: Tuple of TOML root settings and tables for ~/.codex/config.toml; writes nothing.
-        Profiles limit sandboxed shell commands but do not restrict MCP reads through safe_read.
-    Notes: Lines for ~/.codex/config.toml. The profile limits sandboxed shell commands; Codex
-        doesn't apply profiles to MCP servers, so safe_read still reads these paths. The PreToolUse
-        hook is the same content-aware check as Claude Code's: it refuses shell commands that would
-        print a file holding a secret.
+    Output: Tuple of TOML root settings and tables; writes nothing. The profile limits only sandboxed shell commands,
+        not MCP reads, so safe_read still reads these paths. The PreToolUse hook refuses shell commands that would
+        print a file holding a secret, as Claude Code's does.
     """
     command, args = mcp_server()
     files = "\n".join(f'"**/{name}" = "deny"' for name in SENSITIVE_FILES)
@@ -308,10 +285,9 @@ statusMessage = "Harpo: checking files for secrets"
 
 def codex_config() -> str:
     """
-    Description: Combine Codex root settings and tables for the setup command.
+    Description: Combine the Codex root settings and tables into one configuration string, for `harpo setup codex`.
     Parameters: None
     Output: Complete configuration string; writes no files.
-    Notes: The same lines in one piece, for `harpo setup codex`.
     """
     root, tables = codex_config_parts()
     return f"{root}\n{tables}"
@@ -319,13 +295,11 @@ def codex_config() -> str:
 
 def setup_instructions(harness: str) -> str:
     """
-    Description: Generate copy-paste read-tool setup instructions for a Full-tier harness under
-        FR-READ-03.
+    Description: Generate copy-paste read-tool setup instructions for one Full-tier harness, under FR-READ-03.
     Parameters:
         harness: Case-insensitive guide identifier: claude-code or codex.
-    Output: Setup guide including validation steps and protection limitations; raises ValueError for
-        unsupported harnesses and writes nothing.
-    Notes: Copy-paste setup for one Full-tier harness (FR-READ-03).
+    Output: Setup guide with validation steps and protection limitations; raises ValueError for an unsupported harness
+        and writes nothing.
     """
     harness = harness.lower()
     command, args = mcp_server()

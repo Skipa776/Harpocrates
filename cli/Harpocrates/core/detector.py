@@ -37,9 +37,7 @@ class MLVerificationError(RuntimeError):
     """
     Description: Represent failure to complete explicitly requested ML verification.
     Parameters: None
-    Output: Instances provide a RuntimeError subtype for verifier failures or result-count
-    mismatches.
-    Raised when an explicitly requested ML verification cannot complete.
+    Output: A RuntimeError subtype raised for verifier failures or result-count mismatches.
     """
 
 
@@ -135,7 +133,7 @@ def _random_url_piece(value: str) -> bool:
     Parameters:
         value: Candidate value to inspect.
     Output: True for password-shaped pieces at least 16 characters long that are neither joined
-    words nor UUIDs.
+        words nor UUIDs.
     """
     return (len(value) >= 16 and _password_shaped(value) and not _WORDS_JOINED_RE.fullmatch(value)
             and not _UUID_RE.fullmatch(value))
@@ -143,13 +141,12 @@ def _random_url_piece(value: str) -> bool:
 
 def _symbol_soup(value: str) -> bool:
     """
-    Description: Identify punctuation-heavy random values while rejecting word-like text and URLs.
+    Description: Identify punctuation-heavy random values while rejecting word-like text and URLs. Code and prose have
+        long letter runs that random strings lack.
     Parameters:
         value: Candidate value to inspect.
     Output: True for at least three distinct unusual symbols, three letters, a digit, no five-letter
-    run, and no URL scheme; otherwise False.
-    Random punctuation-heavy secret: >= 3 distinct unusual symbols, letters and digits, and no
-    word-like letter run (code and prose have long letter runs; random strings don't).
+        run, and no URL scheme; otherwise False.
     """
     return (len(_SOUP_SYMBOLS & set(value)) >= 3 and sum(c.isalpha() for c in value) >= 3
             and any(c.isdigit() for c in value) and not _LETTER_RUN_RE.search(value)
@@ -187,11 +184,11 @@ def _url_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
 def _password_shaped(value: str) -> bool:
     """
     Description: Check letter/digit combinations for password-like structure to admit low-entropy
-    candidates.
+        candidates.
     Parameters:
         value: Candidate value to inspect.
     Output: True when letters and digits accompany uppercase, a password symbol, or at least three
-    letters and two digits; otherwise False.
+        letters and two digits; otherwise False.
     """
     letters = sum(c.isalpha() for c in value)
     digits = sum(c.isdigit() for c in value)
@@ -208,8 +205,7 @@ def _structured_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
     Parameters:
         scan_target: Source text whose character coordinates identify candidates.
     Output: List of value/start/end tuples in scan_target coordinates; may include overlapping or
-    repeated candidates.
-    (value, start, end) for Phase 2d shapes, in scan_target coordinates.
+        repeated candidates.
     """
     out = [(m.group(), m.start(), m.end()) for m in _CONN_URI_RE.finditer(scan_target)] if "://" in scan_target else []
     for pattern in (_KV_PASSWORD_RE, _URL_TOKEN_RE, _HEX_SECRET_RE):
@@ -236,12 +232,11 @@ _CONTEXT_WINDOW = 256
 def _file_ext(file: str) -> str:
     """
     Description: Derive and cache a lowercase file extension for risk routing, recognizing dotted
-    .env variants.
+        .env variants. It is computed once per file instead of once per line.
     Parameters:
         file: Optional source file path.
     Output: Extension string, including .env for supported dotenv names; updates the bounded LRU
-    cache.
-    File extension used for risk routing, computed once per file instead of once per line.
+        cache.
     """
     ext = Path(file).suffix.lower()
     if not ext or ext not in HIGH_RISK_EXTENSIONS:
@@ -257,7 +252,7 @@ def _calculate_entropy_confidence(entropy_val: Optional[float]) -> float:
     Parameters:
         entropy_val: Optional Shannon entropy value.
     Output: Confidence from 0.6 to 0.8; missing or sub-4.0 entropy gives 0.6, and entropy at least
-    5.5 gives 0.8.
+        5.5 gives 0.8.
     """
     if entropy_val is None:
         return 0.6
@@ -270,14 +265,12 @@ def _calculate_entropy_confidence(entropy_val: Optional[float]) -> float:
 
 def _severity_from_entropy(inference: "CategoryInference") -> Severity:
     """
-    Description: Assign pre-ML severity from category evidence so strong heuristics can reach HIGH.
+    Description: Assign pre-ML severity for entropy-stage findings, so strong heuristics such as
+        PASSWORD 0.90 or JWT 0.85 can reach HIGH without ML confirmation.
     Parameters:
         inference: Category inference and classification confidence.
-    Output: Severity.INFO, MEDIUM, or HIGH; delegates without an ML confidence.
-    Severity for entropy-stage findings (before ML verification, if any).
-    Delegates to _severity_from_classification without ml_confidence so strong heuristic signals
-    (e.g., PASSWORD 0.90, JWT 0.85) reach HIGH without requiring ML confirmation. ML verification
-    can still upgrade MEDIUM→HIGH via ml_confidence when the verifier runs.
+    Output: Severity.INFO, MEDIUM, or HIGH; delegates to _severity_from_classification without an ML
+        confidence. ML verification can still upgrade MEDIUM to HIGH when it runs.
     """
     return _severity_from_classification(inference)
 
@@ -287,20 +280,14 @@ def _severity_from_classification(
     ml_confidence: Optional[float] = None,
 ) -> Severity:
     """
-    Description: Map category and optional ML confidence into severity bands with HIGH as the
-    heuristic ceiling.
+    Description: Map category and optional ML confidence into severity bands with HIGH as the heuristic
+        ceiling. The regex tier owns CRITICAL (deterministic format, 0.99 confidence), so heuristic and
+        ML paths cannot claim it.
     Parameters:
         inference: Category inference and classification confidence.
         ml_confidence: Optional model confidence for severity promotion.
     Output: Severity.INFO, MEDIUM, or HIGH, never CRITICAL; weak category confidence below 0.5 is
-    INFO before any ML promotion.
-    Map (category, classification confidence, optional ML confidence) → Severity.
-    Banding: INFO — no/weak signal (cat_conf < 0.5, or GENERIC_SECRET with cat_conf < 0.7) MEDIUM —
-    moderate signal (specific category cat_conf in [0.70, 0.85), or GENERIC_SECRET with cat_conf >=
-    0.70) HIGH — strong signal (specific category cat_conf >= 0.85, or ml_confidence >= 0.85 with
-    any non-generic category)
-    CRITICAL is intentionally NOT reachable here. Regex tier owns CRITICAL (deterministic format +
-    0.99 confidence). Heuristic+ML cannot make that claim; HIGH is the ceiling for entropy/ML paths.
+        INFO before any ML promotion.
     """
     from Harpocrates.core.classification import ViolationCategory
 
@@ -360,13 +347,13 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
         line: Source line to scan.
         lineno: One-based source line number.
         file: Optional source file path.
-        continued: For a later piece of a long line (FR-CORE-05), whether the line is a comment; the piece is then
-            scanned as it is, without stripping or comment detection, and offsets count from the piece's start.
-    Output: Ordered regex findings or fallback entropy/structured candidates; empty list for blank
-    or excluded lines. Findings retain raw tokens and snippets and may populate the file-extension
-    cache.
-    Returns findings ordered: CRITICAL regex → HIGH regex → entropy. Entropy phase is skipped if any
-    regex hit is found on the line (on a split line: in the piece).
+        continued: For a later piece of a long line (FR-CORE-05), whether the line is a comment; the
+            piece is then scanned as it is, without stripping or comment detection, and offsets count
+            from the piece's start.
+    Output: Ordered regex findings or fallback entropy/structured candidates; empty list for blank or
+        excluded lines. Order is CRITICAL regex, then HIGH regex, then entropy; the entropy phase is
+        skipped when the line (or split piece) has any regex hit. Findings keep raw tokens and snippets
+        and may populate the file-extension cache.
     """
     findings: List[Finding] = []
     if continued is None:
@@ -593,17 +580,14 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
 
 def _apply_block_comment_flag(line_findings: List[Finding], in_block: bool) -> List[Finding]:
     """
-    Description: Carry collector block-comment state into findings whose line lacks a comment
-    prefix.
+    Description: Carry collector block-comment state into findings whose line lacks a comment prefix.
+        _scan_line sets in_comment only when the line starts with a prefix, so interior lines of /* */
+        blocks need this.
     Parameters:
         line_findings: Findings collected from the current line.
         in_block: Whether the line is inside an already open block comment.
-    Output: Original list when no update is needed, otherwise a list replacing only findings with
-    in_comment=None; original finding objects are not mutated.
-    Set in_comment=True on findings from inside an open /* */ block.
-    _scan_line only sets in_comment when the line STARTS with a comment prefix. Interior lines of /*
-    */ blocks don't start with a prefix, so this patch propagates the open-block state tracked by
-    the collector.
+    Output: Original list when no update is needed; otherwise a list replacing only findings with
+        in_comment=None, with in_comment set to True. Original finding objects are not mutated.
     """
     if not in_block or not line_findings:
         return line_findings
@@ -621,8 +605,7 @@ def _collect_text_findings(text: str) -> List[Finding]:
     Parameters:
         text: Source text to scan.
     Output: List of findings including evidence=ML; may update the file-extension cache through
-    scanning.
-    Raw scan of text — returns all findings including evidence=ML.
+        scanning.
     """
     findings: List[Finding] = []
     in_block_comment = False
@@ -644,10 +627,11 @@ def _collect_file_findings(path_obj: Path, memory_cap: Optional[int] = None) -> 
     Description: Scan a whole file line by line, in bounded pieces, keeping every raw candidate (FR-CORE-05).
     Parameters:
         path_obj: Source file path.
-        memory_cap: The most bytes the scan may hold (default MEMORY_CAP); it bounds the piece size, never how much
-            of the file is scanned.
-    Output: Findings including evidence=ML, with line numbers and token offsets of the file. A finding in the overlap
-    of two pieces of a long line is kept once. Skips binary content, ignores decoding errors, propagates OSError.
+        memory_cap: The most bytes the scan may hold (default MEMORY_CAP). It bounds the piece size,
+            never how much of the file is scanned.
+    Output: Findings including evidence=ML, with line numbers and token offsets of the file. A finding
+        in the overlap of two pieces of a long line is kept once. Skips binary content, ignores decoding
+        errors, propagates OSError.
     """
     file_name = str(path_obj)
     findings: List[Finding] = []
@@ -687,13 +671,10 @@ def detect_text(
     """
     Description: Detect secrets in a text blob (regex + entropy, no ML).
     Parameters:
-        text: Text content to scan
-        threshold: Entropy threshold (reserved for future use)
-    Output: List of regex and entropy findings, excluding unverified evidence=ML candidates;
-    threshold is currently unused.
-    List of findings
-    Example: Scanning an assignment containing a matching AWS access-key ID reports a finding whose
-    type is AWS_ACCESS_KEY_ID; no credential-shaped value is shown here.
+        text: Text content to scan.
+        threshold: Entropy threshold (reserved for future use).
+    Output: List of regex and entropy findings, excluding unverified evidence=ML candidates; threshold
+        is currently unused.
     """
     _ = threshold
     return [f for f in _collect_text_findings(text) if f.evidence != EvidenceType.ML]
@@ -707,14 +688,12 @@ def detect_file(
     """
     Description: Detect secrets in a whole file on disk (regex + entropy, no ML), in bounded pieces (FR-CORE-05).
     Parameters:
-        path: Path to the file to scan
-        threshold: Entropy threshold (reserved)
-        memory_cap: The most bytes the scan may hold (default MEMORY_CAP)
-    Output: List excluding unverified evidence=ML candidates, or empty for missing/binary files;
-    reads the file and propagates other OSError failures. The reserved threshold is unused.
-    Skips binary files, handles encoding errors gracefully, and returns an empty list for
-    nonexistent files.
-    List of findings
+        path: Path to the file to scan.
+        threshold: Entropy threshold (reserved).
+        memory_cap: The most bytes the scan may hold (default MEMORY_CAP).
+    Output: List excluding unverified evidence=ML candidates, or empty for missing or binary files;
+        decoding errors are ignored and other OSError failures propagate. The reserved threshold is
+        unused.
     """
     _ = threshold
     path_obj = Path(path)
@@ -733,15 +712,13 @@ _REASON_CONF_RE = re.compile(r"confidence=(\d+\.\d+)")
 
 def _inference_from_finding(finding: Finding) -> "CategoryInference":
     """
-    Description: Rebuild category inference from a finding to recompute severity after verification.
+    Description: Rebuild category inference from a finding so _apply_ml_verification can recompute
+        severity with ml_confidence. The original cat_conf is recovered from the reason string, so
+        strong signals such as PASSWORD 0.90 or JWT 0.85 reach HIGH without requiring ml_confidence >= 0.85.
     Parameters:
         finding: Finding whose metadata and token are used.
     Output: CategoryInference using parsed reason confidence or category-dependent defaults; invalid
-    categories fall back to generic.
-    Reconstruct a CategoryInference from an existing finding's category fields.
-    Used in _apply_ml_verification to recompute severity with ml_confidence. Recovers the original
-    cat_conf from the structured reason string so that strong-signal findings (PASSWORD 0.90, JWT
-    0.85) are promoted to HIGH by cat_conf alone without requiring ml_confidence >= 0.85.
+        categories fall back to generic.
     """
     from Harpocrates.core.classification import CategoryInference, ViolationCategory
 
@@ -779,8 +756,7 @@ def _apply_ml_verification(
         verifier: Verifier used to classify candidate batches.
         ml_threshold: Minimum combined confidence for retaining a secret finding.
     Output: Verified findings; calls the supplied verifier and propagates MLVerificationError for
-    verifier failures or misaligned results.
-    Filter entropy candidates through the ML verifier.
+        verifier failures or misaligned results.
     """
     lines = full_content.splitlines()
     verified: List[Finding] = []
@@ -802,14 +778,13 @@ def _apply_ml_verification(
 
 def _prepare_ml_context_from_lines(finding: Finding, lines: Sequence[str]) -> "CodeContext":
     """
-    Description: Build bounded ML context from shared lines to limit feature extraction cost under
-    NFR-01.
+    Description: Build bounded ML context from shared lines, split once per candidate batch, to limit
+        feature extraction cost under NFR-01.
     Parameters:
         finding: Finding whose metadata and token are used.
         lines: Previously split source lines.
     Output: CodeContext with cropped lines and available token-span metadata; lazily imports context
-    and token helpers.
-    Build verifier context from a file split once for a candidate batch.
+        and token helpers.
     """
     from Harpocrates.ml.context import extract_context_from_lines
     from Harpocrates.ml.tokens import TokenMatch
@@ -989,16 +964,15 @@ def _apply_ml_verification_with_contexts(
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
     """
-    Description: Filter benign path candidates and verify aligned batches before constructing
-    retained findings.
+    Description: Filter benign path candidates and verify pre-built contexts in bounded batches,
+        preserving alignment, before retained findings are constructed.
     Parameters:
         findings_with_context: Aligned finding/context pairs to verify.
         verifier: Verifier used to classify candidate batches.
         ml_threshold: Minimum combined confidence for retaining a secret finding.
     Output: New HYBRID findings meeting the secret and combined-confidence criteria, with calibrated
-    confidence when available (FR-CORE-03). Calls the verifier; raises MLVerificationError for
-    verification failures or result-count mismatches.
-    Verify pre-built contexts in bounded batches and preserve alignment.
+        confidence when available (FR-CORE-03). Calls the verifier; raises MLVerificationError for
+        verification failures or result-count mismatches.
     """
     # Filesystem paths are dropped before the model (detectors/path_tokens.py has the rule and
     # its recall trade-off). Applied here, after candidate generation, so the Python and Rust
@@ -1066,16 +1040,13 @@ def detect_text_with_ml(
     """
     Description: Detect secrets in text with ML verification for entropy candidates.
     Parameters:
-        text: Text content to scan
-        verifier: ML verifier instance
-        threshold: Entropy threshold (reserved)
-        ml_threshold: Minimum ML confidence to keep an entropy finding
-    Output: Regex findings followed by verified non-regex findings; calls the supplied verifier only
-    for non-regex candidates and propagates MLVerificationError. The historical XGBoost wording
-    below refers to the model role; this function accepts any Verifier implementation.
-    Regex hits (CRITICAL/HIGH) are returned immediately — no ML call. Entropy candidates are
-    forwarded to XGBoost for false-positive filtering.
-    List of findings
+        text: Text content to scan.
+        verifier: ML verifier instance.
+        threshold: Entropy threshold (reserved).
+        ml_threshold: Minimum ML confidence to keep an entropy finding.
+    Output: Regex findings (CRITICAL and HIGH) returned immediately with no ML call, followed by
+        verified non-regex findings. The verifier is called only for non-regex (entropy) candidates, to
+        filter false positives. MLVerificationError propagates. Any Verifier implementation is accepted.
     """
     _ = threshold
     findings = _collect_text_findings(text)
@@ -1106,22 +1077,19 @@ def detect_file_with_ml(
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
     """
-    Description: Detect secrets in a whole file with ML verification for entropy candidates, in bounded pieces
-        (FR-CORE-05).
+    Description: Detect secrets in a whole file with ML verification for entropy candidates, in bounded
+        pieces (FR-CORE-05).
     Parameters:
-        path: Path to the file
-        verifier: ML verifier instance
-        threshold: Entropy threshold (reserved)
-        memory_cap: The most bytes the scan may hold (default MEMORY_CAP)
-        ml_threshold: Minimum ML confidence to keep an entropy finding
-    Output: Regex findings followed by verified non-regex findings; reads the file and may call the
-    verifier. Missing/binary files return no findings; initial read errors propagate. Context reread
-    OSError returns non-ML raw findings. Verification failures raise MLVerificationError. The
-    historical XGBoost wording below refers to the model role; any Verifier implementation is
-    accepted.
-    Regex hits (CRITICAL/HIGH) are returned immediately — no ML call. Entropy candidates are
-    forwarded to XGBoost for false-positive filtering.
-    List of findings
+        path: Path to the file.
+        verifier: ML verifier instance.
+        threshold: Entropy threshold (reserved).
+        memory_cap: The most bytes the scan may hold (default MEMORY_CAP).
+        ml_threshold: Minimum ML confidence to keep an entropy finding.
+    Output: Regex findings (CRITICAL and HIGH) returned immediately with no ML call, followed by
+        verified non-regex findings. The verifier is called only for non-regex (entropy) candidates.
+        Missing or binary files return no findings, and initial read errors propagate. If rereading the
+        file for context raises OSError, the non-ML raw findings are returned. Verification failures
+        raise MLVerificationError. Any Verifier implementation is accepted.
     """
     _ = threshold
     path_obj = Path(path)

@@ -48,9 +48,6 @@ def allow_file() -> Path:
     Parameters: None
     Output: Allowlist path, possibly nonexistent; may run the one-time ~/.harpocrates to ~/.harpo
         copy through paths.state_dir.
-    Notes: The allowlist file: ALLOW_FILE if a test set it, else allow in the state directory. The
-        path (it may not exist). May run the one-time ~/.harpocrates to ~/.harpo copy
-        (paths.state_dir).
     """
     return ALLOW_FILE if ALLOW_FILE is not None else state_dir() / "allow"
 
@@ -61,8 +58,6 @@ def log_file() -> Path:
     Parameters: None
     Output: Log path, possibly nonexistent; may run the one-time ~/.harpocrates to ~/.harpo copy
         through paths.state_dir.
-    Notes: The allow log: LOG_FILE if a test set it, else allow.log in the state directory. The path
-        (it may not exist). May run the one-time ~/.harpocrates to ~/.harpo copy (paths.state_dir).
     """
     return LOG_FILE if LOG_FILE is not None else state_dir() / "allow.log"
 
@@ -129,8 +124,6 @@ class NeedsConfirmationError(ValueError):
     Parameters:
         *args: Exception arguments forwarded to ValueError.
     Output: ValueError instances identifying rules that need explicit confirmation.
-    Notes: A name broad enough to cover most of a project (or machine); add_name needs
-        confirmed=True.
     """
 
 
@@ -168,9 +161,6 @@ def _write(lines: list[str]) -> None:
         lines: Complete list of lines to write with final newlines.
     Output: None; creates the parent directory, writes a 0o600 temporary file, and replaces the
         allowlist. Cleans up on failure and re-raises errors.
-    Notes: Atomic rewrite: temp file in the same folder (mkstemp gives 0o600), then os.replace. A
-        reader never sees a half-written list, and a file hand-edited without a final newline can't
-        glue the next entry onto its line.
     """
     _require_usable()
     target = allow_file()
@@ -190,7 +180,6 @@ def entries() -> list[Path]:
     Description: Extract path entries separately from name rules and comments.
     Parameters: None
     Output: List of Path entries; allowlist read and decoding errors propagate.
-    Notes: Path entries only; name rules are in names().
     """
     stripped = (line.strip() for line in _lines())
     return [Path(line) for line in stripped if line and not line.startswith(("#", _NAME_PREFIX))]
@@ -202,9 +191,7 @@ def _fold(text: str) -> str:
         equivalences.
     Parameters:
         text: Text to normalize using NFKC and casefold.
-    Output: Folded text without filesystem side effects.
-    Notes: NFKC + casefold: `.ſsh`, `．ssh` and `.SSH` all read as `.ssh`, as the file system may
-        treat them.
+    Output: Folded text, so lookalike characters (for example a long s) compare equal to ASCII.
     """
     return unicodedata.normalize("NFKC", text).casefold()
 
@@ -212,19 +199,14 @@ def _fold(text: str) -> str:
 @functools.lru_cache(maxsize=8)
 def _home_facts(home: str, stamp: int) -> tuple[frozenset[str], frozenset[str], frozenset[tuple[int, int]]]:
     """
-    Description: Collect and cache home directory facts used to keep name rules away from private
-        locations.
+    Description: Collect and cache home directory facts that keep name rules away from private
+        locations, keyed on the home modification time so a search lists home once.
     Parameters:
         home: Home directory path used as the cache key.
         stamp: Home modification time used to invalidate the cache.
     Output: Tuple of folded home components, folded dot-directory names, and protected (device,
-        inode) identities; ignores scan and stat OSError failures, but path resolution errors may
-        propagate.
-    Notes: (folded components of the home path, folded names of the dot-directories directly in
-        home, identities (device, inode) of the directories no name rule may cover: those
-        dot-directories, ~/Library, and SENSITIVE_HOME_DIRS). Cached per home folder and its
-        modification time, so a search over many files lists home once; a folder added to home
-        changes the stamp.
+        inode) identities of the dot-directories, ~/Library and SENSITIVE_HOME_DIRS. Ignores scan
+        and stat OSError failures, but path resolution errors may propagate.
     """
     base = Path(home)
     try:
@@ -264,10 +246,8 @@ def _refusal(name: str) -> Optional[str]:
     Parameters:
         name: Exact file or folder name proposed for a rule.
     Output: Refusal reason, or None for an acceptable name; consults home protection facts and may
-        propagate path resolution errors.
-    Notes: Why a name can never be a rule (None if it can). Secret-store and home checks compare
-        _fold-ed text, since the default macOS file system folds case and Unicode forms: `.ENV` is
-        the same file as `.env`.
+        propagate path resolution errors. Checks compare folded text, since macOS folds case, so
+        `.ENV` is treated as `.env`.
     """
     if not name or name != name.strip():
         return "a name can't be empty or start or end with a space"
@@ -299,8 +279,6 @@ def names() -> list[str]:
         open broad paths.
     Parameters: None
     Output: List of accepted names; read, decoding, and home resolution errors may propagate.
-    Notes: Name rules in effect: `name:` lines that add_name would accept (a hand-edited `name:/`,
-        `name:.env` or the like matches nothing, so a typo can't open the whole disk).
     """
     found = (line.strip()[len(_NAME_PREFIX):] for line in _lines() if line.strip().startswith(_NAME_PREFIX))
     return [name for name in found if _refusal(name) is None]
@@ -312,7 +290,6 @@ def listing() -> list[tuple[str, str]]:
     Parameters: None
     Output: List of (kind, value) tuples with paths first, then names; underlying rule-reading
         errors propagate.
-    Notes: (kind, value) for display: path entries first, then names.
     """
     return [("path", str(p)) for p in entries()] + [("name", n) for n in names()]
 
@@ -324,23 +301,18 @@ def printable(text: str) -> str:
         text: File name or other text to make safe for display.
     Output: Text with nonprintable characters, including newlines and ANSI escapes, replaced by
         question marks.
-    Notes: Control characters (newlines, ANSI escapes) in a file name shown as '?', so a name can't
-        fake lines in a prompt or the log.
     """
     return "".join(c if c.isprintable() else "?" for c in text)
 
 
 def _in_protected(real: Path) -> bool:
     """
-    Description: Check a path and its ancestors by filesystem identity to enforce private-directory
-        exclusions.
+    Description: Check a path and its ancestors by (device, inode) identity, so any spelling of a
+        private folder (such as ~/.AWS on a case-insensitive file system) is excluded.
     Parameters:
         real: Resolved path to check against protected home directories.
     Output: True for a protected directory or descendant, otherwise False; ignores stat OSError
         failures and may propagate home resolution errors.
-    Notes: Whether real is, or sits under, a folder no name rule may open (_home_facts), decided by
-        identity: each ancestor is stat-ed and compared by (device, inode), so `~/.AWS` on a
-        case-insensitive file system is the credential folder whatever the spelling.
     """
     ids = _facts()[2]
     for ancestor in (real, *real.parents):
@@ -395,8 +367,6 @@ def add_name(name: str, confirmed: bool = False) -> str:
     Output: Accepted name; writes a missing rule. Raises ValueError for forbidden names,
         NeedsConfirmationError (a ValueError) for unconfirmed broad names, and underlying filesystem
         or decoding errors.
-    Notes: Allow a folder or file name in every project. ValueError if it can never be a rule;
-        NeedsConfirmationError (a ValueError) if it is broad and not confirmed.
     """
     reason = _refusal(name)
     if reason:
@@ -436,8 +406,6 @@ def remove(path: Path) -> Path:
         path: Path entry to remove.
     Output: Resolved Path; rewrites matching entries while preserving comments and order. Raises
         ValueError if absent, and propagates filesystem, decoding, or resolution errors.
-    Notes: Drop a path entry (kept as typed or resolved: the entry may be for a folder that is
-        gone). Comments and order stay.
     """
     real = path.resolve()
     forms = {real, Path(os.path.abspath(path))}
@@ -452,8 +420,6 @@ def remove_name(name: str) -> str:
         name: Name text whose raw name: line should be removed.
     Output: Removed name; rewrites the list. Raises ValueError if absent and propagates read, write,
         or decoding errors.
-    Notes: Drop a name rule, matched on the raw line so a hand-edited line add_name would refuse can
-        still go.
     """
     _drop(lambda line: line == f"{_NAME_PREFIX}{name}")
     return name
@@ -483,7 +449,6 @@ def _segments(command: str) -> list[list[str]]:
         command: Shell command text to split.
     Output: Nonempty word lists separated by newlines, ;&|, or tokens containing an opening
         parenthesis; raises ValueError for unbalanced quotes so callers can fail closed.
-    Notes: Words of each simple command; newlines, ;&| and any token with `(` start a new one.
     """
     lex = shlex.shlex(re.sub(r"[\r\n]", ";", command), posix=True, punctuation_chars=True)
     lex.whitespace_split, lex.commenters = True, ""
@@ -499,14 +464,13 @@ def _segments(command: str) -> list[list[str]]:
 
 def _read_only(command: str) -> bool:
     """
-    Description: Recognize only provably read-only shell commands and fail closed on unsafe syntax
-        or unknown commands.
+    Description: Recognize only provably read-only shell commands and fail closed on unsafe syntax or
+        unknown commands.
     Parameters:
         command: Shell command text to validate.
-    Output: True if every segment begins with a permitted command and no unsafe text is present;
-        False for redirects, substitutions, heredocs, tokenization failures, or unknown commands.
-    Notes: Fail closed: redirects, substitutions, heredocs, untokenisable text or any command word
-        outside _READ_ONLY make it not read-only.
+    Output: True if every segment begins with a permitted command (one in _READ_ONLY) and no unsafe
+        text is present; False for redirects, substitutions, heredocs, tokenization failures, or
+        unknown commands.
     """
     if _UNSAFE_TEXT.search(command):
         return False
@@ -548,12 +512,9 @@ def _normalise(command: str) -> str:
     Description: Undo shell spelling tricks so state-directory guards see obfuscated mentions.
     Parameters:
         command: Shell command text to normalize.
-    Output: Text with ANSI-C escapes decoded and backslashes, line continuations, quotes, braces, and commas
-        removed.
-    Notes: Spelling tricks undone: $'...' escapes decoded, then backslash-newline pairs (a line continuation:
-        `harpo \\<newline>allow` is `harpo allow`), then backslashes, quotes, braces and
-        commas removed, so `.h\\arpocrates`, `.ha""rpocrates`, `{.,}harpocrates` and
-        `$'\\056harpocrates'` read as `.harpocrates`.
+    Output: Text with ANSI-C escapes decoded first, then backslash-newline line continuations joined,
+        then backslashes, quotes, braces, and commas removed, so `.h\arpocrates` and `{.,}harpocrates`
+        both read as `.harpocrates`.
     """
     decoded = _ANSI_C.sub(lambda m: _ESCAPE.sub(_decode_escape, m.group(1)), command)
     decoded = re.sub(r"\\\r?\n", "", decoded)  # a backslash-newline is gone before the shell reads a word
@@ -592,25 +553,20 @@ def _homes() -> list[Path]:
 
 def inside_state_dir(path: Optional[Path]) -> bool:
     """
-    Description: Check whether a path lies in either state directory using resolved, folded names
-        and file identities.
+    Description: Check whether a path lies in either state directory, using resolved, NFKC- and
+        case-folded names and file identities. Case folding matters because the default macOS file
+        system treats .HARPO as .harpo.
     Parameters:
         path: Absolute or relative path, possibly nonexistent; None means no path.
-    Output: True inside ~/.harpo or ~/.harpocrates, otherwise False; checks both names, in the password-database home
-        and in the $HOME-derived one, without migration. Raises OSError or RuntimeError on resolution failure, which
-        callers treat as refusal.
-    Notes: Whether path is ~/.harpo or ~/.harpocrates, or lies under either: links resolved, names
-        compared     NFKC- and case-folded (the default macOS file system treats .HARPO as .harpo),
-        and by file identity where     the folder exists. A command run there names its files
-        without the directory, so for a shell command the     working directory is what shows it;
-        for an Edit or Write tool call it is the target path. True when inside either folder, False
-        when not or when path is None. Both names are checked whichever     one is in use, and the
-        migration is not run. Both homes are checked (SEC-08): the real one (paths.home) and the one $HOME names.
-        Any path whose first component under either home folder starts with .harpo (folded) is inside too
-        (SEC-09), so the migration's temp folder (~/.harpo.migrating.x) and a backup (~/.harpocrates.bak) are
-        guarded; an unrelated ~/.harpoon is over-blocked on purpose. A project folder named .harpo elsewhere is not.
-        Raises OSError or RuntimeError when the path cannot be     resolved;
-        callers treat that as a refusal.
+    Output: True when the path is inside ~/.harpo or ~/.harpocrates, False otherwise and for None.
+        Both homes are checked (SEC-08): the real one (paths.home) and the one $HOME names, using both
+        names, without running the migration. Any path whose first component under either home starts
+        with .harpo (folded) also counts as inside (SEC-09), so the migration's temp folder
+        (~/.harpo.migrating.x) and a backup (~/.harpocrates.bak) are guarded; an unrelated ~/.harpoon
+        is over-blocked on purpose. A project folder named .harpo elsewhere is not inside. A shell
+        command names its files without the directory, so the working directory is what shows it; an
+        Edit or Write call is checked by its target path. Raises OSError or RuntimeError when the path
+        cannot be resolved; callers treat that as a refusal.
     """
     if path is None:
         return False
@@ -769,15 +725,12 @@ def touches(command: str, cwd: Optional[Path] = None) -> bool:
     Parameters:
         command: Shell command text to inspect.
         cwd: Working directory, or None when unavailable.
-    Output: True for allow commands or module-edit patterns, or non-read-only state-directory
-        mentions and working directories; otherwise False. Directory resolution errors propagate for
-        caller refusal.
-    Notes: Whether a shell command could change the allowlist or the session grants: it runs
-        `harpo allow` or `harpocrates allow` (also with a glob in the program word), or mentions the
-        ~/.harpo or ~/.harpocrates directory (also in a quoted, escaped, braced or globbed spelling),
-        or runs with either as its working directory (cwd), in anything but a provably read-only
-        command. A command that mentions either directory and also runs cd, pushd or popd is refused
-        even if the rest is read-only (SEC-09): it would leave the shell inside the folder.
+    Output: True for allow commands (`harpo allow` or `harpocrates allow`, also with a glob in the
+        program word) or module-edit patterns; for non-read-only mentions of ~/.harpo or ~/.harpocrates,
+        including quoted, escaped, braced, or globbed spellings; and for non-read-only runs with either
+        folder as cwd; otherwise False. A command that mentions either folder and also runs cd, pushd, or
+        popd is True even when the rest is read-only (SEC-09), since it would leave the shell inside the
+        folder. Directory resolution errors propagate for caller refusal.
     """
     norm = _normalise(command)
     if _ALLOW_CMD.search(command) or _ALLOW_CMD.search(norm) or _edits_module(command) or _edits_module(norm):
