@@ -6,7 +6,7 @@ import io
 
 import pytest
 
-from Harpocrates.gate.body_read import BodyRead, read_body
+from Harpocrates.gate.body import BodyRead, read_body
 
 CAP = 1024
 

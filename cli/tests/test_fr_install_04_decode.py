@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 import tomllib
 
-from Harpocrates.gate import body_encoding
-from Harpocrates.gate.body_encoding import Decoded, Zstd, decode_body, encode_body, load_zstd
+from Harpocrates.gate import body
+from Harpocrates.gate.body import Decoded, Zstd, decode_body, encode_body, load_zstd
 
 zstandard = pytest.importorskip("zstandard")
 CAP = 1 << 20
@@ -152,7 +152,7 @@ def test_fr_install_04_load_zstd_returns_none_when_no_module_imports(monkeypatch
     def refuse(name: str, package=None):
         raise ImportError(name)
 
-    monkeypatch.setattr(body_encoding.importlib, "import_module", refuse)
+    monkeypatch.setattr(body.importlib, "import_module", refuse)
     assert load_zstd() is None
 
 
@@ -177,7 +177,7 @@ def test_fr_install_04_load_zstd_uses_the_python_3_14_module_shape(monkeypatch: 
     fake = types.SimpleNamespace(ZstdDecompressor=FakeDecompressor,
                                  compress=lambda data: zstandard.ZstdCompressor().compress(data))
     real_import = importlib.import_module
-    monkeypatch.setattr(body_encoding.importlib, "import_module",
+    monkeypatch.setattr(body.importlib, "import_module",
                         lambda name, package=None: fake if name == "compression.zstd" else real_import(name, package))
     codec = load_zstd()
     assert codec is not None

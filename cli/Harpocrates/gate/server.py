@@ -12,8 +12,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from Harpocrates.audit import FindingsLog, ProofChain, placeholders
-from Harpocrates.gate.body_encoding import Zstd, decode_body, encode_body, load_zstd
-from Harpocrates.gate.body_read import read_body
+from Harpocrates.gate.body import Zstd, decode_body, encode_body, load_zstd, read_body
 from Harpocrates.gate.config import BIND_HOST, CHATGPT_PATH_PREFIX, GateConfig
 from Harpocrates.gate.errors import UPSTREAM_FAILED, error_response
 from Harpocrates.gate.headers import upstream_request_headers
