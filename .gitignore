@@ -183,8 +183,9 @@ cli/Harpocrates/training/train_model.py
 cli/tests/test_data_generator.py
 cli/tests/test_ml_shortcuts.py
 
-# Local plan for Harpo milestones, never committed
+# Local plan and session notes, never committed
 docs/DO_NOT_TRACK.md
+docs/cloud-session-delegation.md
 
 # Mock-provider recordings hold request bodies from agent sessions; never committed (FR-PROOF-04). Reports in bench/results/proof/ (counts only) may be.
 bench/results/mock/
