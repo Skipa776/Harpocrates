@@ -9,10 +9,10 @@ Facts about Claude Code and Codex were checked against their documentation on Se
 | Layer | Status | Covers |
 | --- | --- | --- |
 | Read tool (`safe_read`, `safe_grep`) | Shipped (M1) | Files the agent reads through it, once [setup](setup.md) denies the built-in reads. A content-aware hook also refuses built-in reads and shell reads of any file holding a secret, on Claude Code, and on Codex once you trust the hook in `/hooks`. |
-| Egress gate | M2 | Every request to the provider, including shell output and tool results |
+| Egress gate | Built on this branch (M2), not in a release yet. `harpo guard up` starts it and routes the agents to it | Every request sent to the API base URL the harness is pointed at, including shell output and tool results |
 | Commit scanner | Shipped | Secrets on their way into git |
 
-Until the gate ships, a secret the agent reaches by any route other than `safe_read` goes to the model. That includes a script that opens files itself, a path built from shell variables, and, on Codex before you trust the hook, any ordinarily named file that holds a token. That includes `env`, test output, a stack trace, `git log -p`, or a script that prints a file.
+Without the gate (v1.3.0, or `harpo guard down`), a secret the agent reaches by any route other than `safe_read` goes to the model. That includes a script that opens files itself, a path built from shell variables, and, on Codex before you trust the hook, any ordinarily named file that holds a token. That includes `env`, test output, a stack trace, `git log -p`, or a script that prints a file.
 
 ## Residual risk 1: other exfiltration channels
 
@@ -43,7 +43,7 @@ Transcripts can also leave the machine on purpose:
 - So does answering "Yes" to the optional request to share a transcript after a session quality survey.
 - Anthropic's documentation says known key and token patterns are redacted before upload, and file contents are uploaded as-is.
 
-**What Guard does.** Output from `safe_read` and `safe_grep` is already redacted when the harness records it, so files read that way are stored as placeholders. Guard's own logs hold keyed hashes, never values (SEC-01, M2).
+**What Guard does.** Output from `safe_read` and `safe_grep` is already redacted when the harness records it, so files read that way are stored as placeholders. Guard's own logs hold keyed hashes and counts, never values (SEC-01, FR-LOG-01, FR-PROOF-01); the end-to-end suite reads every file under `~/.harpo` and TMPDIR after each run and finds no canary value.
 
 **What helps:**
 - **Shorten retention.** In Claude Code, set `cleanupPeriodDays`. In Codex, set `history.persistence = "none"`.
@@ -72,7 +72,7 @@ None of these channels is meant to carry prompt content, but Guard can't verify 
 **What helps:**
 - **Claude Code:** `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` turns off metrics, error reports, feature flags, and surveys in one switch. The WebFetch check has its own setting, `skipWebFetchPreflight`.
 - **Codex:** `analytics.enabled = false`, and leave `otel.exporter` unset.
-- **Verify the routing.** The planned doctor command (FR-INSTALL-02, M2) will send a canary through each harness and warn if traffic bypassed the gate.
+- **Verify the routing.** `harpo doctor` (FR-INSTALL-02) checks on this machine that each harness is routed to a running gate with the current token and that no setting bypasses it. It sends nothing to a provider, so it cannot see a connection the harness makes on its own (the channels above).
 
 ## Residual risk 4: approved edits and the allowlist
 
@@ -110,7 +110,7 @@ The Claude Code prompt plugin (`/harpo allow`) has the same exposure in a second
 - **Third-party MCP write tools are not matched by the Claude Code hook.** The hook matches the built-in tools. A file-writing tool from an MCP server the agent can call is not inspected, and neither Claude Code's `Edit(...)` deny rules nor Codex's profile apply to MCP servers.
 - **A script that builds the path at run time.** As for the allowlist and grants above: the guard reads the command text, so a path assembled while the command runs gets past it.
 
-**What helps:** re-run `harpo install` after every upgrade; keep Codex sandboxed; give the agent only MCP servers you trust to write files; keep the allowlist short. The egress gate (M2) sees what reaches the provider whichever channel carried it.
+**What helps:** re-run `harpo install` after every upgrade; keep Codex sandboxed; give the agent only MCP servers you trust to write files; keep the allowlist short. The egress gate sees what reaches the provider whichever channel carried it.
 
 ## Also out of scope
 

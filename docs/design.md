@@ -429,7 +429,7 @@ The trust boundary is the network edge between your machine and the cloud LLM pr
 
 Guard is defense in depth: two layers catch secrets on the way out, and the existing commit gate catches them on the way into git. All layers share one detection core.
 
-The diagram shows the design. As built on Oct 21, 2026, two things differ: the read tool, the read hook and the gate run the core's Python implementation (regex, entropy, and the ONNX model through ONNX Runtime), while the Rust scanner backs `harpo scan` when its binary is present; and the audit log is not built (the gate writes a request log with fixed fields and no values). `harpo install` sets up the read tool, deny rules and hooks; `harpo guard up` starts the gate and routes the agents to it (G7).
+The diagram shows the design. As built on Oct 21, 2026, two things differ: the read tool, the read hook and the gate run the core's Python implementation (regex, entropy, and the ONNX model through ONNX Runtime), while the Rust scanner backs `harpo scan` when its binary is present; and the audit log is two files, `~/.harpo/findings.jsonl` for findings from every layer and the hash-chained `~/.harpo/proof.jsonl` of what the gate forwarded (G6). `harpo install` sets up the read tool, deny rules and hooks; `harpo guard up` starts the gate and routes the agents to it (G7).
 
 ```mermaid
 flowchart LR
@@ -441,7 +441,7 @@ flowchart LR
   R -.uses.-> C[harpo-core<br/>regex, entropy, ONNX model]
   G -.uses.-> C
   K[harpo-commit<br/>harpo scan, pre-commit] -.uses.-> C
-  G --> L[Audit log, planned<br/>JSONL, hashes only]
+  G --> L[Findings and proof logs<br/>JSONL, hashes and counts only]
   R --> L
 ```
 
