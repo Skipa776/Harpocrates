@@ -1,6 +1,6 @@
 # Gate transport notes (FR-GATE-09)
 
-Oct 19, 2026 · status: **decisions approved; G2 capture results added ("To verify in G2" at the end). No gate code exists yet.** M2, step G1. For Claude Code and Codex CLI: which endpoints, which transport, which headers, what bypasses the base URL, and what the gate must do on the response path. Request bodies are in [gate-parser-spec.md](gate-parser-spec.md).
+Oct 19, 2026 · status: **decisions approved; G2 capture results added ("To verify in G2" at the end). No gate code exists yet.** M2, step G1. For Claude Code and Codex CLI: which endpoints, which transport, which headers, what bypasses the base URL, and what the gate must do on the response path. Request bodies are in [FR-GATE-02 in docs/design.md](design.md).
 
 Every external claim cites a source from the table at the end, each checked 2026-10-19. A claim is **VERIFIED** (source named, or a G2 probe run) or **TO VERIFY IN G2** (the mock-server capture that will confirm it). The first version was written without running an agent; G2 then ran Claude Code 2.1.303 and Codex CLI 0.163.0 against the mock with fake credentials only, in probe run `20261019T175710Z-g2` (`bench/results/proof/g2-probes-20261019T175710Z-g2.json`). Where a row below says "VERIFIED in G2", that run is the source. Open items are marked STILL OPEN with the reason.
 
@@ -175,7 +175,7 @@ Oct 19, 2026. The hook (`hooks.py`) runs the check in `cli/Harpocrates/gatecheck
 - `ANTHROPIC_AWS_BASE_URL` (C6) is an endpoint override beside `ANTHROPIC_BASE_URL`; it only matters with `CLAUDE_CODE_USE_ANTHROPIC_AWS` on, which is now a bypass by itself.
 - Per-run flags and the process's own `HTTPS_PROXY` are invisible to the hook.
 
-## Open questions for Josh (decided Oct 19, 2026: see Decisions in `docs/gate-parser-spec.md`)
+## Open questions for Josh (decided Oct 19, 2026: see FR-GATE-02 and SEC-03 in `docs/design.md`)
 
 1. **WebSocket scope.** Proposed: not in v1; route A avoids it; route B refuses the upgrade and relies on Codex's HTTP fallback. If ChatGPT-login users need route B, WebSocket moves into M2. Accept?
 2. **Gate token.** SEC-03 says per session. Claude Code's `env` block and Codex's `http_headers` are static files, and IDE-launched agents do not see shell variables (FR-INSTALL-06). Options: rewrite both configs on every `harpo guard up` (proposed), or a stable per-install token stored `0600`. The token stops other users and browser pages, not other processes of the same user, who can read the same files.

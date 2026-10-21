@@ -1,4 +1,4 @@
-"""Generated canaries for the gate tests: fake values in real provider formats, never a real credential (AGENTS.md rule 3)."""
+"""Generated canaries for the gate tests: fake values in real provider formats, never a real credential."""
 from __future__ import annotations
 
 import random

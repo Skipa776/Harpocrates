@@ -1,4 +1,4 @@
-"""FR-GATE-06 and NFR-01, G5 spec part 3 (docs/gate-media-upstream-spec.md): the gate keeps idle upstream connections and
+"""FR-GATE-06 and NFR-01 (docs/design.md): the gate keeps idle upstream connections and
 reuses them, but only after a reply was read to its framed end on HTTP/1.1 without Connection: close or an error; a
 reused connection that fails before any reply byte is retried once on a new connection; a new connection that fails is
 not retried.

@@ -1,6 +1,6 @@
 """FR-PROOF-04 and FR-GATE-02: the synthetic request corpus (bench/gate_corpus.py).
 
-One request per block, item and tool type in docs/gate-parser-spec.md, in both provider formats, each carrying a
+One request per block, item and tool type covered by FR-GATE-02 (docs/design.md), in both provider formats, each carrying a
 generated canary. The corpus is test data for the future test_fr_gate_02_* parser tests; the canary harness sends it
 to the mock provider in direct mode. Every canary is generated; nothing here is a real credential.
 """
@@ -8,28 +8,95 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 import pytest
 
 from bench import canary_match as match
 from bench import gate_corpus as corpus
 
-SPEC = Path(__file__).resolve().parents[2] / "docs" / "gate-parser-spec.md"
 CASES = corpus.build_corpus(0)
 EXPECTS = {"redact", "block", "pass"}
 
-
-def spec_test_names() -> set[str]:
-    """Every per-block, per-item and per-tool test name in the parser spec (the cross-cutting ones have other prefixes)."""
-    return set(re.findall(r"`(test_fr_gate_02_(?:anthropic|responses)_\w+)`", SPEC.read_text()))
+# Frozen FR-GATE-02 coverage contract (docs/design.md), independent of the corpus builders.
+PARSER_CASE_NAMES = frozenset({
+    "test_fr_gate_02_anthropic_code_execution_tool_result",
+    "test_fr_gate_02_anthropic_compaction",
+    "test_fr_gate_02_anthropic_container_upload",
+    "test_fr_gate_02_anthropic_document_content",
+    "test_fr_gate_02_anthropic_document_pdf",
+    "test_fr_gate_02_anthropic_document_text",
+    "test_fr_gate_02_anthropic_document_url",
+    "test_fr_gate_02_anthropic_image",
+    "test_fr_gate_02_anthropic_mcp_tool_listing",
+    "test_fr_gate_02_anthropic_mcp_tool_result",
+    "test_fr_gate_02_anthropic_mcp_tool_use",
+    "test_fr_gate_02_anthropic_redacted_thinking",
+    "test_fr_gate_02_anthropic_search_result",
+    "test_fr_gate_02_anthropic_server_tool_use",
+    "test_fr_gate_02_anthropic_system_role_text",
+    "test_fr_gate_02_anthropic_text",
+    "test_fr_gate_02_anthropic_text_editor_tool_result",
+    "test_fr_gate_02_anthropic_thinking",
+    "test_fr_gate_02_anthropic_tool_addition",
+    "test_fr_gate_02_anthropic_tool_removal",
+    "test_fr_gate_02_anthropic_tool_result_blocks",
+    "test_fr_gate_02_anthropic_tool_result_string",
+    "test_fr_gate_02_anthropic_tool_search_tool_result",
+    "test_fr_gate_02_anthropic_tool_use",
+    "test_fr_gate_02_anthropic_tools_custom",
+    "test_fr_gate_02_anthropic_tools_mcp_toolset",
+    "test_fr_gate_02_anthropic_tools_server",
+    "test_fr_gate_02_anthropic_tools_unknown_type_blocked",
+    "test_fr_gate_02_anthropic_unknown_block_blocked",
+    "test_fr_gate_02_anthropic_web_fetch_tool_result",
+    "test_fr_gate_02_anthropic_web_search_tool_result",
+    "test_fr_gate_02_responses_additional_tools",
+    "test_fr_gate_02_responses_apply_patch_call",
+    "test_fr_gate_02_responses_apply_patch_call_output",
+    "test_fr_gate_02_responses_code_interpreter_call",
+    "test_fr_gate_02_responses_compaction",
+    "test_fr_gate_02_responses_computer_call",
+    "test_fr_gate_02_responses_computer_call_output",
+    "test_fr_gate_02_responses_conversation_blocked",
+    "test_fr_gate_02_responses_custom_tool_call",
+    "test_fr_gate_02_responses_custom_tool_call_output",
+    "test_fr_gate_02_responses_file_search_call",
+    "test_fr_gate_02_responses_function_call",
+    "test_fr_gate_02_responses_function_call_output",
+    "test_fr_gate_02_responses_image_generation_call",
+    "test_fr_gate_02_responses_input_file",
+    "test_fr_gate_02_responses_input_image",
+    "test_fr_gate_02_responses_input_text",
+    "test_fr_gate_02_responses_item_reference",
+    "test_fr_gate_02_responses_local_shell_call",
+    "test_fr_gate_02_responses_local_shell_call_output",
+    "test_fr_gate_02_responses_mcp_approval_request",
+    "test_fr_gate_02_responses_mcp_approval_response",
+    "test_fr_gate_02_responses_mcp_call",
+    "test_fr_gate_02_responses_mcp_list_tools",
+    "test_fr_gate_02_responses_message_string",
+    "test_fr_gate_02_responses_output_text",
+    "test_fr_gate_02_responses_previous_response_id_seen_passes",
+    "test_fr_gate_02_responses_previous_response_id_unseen_blocked",
+    "test_fr_gate_02_responses_reasoning",
+    "test_fr_gate_02_responses_refusal",
+    "test_fr_gate_02_responses_shell_call",
+    "test_fr_gate_02_responses_shell_call_output",
+    "test_fr_gate_02_responses_tool_search",
+    "test_fr_gate_02_responses_tools_builtin",
+    "test_fr_gate_02_responses_tools_custom",
+    "test_fr_gate_02_responses_tools_function",
+    "test_fr_gate_02_responses_tools_mcp",
+    "test_fr_gate_02_responses_tools_namespace",
+    "test_fr_gate_02_responses_tools_unknown_type_blocked",
+    "test_fr_gate_02_responses_unknown_item_blocked",
+    "test_fr_gate_02_responses_web_search_call",
+})
 
 
 def test_fr_proof_04_corpus_covers_every_parser_spec_row() -> None:
-    wanted = spec_test_names()
-    assert len(wanted) >= 70, "the spec table could not be read"
     have = {c.test_name for c in CASES if c.test_name}
-    assert wanted <= have, sorted(wanted - have)
+    assert PARSER_CASE_NAMES <= have, sorted(PARSER_CASE_NAMES - have)
 
 
 def test_fr_proof_04_corpus_case_ids_and_test_names_are_unique() -> None:

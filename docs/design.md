@@ -151,7 +151,7 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | FR-GATE-08 | User-approved allowlist by path or secret hash, every use logged | Allowlisted secret passes; log entry exists | M3 |
 | FR-GATE-09 | Confirm the transport each agent uses (HTTP, server-sent events, WebSocket) and support it | Transport notes in `docs/`; both agents work | M2 |
 | FR-GATE-10 | Content the gate can't rewrite. Signed thinking and redacted-thinking blocks are dropped from every request, which the API allows, so nothing unredacted in them is forwarded and the session survives. Other unrewritable content (encrypted reasoning, provider-signed readable text) that holds a detected secret blocks the request with a clear message. Trade-off (Josh, Oct 19, 2026): dropping thinking costs the model its earlier reasoning in later turns; blocking would end the session | A secret planted in a signed thinking block never reaches the mock provider and the request still succeeds; a secret in encrypted reasoning triggers a block with a clear message | M2 |
-| FR-GATE-11 | Secrets base64-encoded inside text fields. Long base64 runs (24 or more characters, standard or URL-safe, wrapped or split by whitespace or escapes) in every rewrite and scan-only text field are decoded at every alignment; the text in each decoding (UTF-8 or UTF-16) is scanned, and a finding blocks the request with a clear message; more than 2 MiB of runs in one request blocks too. Trade-off (Josh, Oct 20, 2026): a benign encoded text that trips the detector blocks instead of being redacted; secrets inside encoded binary, compressed or double-encoded data still pass (`docs/gate-base64-text-spec.md`) | A secret in an MCP resource blob that Codex sends as JSON text, and in a base64 run in any text field, triggers `HARPO-BLOCK-ENCODED-SECRET`; binary, random and clean encoded runs pass unchanged | M2 |
+| FR-GATE-11 | Secrets base64-encoded inside text fields. Long base64 runs (24 or more characters, standard or URL-safe, wrapped or split by whitespace or escapes) in every rewrite and scan-only text field are decoded at every alignment; the text in each decoding (UTF-8 or UTF-16) is scanned, and a finding blocks the request with a clear message; more than 2 MiB of runs in one request blocks too. Trade-off (Josh, Oct 20, 2026): a benign encoded text that trips the detector blocks instead of being redacted; secrets inside encoded binary, compressed or double-encoded data still pass | A secret in an MCP resource blob that Codex sends as JSON text, and in a base64 run in any text field, triggers `HARPO-BLOCK-ENCODED-SECRET`; binary, random and clean encoded runs pass unchanged | M2 |
 
 **Commit gate, logging, and setup**
 
@@ -199,9 +199,7 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 
 ## Roadmap after R0: proof, serving, learning, lifecycle, service and detections
 
-Added Oct 18, 2026, from Josh's milestone plan. Targets marked **(proposed)** are starting points for Josh to confirm or change. Once a target is confirmed, it may be loosened only with a written trade-off note, never silently. Rows marked **(Josh writes)** are the five parts Josh implements by hand. For those, the assistant writes only the spec, interface signatures and test fixtures, and reviews Josh's code on request. **M8 is deferred** (Josh, Oct 18).
-
-Working rules for this section, on top of the six in `AGENTS.md`: one requirement ID at a time, with its acceptance test first and named after the ID; a spec of a page or less (inputs, outputs, failure behavior, test plan) approved before any delegated component is coded; one function per commit, each commit naming its ID.
+Added Oct 18, 2026, from Josh's milestone plan. Targets marked **(proposed)** are starting points for Josh to confirm or change. Once a target is confirmed, it may be loosened only with a written trade-off note, never silently. Rows marked **(Josh writes)** are the five parts Josh implements by hand. **M8 is deferred** (Josh, Oct 18).
 
 ### Baseline (v17, detector 1.2)
 
@@ -330,7 +328,7 @@ Deferred by Josh on Oct 18, 2026. Kept here so the IDs are reserved and the plan
 | FR-DET-03 | Sigma rules, each with an ADS document, for four Atomic Red Team T1552.001 tests on a Linux VM Josh owns, using auditd or Sysmon for Linux: Find AWS credentials, Extract passwords with grep, Search for Git Credential Files, Find .env Files Containing Application Credentials | Each rule fires on its recording | M8 |
 | FR-DET-04 | Two Sigma rules over the hook decision log as a custom log source: a denied file retried through a script, and file contents sent out with `curl` | Each fires on its recording | M8 |
 | FR-DET-05 | Rules run in CI against recorded attack logs and at least 8 hours of benign activity from the same VM **(proposed)** | Every rule fires on its attack and raises 0 alerts on benign logs | M8 |
-| FR-CLOUD-01 | Terraform for a VPC, 1 m7i.xlarge running Redpanda, 4 c7i.xlarge (3 workers and 1 load generator), an S3 bucket for findings, least-privilege IAM roles and a CloudTrail trail. Delegated one resource per commit | Josh reviews `terraform plan`; Harpo runs on it as a pre-commit hook | M8 |
+| FR-CLOUD-01 | Terraform for a VPC, 1 m7i.xlarge running Redpanda, 4 c7i.xlarge (3 workers and 1 load generator), an S3 bucket for findings, least-privilege IAM roles and a CloudTrail trail | Josh reviews `terraform plan`; Harpo runs on it as a pre-commit hook | M8 |
 | FR-CLOUD-02 | `terraform destroy` leaves no billable resources | A resource listing after destroy is empty | M8 |
 | FR-CLOUD-03 | A canary secret in Secrets Manager, Stratus Red Team's `aws.credential-access.secretsmanager-retrieve-secrets`, and a Sigma rule over CloudTrail that catches it | The rule fires on the Stratus run and not on a day of normal account activity | M8 |
 | FR-CLOUD-04 | A $25 billing alert exists before the first `apply` | A check script fails `apply` without it | M8 |
@@ -407,7 +405,6 @@ harpocrates/
   bench/           Detector, leakage, evasion, red-team, utility, latency suites
   bench/canaries/  Fake secrets only, generated by script
   docs/            design.md, threat-model.md, parser specs, data.md, bypasses.md
-  AGENTS.md        Working rules for contributors and agents (CLAUDE.md symlinks to it)
 ```
 
 ## Harness support and installer
@@ -627,7 +624,7 @@ v1 ships in about 8 weeks. Apply to internships from week 2 onward; don't wait f
 | M1: Read tool | Oct 6 to Oct 19 | `safe_read` and `safe_grep`; typed placeholders; Claude Code and Codex setup docs with deny rules; secret-type labels in core | Agent can read a repo with planted canaries and none appear in its context |
 | M2: Egress gate | Oct 20 to Nov 9 | Localhost proxy; full-request scanning; fail closed; audit log; mock server and canary harness; Claude Code and Codex install adapters with harpo doctor | 0 known-format canaries reach the mock server across all read paths |
 | M3: Evaluate and publish | Nov 10 to Nov 23 | Evasion and prompt-injection suites; utility, latency, and competitor comparison study; SARIF and GitHub Action; write-up and 2-minute demo video | All targets in the Evaluation plan measured and published, including failures |
-| R0: Cleanup, docs and rename | Oct 18 to Oct 19 (inserted before M2) | Cleanup review and untracks; docstrings enforced in CI; rename to Harpo (`harpo`, `harpo-mcp`, `~/.harpo`, pre-commit `harpo`, MCP server `harpo`); first two README demos; security fixes FR-CORE-07, SEC-01, SEC-07 to SEC-09 | Findings byte-identical to before the cleanup; full suite and coverage floor green; `docs/cleanup-report.md` complete |
+| R0: Cleanup, docs and rename | Oct 18 to Oct 19 (inserted before M2) | Cleanup review and untracks; docstrings enforced in CI; rename to Harpo (`harpo`, `harpo-mcp`, `~/.harpo`, pre-commit `harpo`, MCP server `harpo`); first two README demos; security fixes FR-CORE-07, SEC-01, SEC-07 to SEC-09 | Findings byte-identical to before the cleanup; full suite and coverage floor green |
 | M4: Serving and reliability | Dates set aside (Josh, Oct 18) | Stage profile; detector daemon and thin hook client; fallback that never allows; checkpointed history scans; atomic state files | NFR-03 to NFR-06 met and published |
 | M5: Learns false alarms, not secrets | Dates set aside | Out-of-band questions and `harpo review`; fingerprint allowlist; local context-only suppressor | FR-LEARN-06 and FR-LEARN-07 published; labeling study done |
 | M6: Model lifecycle | Dates set aside | Feedback export; one-command retrain; CI evaluation gate; shadow runs; versioned manifests and rollback | A deliberately worse model is rejected; feedback retrain target met |
@@ -640,7 +637,7 @@ v1 ships in about 8 weeks. Apply to internships from week 2 onward; don't wait f
 
 **Phase 2: harpocrates-lab repo with ThreatChain (Mar to May 2027)**
 
-Turn ThreatChain from an LLM wrapper into an investigation system over real telemetry. This combines the Mini-EDR and ThreatChain items from the ChatGPT roadmap into one repo: the separate harpocrates-lab repo, not the product.
+Turn ThreatChain from an LLM wrapper into an investigation system over real telemetry. This combines the Mini-EDR and ThreatChain items from the roadmap into one repo: the separate harpocrates-lab repo, not the product.
 
 - Lab: a Windows VM with Sysmon, a Linux VM with auditd, and Zeek. Store events in DuckDB or Elastic. No Kafka unless you hit a real throughput need.
 - Attacks: Atomic Red Team runs, labeled by ATT&CK technique, inside the lab only.

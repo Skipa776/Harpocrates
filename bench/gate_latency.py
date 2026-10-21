@@ -168,7 +168,7 @@ def measure(calls: int = 200, warmup: int = 20, body_bytes: int = 100 * 1024, tl
     client_ctx = None
     if tls:
         server_ctx, client_ctx = _throwaway_tls()
-        # ponytail: wraps the listening socket in place while serving; fine for this serial bench (each TLS handshake runs
+        # wraps the listening socket in place while serving; fine for this serial bench (each TLS handshake runs
         # in accept), a TLS-aware mock if a bench ever needs parallel clients.
         upstream.server.socket = server_ctx.wrap_socket(upstream.server.socket, server_side=True)
     base = f"{'https' if tls else 'http'}://127.0.0.1:{upstream.port}"

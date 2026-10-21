@@ -1,5 +1,5 @@
 """OpenAI Responses rows of the gate corpus (FR-PROOF-04, FR-GATE-02): one request per input item and tool type in
-docs/gate-parser-spec.md, "OpenAI Responses". Shapes are written from the spec tables and the official API docs.
+FR-GATE-02 (docs/design.md). Shapes follow the OpenAI Responses API documentation.
 """
 from __future__ import annotations
 

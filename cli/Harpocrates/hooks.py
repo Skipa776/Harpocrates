@@ -27,7 +27,7 @@ the user's explicit call. An edit that would leave a Harpo placeholder in the fi
 is denied in every mode, granted or not: it would swap a real secret for a fake value. Codex runs without --ask: its
 handling of "ask" isn't verified.
 
-ponytail: Bash coverage is best effort. It follows `sh -c` bodies, `$(...)`, backticks, `cd`, `git -C`,
+Bash coverage is best effort. It follows `sh -c` bodies, `$(...)`, backticks, `cd`, `git -C`,
 globs, `~` and `$VAR` paths, `git show rev:path`, and the environment. A script that opens files itself
 (`python x.py`, `node -e`, `python - <<EOF`), `find -exec`, `xargs` fed by a pipe, and `git diff` / `git log -p` output get
 through. The egress gate (M2) covers what reaches the provider whatever the tool.

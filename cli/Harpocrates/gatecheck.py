@@ -13,7 +13,7 @@ one more top-level entry, written by `harpo guard up` (G7) and read here:
 
   * absent entry, absent record, or "enabled": false  -> no gate installed; this module reports nothing.
   * "enabled": true needs "port" (an integer, 1 to 65535: where http://127.0.0.1:<port> listens) and "token_header"
-    (the HTTP header name that carries the gate token, see docs/gate-proxy-spec.md). Anything else about the entry is
+    (the HTTP header name that carries the gate token, see SEC-03, docs/design.md). Anything else about the entry is
     an error and the hook refuses (fail closed): without it Harpo cannot tell whether the gate is on. So is a record
     that exists but cannot be read (permissions, a folder, over 1 MiB), and a record that is not strict JSON when its
     bytes contain the quoted word "gate" (a gate entry may be there, damaged). A record that is not strict JSON and

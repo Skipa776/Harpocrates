@@ -4,7 +4,7 @@ import argparse
 import ast
 from pathlib import Path
 
-import tomllib  # ponytail: dev/CI script, needs Python 3.11+ (CI runs 3.11); the package itself still supports 3.10
+import tomllib  # dev/CI script, needs Python 3.11+ (CI runs 3.11); the package itself still supports 3.10
 
 HEADINGS = ("Description:", "Parameters:", "Output:")
 

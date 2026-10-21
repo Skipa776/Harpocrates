@@ -15,6 +15,7 @@ import ast
 import asyncio
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -57,9 +58,6 @@ ALLOWED_FILES: dict[str, str] = {
     "cli/Harpocrates/deprecated.py": "it is the deprecation notice for the old command names (FR-NAME-02)",
     "cli/Harpocrates/allowlist.py": "it recognises the old command names and both state folders in agent shell "
                                     "commands, which it must refuse (FR-NAME-02, FR-NAME-04)",
-    "docs/cleanup-report.md": "a record of the cleanup that came before the rename",
-    "docs/r0-specs.md": "the approved rename spec, which describes the rename itself",
-    "docs/DO_NOT_TRACK.md": "the rename brief, history",
     "docs/design.md": "the spec; its decision rows and history keep the old name",
 }
 # Sections that are the changelog or the migration notes, as (file, heading).
@@ -99,7 +97,12 @@ def _without_sections(rel: str, text: str) -> str:
 
 def _markdown_files() -> list[Path]:
     files = [ROOT / "README.md", ROOT / "plugins" / "harpocrates-prompt" / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
-    return [f for f in files if f.relative_to(ROOT).as_posix() not in ALLOWED_FILES]
+    # Tracked or new-but-not-ignored: git-ignored local notes are skipped, a doc not yet added is still checked.
+    listed = subprocess.check_output(["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=ROOT, text=True)
+    kept = set(listed.splitlines())
+    assert {"README.md", "docs/design.md"} <= kept, "git ls-files did not list the repo's docs"
+    return [f for f in files if f.relative_to(ROOT).as_posix() in kept
+            and f.relative_to(ROOT).as_posix() not in ALLOWED_FILES]
 
 
 def test_fr_name_01_no_user_facing_harpocrates_in_the_readme_and_docs() -> None:

@@ -1,4 +1,4 @@
-"""FR-GATE-06, G5 spec part 2 (docs/gate-media-upstream-spec.md): an OpenAI request that carries chatgpt-account-id goes
+"""FR-GATE-06 (docs/design.md): an OpenAI request that carries chatgpt-account-id goes
 to the ChatGPT upstream with /v1 replaced by /backend-api/codex; without the header it goes to the OpenAI upstream
 unchanged; an Anthropic route never looks at the header. Credentials pass byte-identical.
 

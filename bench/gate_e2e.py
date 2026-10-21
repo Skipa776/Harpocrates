@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end test of the egress gate with real agents (AGENTS.md rule 7; FR-GATE-01, FR-GATE-03, SEC-10, FR-GATE-04).
+"""End-to-end test of the egress gate with real agents (FR-GATE-01, FR-GATE-03, SEC-10, FR-GATE-04).
 
     python -m bench.gate_e2e --suite g3 [--out-dir bench/results]
     python -m bench.gate_e2e --suite g4 [--out-dir bench/results]

@@ -229,7 +229,7 @@ class Redactor:
                 text = _read_text(file)
             except (ValueError, OSError):
                 continue
-            # ponytail: raw prefilter skips files that can't match; the match that is reported still
+            # raw prefilter skips files that can't match; the match that is reported still
             # runs on redacted text. Cost: a search for "<<HARPO" itself finds nothing.
             if not rx.search(text):
                 continue

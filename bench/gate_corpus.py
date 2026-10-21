@@ -3,7 +3,7 @@
     from bench.gate_corpus import build_corpus
     cases = build_corpus(seed=0)
 
-One request per block, item and tool type in docs/gate-parser-spec.md, in both provider formats, each carrying one
+One request per block, item and tool type covered by FR-GATE-02 (docs/design.md), in both provider formats, each carrying one
 generated canary in the field the spec says the gate scans. The canary harness sends the cases to the mock provider
 (direct mode); the future test_fr_gate_02_* parser tests (G4) use the same cases, so a case's test_name is the spec's
 name for it. A case has source "spec" when its shape is written from the spec tables and official docs, and "captured"

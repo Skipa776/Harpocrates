@@ -45,7 +45,7 @@ AGENT_NOTE = (
 # Claude Code asks the user before an edit of such a file (FR-READ-06); Codex has no edit prompt.
 CLAUDE_NOTE = AGENT_NOTE + " To edit such a file, use Edit directly: the user is asked once per file and session."
 CODEX_NOTE = AGENT_NOTE + " Ask the user to edit such files."
-# ponytail: flip when the egress gate ships (M2); until then no harness has more than the read tool.
+# flip when the egress gate ships (M2); until then no harness has more than the read tool.
 GATE_AVAILABLE = False
 
 

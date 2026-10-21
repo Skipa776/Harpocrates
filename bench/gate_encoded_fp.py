@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""False-positive check for FR-GATE-11 (docs/gate-base64-text-spec.md): replay every recorded request through the
+"""False-positive check for FR-GATE-11 (docs/design.md): replay every recorded request through the
 encoded-text rule alone and count the requests it would block.
 
     python -m bench.gate_encoded_fp [--recordings bench/results/mock] [--out bench/results/gate/encoded-fp-<date>.json]

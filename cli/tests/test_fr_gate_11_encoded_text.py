@@ -1,4 +1,4 @@
-"""FR-GATE-11 (docs/gate-base64-text-spec.md): a secret base64-encoded inside a class R or S text field is found by
+"""FR-GATE-11 (docs/design.md): a secret base64-encoded inside a class R or S text field is found by
 decoding long base64 runs, at every alignment, and blocks the request.
 
 Every secret is a generated canary (gate_canaries.py). Tests that check a request is *not* blocked use an oracle detector

@@ -25,7 +25,7 @@ from Harpocrates.read import Redactor
 
 CASES = gate_corpus.build_corpus(0)
 assert len(CASES) == 94
-# What G4 does where the G2 corpus still holds the pre-decision expectation (docs/gate-scan-spec.md):
+# What G4 does where the G2 corpus still holds the pre-decision expectation (FR-GATE-10, docs/design.md):
 #  * thinking and redacted_thinking blocks are dropped, not blocked or passed (decision 5, FR-GATE-10);
 #  * previous_response_id blocks whether or not the gate has seen the id: v1 has no relay tee (decision 1).
 EXPECT = {"anthropic_thinking": "drop", "anthropic_redacted_thinking": "drop",

@@ -354,7 +354,7 @@ def _segment(line: str, token: str, i: int) -> str:
     Output: Surrounding segment with matching enclosing quotes removed, or a whitespace-bounded
     slice. Escaped quotes can truncate a literal, as noted below.
     The string literal holding the token when matching quotes enclose it, else its
-    whitespace-delimited word. ponytail: an escaped quote inside a literal cuts it short; a real
+    whitespace-delimited word. An escaped quote inside a literal cuts it short; a real
     string parser if the per-type report shows misses from it.
     """
     j = i + len(token)

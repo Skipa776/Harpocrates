@@ -4,7 +4,7 @@
     python bench/canary_harness.py --mode direct [--target mock|gate] [--seed N] [--out-dir bench/results]
     python bench/canary_harness.py --mode agent  [--seed N] [--agent claude|codex|all] [--out-dir bench/results]
 
-direct   Builds one synthetic request per block, item and tool type in docs/gate-parser-spec.md, in both provider
+direct   Builds one synthetic request per block, item and tool type covered by FR-GATE-02 (docs/design.md), in both provider
          formats, each carrying a generated canary (bench/gate_corpus.py), and sends them to a mock provider on
          127.0.0.1. Against the bare mock every canary must arrive, which shows that the counter works. The corpus
          is also the test data for the test_fr_gate_02_* parser tests. With --target gate the requests go to the real gate

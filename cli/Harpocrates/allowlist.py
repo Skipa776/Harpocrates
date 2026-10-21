@@ -67,7 +67,7 @@ def log_file() -> Path:
     return LOG_FILE if LOG_FILE is not None else state_dir() / "allow.log"
 
 
-# ponytail: text match, best effort. A script that builds the path at runtime gets past it, but such a
+# text match, best effort. A script that builds the path at runtime gets past it, but such a
 # script could just as well open the secret file itself, a gap the hook already has (hooks.py docstring).
 # The egress gate (M2) sees whatever reaches the provider either way.
 # Rule: `harpo ... allow` or `harpocrates ... allow` anywhere in a segment is refused (FR-NAME-02: the command is

@@ -1,7 +1,7 @@
 """FR-GATE-01, FR-GATE-03, SEC-10: the end-to-end harness for real agents behind the gate (bench/gate_e2e.py).
 
 The unit tests cover the helpers that build the install record and read the recording. The integration test at the end runs
-`claude -p` and `codex exec` through the gate to the mock in throwaway homes (AGENTS.md rule 7) and is skipped when a CLI is
+`claude -p` and `codex exec` through the gate to the mock in throwaway homes and is skipped when a CLI is
 not installed.
 """
 from __future__ import annotations
@@ -179,7 +179,7 @@ def test_fr_gate_04_e2e_the_g4_suite_has_gate_only_gate_and_hook_and_gate_off_co
 
 @pytest.mark.integration
 def test_fr_gate_04_e2e_real_agents_through_the_scanner_zero_known_format_canaries(tmp_path: Path) -> None:
-    """AGENTS.md rule 7 for G4: scripted reads of the seeded canary repo (Read .env, cat, grep) by real claude -p and codex exec
+    """FR-GATE-04 (docs/design.md): scripted reads of the seeded canary repo (Read .env, cat, grep) by real claude -p and codex exec
     through the gate to the mock. No known-format canary reaches the mock, placeholders stand where they were, every session
     completes its script; with the gate off the same reads do leak (the counter works). The real home must not change."""
     present = [name for name in ("claude", "codex") if shutil.which(name)]

@@ -1,4 +1,4 @@
-"""Base64 inside text fields (FR-GATE-11, docs/gate-base64-text-spec.md): find long base64 runs in a string, decode them
+"""Base64 inside text fields (FR-GATE-11, docs/design.md): find long base64 runs in a string, decode them
 at every alignment, and keep the text in each decoding, for the scan step to scan."""
 from __future__ import annotations
 

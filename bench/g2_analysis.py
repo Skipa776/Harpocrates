@@ -1,7 +1,7 @@
 """Read a mock recording for the G2 verify items (FR-PROOF-04): names and shapes, never values.
 
-Each function answers one item of docs/gate-parser-spec.md ("To verify": V1, V3 to V7) or docs/gate-transport.md ("To verify
-in G2": T1 to T10) from the recording entries bench/mock_provider.py writes. What comes out is a header or field name, a type,
+Each function checks a request-body probe (V1, V3 to V7; FR-GATE-02, docs/design.md) or a transport probe
+(T1 to T10; docs/gate-transport.md, "To verify in G2") from the recording entries bench/mock_provider.py writes. What comes out is a header or field name, a type,
 a count, or a short fixed text such as the attribution prefix of a system block. A credential-named header's value is
 already "<present>" in the recording; a JSON header is described by its shape, not its content.
 """
