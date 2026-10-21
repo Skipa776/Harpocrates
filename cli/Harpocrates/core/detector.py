@@ -373,56 +373,32 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
     in_comment = True if is_comment else None
 
     # ------------------------------------------------------------------
-    # Phase 1a: CRITICAL regex — deterministic, no ML needed.
+    # Phase 1: CRITICAL, then HIGH regex: deterministic, no ML needed.
     # ------------------------------------------------------------------
-    for sig_name, pattern in CRITICAL_SIGNATURES.items():
-        for match in pattern.finditer(scan_target):
-            token = match.group()
-            _inf = infer_category(signature_name=sig_name, var_name=None, token=token)
-            findings.append(
-                Finding(
-                    type=sig_name,
-                    file=file,
-                    line=lineno,
-                    snippet=stripped[:200],
-                    entropy=shannon_entropy(token) if token else 0.0,
-                    evidence=EvidenceType.REGEX,
-                    severity=Severity.CRITICAL,
-                    confidence=0.99,
-                    token=token,
-                    token_start=match.start(),
-                    token_end=match.end(),
-                    in_comment=in_comment,
-                    category=_inf.category.value,
-                    category_reason=_inf.reason,
+    for signatures, severity, confidence in ((CRITICAL_SIGNATURES, Severity.CRITICAL, 0.99),
+                                             (HIGH_SIGNATURES, Severity.HIGH, 0.95)):
+        for sig_name, pattern in signatures.items():
+            for match in pattern.finditer(scan_target):
+                token = match.group()
+                _inf = infer_category(signature_name=sig_name, var_name=None, token=token)
+                findings.append(
+                    Finding(
+                        type=sig_name,
+                        file=file,
+                        line=lineno,
+                        snippet=stripped[:200],
+                        entropy=shannon_entropy(token) if token else 0.0,
+                        evidence=EvidenceType.REGEX,
+                        severity=severity,
+                        confidence=confidence,
+                        token=token,
+                        token_start=match.start(),
+                        token_end=match.end(),
+                        in_comment=in_comment,
+                        category=_inf.category.value,
+                        category_reason=_inf.reason,
+                    )
                 )
-            )
-
-    # ------------------------------------------------------------------
-    # Phase 1b: HIGH regex — also deterministic, also bypasses ML.
-    # ------------------------------------------------------------------
-    for sig_name, pattern in HIGH_SIGNATURES.items():
-        for match in pattern.finditer(scan_target):
-            token = match.group()
-            _inf = infer_category(signature_name=sig_name, var_name=None, token=token)
-            findings.append(
-                Finding(
-                    type=sig_name,
-                    file=file,
-                    line=lineno,
-                    snippet=stripped[:200],
-                    entropy=shannon_entropy(token) if token else 0.0,
-                    evidence=EvidenceType.REGEX,
-                    severity=Severity.HIGH,
-                    confidence=0.95,
-                    token=token,
-                    token_start=match.start(),
-                    token_end=match.end(),
-                    in_comment=in_comment,
-                    category=_inf.category.value,
-                    category_reason=_inf.reason,
-                )
-            )
 
     # ------------------------------------------------------------------
     # Phase 2: Entropy fallback — only when regex found nothing.

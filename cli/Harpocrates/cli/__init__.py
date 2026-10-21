@@ -138,6 +138,145 @@ def _main(
     """
 
 
+_SEVERITY_STYLES = {
+    Severity.CRITICAL: "red bold",
+    Severity.HIGH: "red",
+    Severity.MEDIUM: "yellow",
+    Severity.LOW: "blue",
+    Severity.INFO: "white",
+}
+
+
+def _scan_paths(paths: List[Path], *, history: bool, recursive: bool, memory_cap: int, ignore_patterns: set,
+                verifier: object, ml_threshold: float, engine: ScanEngine) -> ScanResult:
+    """
+    Description: Scan each path given to `harpo scan` (a file, a folder, or its git history) and add up the results.
+    Parameters:
+        paths: the paths.
+        history: scan each path's git history instead of its files.
+        recursive: descend into subfolders.
+        memory_cap: the most bytes one file's scan may hold (FR-CORE-05).
+        ignore_patterns: extra ignore patterns for folder scans.
+        verifier: the loaded model.
+        ml_threshold: the least model confidence kept.
+        engine: auto, rust or python.
+    Output: One ScanResult over every path. A missing path, or a file that cannot be read, is skipped with a warning
+        on stderr; a history error exits 2.
+    """
+    all_findings = []
+    total_files = 0
+    total_lines = 0
+    total_duration = 0.0
+    all_errors: list = []
+
+    for path in paths:
+        if not path.exists():
+            error_console.print(f"[yellow]⚠[/yellow] Path not found, skipping: {path}")
+            continue
+
+        if history:
+            try:
+                r = scan_git_history(path)
+            except ValueError as e:
+                error_console.print(f"[red]✗[/red] {e}")
+                raise typer.Exit(code=2) from e
+        elif path.is_dir():
+            r = scan_directory(
+                path,
+                recursive=recursive,
+                memory_cap=memory_cap,
+                ignore_patterns=ignore_patterns,
+                verifier=verifier,
+                ml_threshold=ml_threshold,
+                engine=engine,
+            )
+        else:
+            try:
+                r = scan_file(
+                    path,
+                    memory_cap=memory_cap,
+                    verifier=verifier,
+                    ml_threshold=ml_threshold,
+                    engine=engine,
+                )
+            except UnicodeDecodeError:
+                error_console.print(
+                    f"[yellow]⚠[/yellow] Skipping binary/unreadable file: {path}"
+                )
+                continue
+            except (OSError, PermissionError) as e:
+                error_console.print(
+                    f"[yellow]⚠[/yellow] Skipping unreadable file {path}: {e}"
+                )
+                continue
+
+        all_findings.extend(r.findings)
+        total_files += r.scanned_files
+        total_lines += r.total_lines
+        total_duration += r.duration_ms
+        if r.errors:
+            all_errors.extend(r.errors)
+
+    return ScanResult(
+        findings=all_findings,
+        scanned_files=total_files,
+        total_lines=total_lines,
+        duration_ms=total_duration,
+        errors=all_errors,
+    )
+
+
+def _print_findings_table(result: ScanResult, show_secrets: bool) -> None:
+    """
+    Description: Print scan findings as a table, most severe first, then the totals.
+    Parameters:
+        result: the scan result, with at least one finding.
+        show_secrets: print full tokens instead of redacted ones.
+    Output: None; prints to the console.
+    """
+    table = Table(
+        title=f"Found {len(result.findings)} potential secrets",
+        show_header=True
+    )
+    table.add_column("Severity", style="bold")
+    table.add_column("Type", style="cyan")
+    table.add_column("Location")
+    table.add_column("Secret")
+
+    for finding in sorted(
+        result.findings,
+        key=lambda f: (f.severity.value, f.file or "", f.line or 0)
+    ):
+        severity_style = _SEVERITY_STYLES.get(finding.severity, "white")
+        severity_text = f"[{severity_style}]{finding.severity.value.upper()}[/{severity_style}]"
+
+        # Format location
+        location = f"{finding.file}:{finding.line}" if finding.file else "text input"
+
+        # Redacted by default; full token only when --show-secrets is set
+        if show_secrets:
+            secret_cell = finding.token or finding.snippet or "—"
+        else:
+            secret_cell = finding.redacted_token or "—"
+
+        table.add_row(
+            severity_text,
+            finding.type,
+            location,
+            secret_cell,
+        )
+
+    console.print(table)
+    console.print(
+        f"\nScanned {result.scanned_files} files ({result.total_lines} lines) "
+        f"in {result.duration_ms:.0f}ms"
+    )
+    console.print(
+        f"[yellow]⚠[/yellow]  Found {result.critical_count} critical, "
+        f"{result.high_count} high severity secrets"
+    )
+
+
 @app.command(help=(
     '\n'
     '    Scan a file or directory for secrets.\n'
@@ -289,68 +428,9 @@ def scan(
         error_console.print(f"[red]✗[/red] ML model could not be loaded: {e}")
         raise typer.Exit(code=2) from e
 
-    # Scan all paths, aggregating findings across files and directories.
-    all_findings = []
-    total_files = 0
-    total_lines = 0
-    total_duration = 0.0
-    all_errors: list = []
-
-    for path in paths:
-        if not path.exists():
-            error_console.print(f"[yellow]⚠[/yellow] Path not found, skipping: {path}")
-            continue
-
-        if history:
-            try:
-                r = scan_git_history(path)
-            except ValueError as e:
-                error_console.print(f"[red]✗[/red] {e}")
-                raise typer.Exit(code=2) from e
-        elif path.is_dir():
-            r = scan_directory(
-                path,
-                recursive=recursive,
-                memory_cap=memory_cap,
-                ignore_patterns=ignore_patterns,
-                verifier=verifier,
-                ml_threshold=ml_threshold,
-                engine=cast(ScanEngine, engine),
-            )
-        else:
-            try:
-                r = scan_file(
-                    path,
-                    memory_cap=memory_cap,
-                    verifier=verifier,
-                    ml_threshold=ml_threshold,
-                    engine=cast(ScanEngine, engine),
-                )
-            except UnicodeDecodeError:
-                error_console.print(
-                    f"[yellow]⚠[/yellow] Skipping binary/unreadable file: {path}"
-                )
-                continue
-            except (OSError, PermissionError) as e:
-                error_console.print(
-                    f"[yellow]⚠[/yellow] Skipping unreadable file {path}: {e}"
-                )
-                continue
-
-        all_findings.extend(r.findings)
-        total_files += r.scanned_files
-        total_lines += r.total_lines
-        total_duration += r.duration_ms
-        if r.errors:
-            all_errors.extend(r.errors)
-
-    result = ScanResult(
-        findings=all_findings,
-        scanned_files=total_files,
-        total_lines=total_lines,
-        duration_ms=total_duration,
-        errors=all_errors,
-    )
+    result = _scan_paths(paths, history=history, recursive=recursive, memory_cap=memory_cap,
+                         ignore_patterns=ignore_patterns, verifier=verifier, ml_threshold=ml_threshold,
+                         engine=cast(ScanEngine, engine))
 
     # Handle errors
     if result.errors:
@@ -401,55 +481,7 @@ def scan(
         )
         raise typer.Exit(code=0)
 
-    table = Table(
-        title=f"Found {len(result.findings)} potential secrets",
-        show_header=True
-    )
-    table.add_column("Severity", style="bold")
-    table.add_column("Type", style="cyan")
-    table.add_column("Location")
-    table.add_column("Secret")
-
-    for finding in sorted(
-        result.findings,
-        key=lambda f: (f.severity.value, f.file or "", f.line or 0)
-    ):
-        # Color severity
-        severity_colors = {
-            Severity.CRITICAL: "red bold",
-            Severity.HIGH: "red",
-            Severity.MEDIUM: "yellow",
-            Severity.LOW: "blue",
-            Severity.INFO: "white",
-        }
-        severity_style = severity_colors.get(finding.severity, "white")
-        severity_text = f"[{severity_style}]{finding.severity.value.upper()}[/{severity_style}]"
-
-        # Format location
-        location = f"{finding.file}:{finding.line}" if finding.file else "text input"
-
-        # Redacted by default; full token only when --show-secrets is set
-        if show_secrets:
-            secret_cell = finding.token or finding.snippet or "—"
-        else:
-            secret_cell = finding.redacted_token or "—"
-
-        table.add_row(
-            severity_text,
-            finding.type,
-            location,
-            secret_cell,
-        )
-
-    console.print(table)
-    console.print(
-        f"\nScanned {result.scanned_files} files ({result.total_lines} lines) "
-        f"in {result.duration_ms:.0f}ms"
-    )
-    console.print(
-        f"[yellow]⚠[/yellow]  Found {result.critical_count} critical, "
-        f"{result.high_count} high severity secrets"
-    )
+    _print_findings_table(result, show_secrets)
 
     raise typer.Exit(code=exit_on_findings)
 
