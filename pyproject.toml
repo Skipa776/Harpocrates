@@ -37,6 +37,7 @@ dev = [
     "build>=1.0.0",
     "zstandard>=0.22",  # the gate tests compress with it on every Python version
     "pyyaml>=6.0",  # reads .pre-commit-hooks.yaml in the hook-id tests (FR-NAME-05)
+    "pre-commit>=3.0",  # runs both hook ids in a fixture repo (FR-NAME-05's integration test)
 ]
 mcp = [
     "mcp>=1.27,<2",

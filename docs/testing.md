@@ -12,7 +12,7 @@ Install Harpo with the dev, explain and mcp extras:
 pip install -e ".[dev,explain,mcp]"
 ```
 
-**Dev extra.** The dev extra includes pytest, pytest-cov, ruff, mypy, build, zstandard and pyyaml.
+**Dev extra.** The dev extra includes pytest, pytest-cov, ruff, mypy, build, zstandard, pyyaml and pre-commit.
 
 **Model files.** The model files are in Git LFS. Run `git lfs pull`. An unfetched `cli/Harpocrates/ml/models/model.onnx` is a text file of about 130 bytes. Harpo refuses any model artifact whose SHA-256 does not match `onnx_model_hashes.json` (SEC-07).
 
@@ -43,7 +43,7 @@ Never log either CLI in. Every suite uses fake keys. When a CLI is missing, the 
 | Rust format | `cargo fmt --manifest-path core/Cargo.toml --check` | |
 | Rust lint | `cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings` | |
 | Rust tests | `cargo test --manifest-path core/Cargo.toml` | |
-| Integration | `pytest -q -m integration` | Builds a wheel and runs real agents where installed. |
+| Integration | `pytest -q -m integration` | Builds a wheel and runs real agents where installed. TEST-03 (`test_test_03_*`) installs the wheel in a fresh venv, so it needs the package index. |
 | Plugin | `claude plugin test plugins/harpocrates-prompt` | CI pins Claude Code 2.1.302 for this job. |
 
 **Expected skips.** When run as root, 5 tests skip because root ignores file modes. One test needs a case-insensitive file system (the macOS default). Any other skip needs a reason.
@@ -66,6 +66,7 @@ Never log either CLI in. Every suite uses fake keys. When a CLI is missing, the 
 | Gate, scripted reads | `python -m bench.gate_e2e --suite g4` | FR-GATE-01, FR-GATE-04, FR-GATE-05 | Gated sessions receive 0 canaries, and their tool results carry placeholders. The gate-off controls leak. |
 | Gate, media and MCP images | `python -m bench.gate_e2e --suite g5` | FR-GATE-07, FR-GATE-06, FR-GATE-11 | Gated sessions receive 0 known-format canaries, also inside base64 payloads. Each control shows whether that path leaks without the gate. |
 | G7 and G6, guard up and down with real agents | `python -m bench.guard_e2e` | FR-INSTALL-01, FR-INSTALL-02, FR-INSTALL-08, FR-UX-01, FR-LOG-01, FR-PROOF-01, FR-PROOF-02, SEC-01 | Routed sessions receive 0 known-format canaries and `harpo doctor` passes; every request the mock received has a proof entry with the same SHA-256, the chain verifies, and the gate logged findings. After `harpo guard down` both files are byte-identical and the same reads leak. In every session, no canary value is in any file under the throwaway `~/.harpo` or TMPDIR (`sec01` in the report lists the files read). Exits 0 only when the report passes. |
+| TEST-03, critical flows on the installed wheel | `pytest -q -m integration cli/tests/test_test_03_installed_wheel.py` | TEST-03, FR-READ-01, FR-READ-06, FR-LOG-01, FR-INSTALL-08 | A wheel built from the checkout, in a fresh venv, run in a throwaway home: (a) the installed hook denies a Read of a canary file and `safe_read` over the MCP server returns placeholders, both logged as findings; (b) a pre-commit hook running the wheel's `harpo scan` blocks a commit that stages a canary and lets a clean one through; (c) install, one hook call and uninstall leave every file byte-identical, apart from the `*.harpo.bak` originals the installer keeps. The real home is snapshotted before and after. |
 | Transport probes | `python bench/g2_probes.py` | FR-GATE-09 | No pass/fail. Compare the observations with the last committed run when an agent version changes. |
 
 **Exit codes.** `canary_harness.py` exits 0 when it passed, 1 when a known-format canary reached the provider through a protected path, and 2 when the run is inconclusive (an agent is missing or did not finish). `gate_e2e` exits 0 unless the real home changed, so read every scenario in its report.
