@@ -255,12 +255,17 @@ class GateHandler(BaseHTTPRequestHandler):
     def parse_request(self) -> bool:
         """
         Description: Parse the request line and headers, forgetting the previous request's headers first so a refusal
-            never takes its error shape from them.
+            never takes its error shape from them. An HTTP/0.9 request gets an empty header set of the usual type:
+            Python 3.13 gives it a plain dict, which the token check cannot read, so it would block as
+            HARPO-BLOCK-INTERNAL instead of HARPO-BLOCK-TOKEN.
         Parameters: None
         Output: True when the request parsed; False when it was refused (send_error has already answered).
         """
         self.headers = None
-        return super().parse_request()
+        parsed = super().parse_request()
+        if parsed and not isinstance(self.headers, self.MessageClass):
+            self.headers = self.MessageClass()
+        return parsed
 
     def send_error(self, code: int, message: Optional[str] = None, explain: Optional[str] = None) -> None:
         """
