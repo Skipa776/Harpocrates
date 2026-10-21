@@ -133,18 +133,16 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | FR-READ-01 | MCP tools `safe_read` (with line ranges) and `safe_grep` that return redacted content | Canary repo read with 0 canaries in tool output | M1 |
 | FR-READ-02 | Typed placeholders `<<HARPO:type:hash4>>`, identical for the same secret within a session | Same secret in two files gets the same placeholder | M1 |
 | FR-READ-03 | Setup docs and config for each Full-tier harness that deny the built-in read tool on sensitive paths and route reads to `safe_read` | Fresh machine setup in under 5 minutes, verified by someone else | M1 |
-| FR-READ-04 | Warn when the agent writes a placeholder into a file | Write containing a placeholder produces a visible warning | M2 |
+| FR-READ-04 | A built-in edit (Edit, MultiEdit, Write, NotebookEdit) that would add a placeholder to a file is denied with a visible reason, in every mode. Reworded from "warn" (Josh, Oct 21, 2026), matching what shipped with FR-READ-06. A placeholder written by a shell command is not checked; that is a documented gap | FR-READ-06's placeholder tests: an edit that adds a placeholder is denied, granted or not | M2 |
 | FR-READ-05 | The read hook lets through user-allowlisted paths (`harpocrates allow`, each use logged) and name rules (`allow --name graphify-out`: any path whose resolved real path has a component with that exact name, in every project; names are compared NFKC- and case-folded, secret-store, system and home-path names are refused, broad or secret-sounding ones such as `src` or `secrets` need `--yes`, and a name rule never opens a dot-directory of the home folder or `~/Library`, decided by file identity); `allow --remove` and `--list` manage the list, `--json` gives plugins a stable output; the agent can't edit or call any of it. Copy, move, link and archive commands (`cp -r DIR dst`, `tar`, `zip`, `ditto`) scan their directory arguments like a recursive search, and UTF-16/32 text is decoded and scanned instead of passing as binary. (The prompt this row first gave other secret-bearing reads moved to edits in FR-READ-06.) | Allowlisted path or name passes and is logged; a link named like a rule that points elsewhere, a hard link and a secret-store name are still refused; an allowlist change by the agent is refused | M1 |
 | FR-READ-06 | Reads never prompt: a built-in Read, content Grep or Bash call that would expose a secret-bearing file is refused with a pointer to `safe_read` / `safe_grep`, in every mode (allowlisted paths still pass). On Claude Code with `--ask`, an Edit, MultiEdit, Write (existing file) or NotebookEdit of such a file asks the user once, naming the file and its secret types. The hook records the call as pending under the session and tool-use id; `python -m Harpocrates.hooks --post` (PostToolUse, PostToolUseFailure, SessionEnd) turns it into a grant only once the tool has run, so a No never grants. The grant (`~/.harpocrates/grants/<session_id>.json`, 24 h expiry, deleted at SessionEnd) covers that one real path for the same session, for built-in Read, content Grep and edits; never Bash, never a directory. No session or tool-use id, or no human to ask (bypass modes), means refusal. An edit whose new content holds a placeholder is denied in every mode, granted or not. Trade-off: Yes sends the file's values to the provider as-is. Residual: a script that writes the grants file itself can forge a grant (the allowlist's script gap) | Read of a secret file in `--ask` mode is denied, not asked; an Edit of one asks with the exact reason and writes a pending entry; the matching Post grants that path to that session only (not another session, another path, or Bash); an unknown id, an interrupt, a corrupt file or a grant over 24 h old grants nothing; SessionEnd removes the file; a placeholder in new content is denied even when granted | M1 |
-
-**FR-READ-04 wording (proposed, for Josh).** FR-READ-04 asks for a warning. The hook that shipped with FR-READ-06 is stricter: an Edit, MultiEdit, Write or NotebookEdit that would leave a new placeholder in the file is denied in every mode, with the reason shown. A placeholder written by a shell command (`echo ... > file`) is not checked. Proposed: reword FR-READ-04 to "a built-in edit that adds a placeholder is denied with a visible reason; shell writes are a documented gap", and count the FR-READ-06 placeholder tests as its acceptance. Until approved, FR-READ-04 stays open.
 
 **Egress gate (harpo-gate)**
 
 | ID | Requirement | Acceptance test | Milestone |
 | --- | --- | --- | --- |
 | FR-GATE-01 | Localhost proxy that the agent's API base URL points to; forwards over TLS to the real provider | Agent completes a normal session through the proxy | M2 |
-| FR-GATE-02 | Written parser spec per provider format (Anthropic Messages and OpenAI Responses in v1; OpenAI Chat Completions when the Copilot adapter ships) covering text, tool calls, tool results, and system prompts | Spec in `docs/`; parser tests for every content-block type | M2 |
+| FR-GATE-02 | Written parser spec per provider format (Anthropic Messages and OpenAI Responses in v1; OpenAI Chat Completions when the Copilot adapter ships) covering text, tool calls, tool results, and system prompts | The Gate design decisions table below, `docs/gate-transport.md`, and the `test_fr_gate_02_*` corpus tests for every content-block type. Repointed from "spec in `docs/`" (Josh, Oct 21, 2026): the parser spec is kept locally | M2 |
 | FR-GATE-03 | Fail closed on scanner error, timeout, or unparseable request. No override in v1 (Oct 20, 2026: a switch that forwards unscanned is the fail-open state the gate exists to prevent; a scanner failure blocks until restart or downgrade) | Killed scanner, timeout, and malformed request all blocked | M2 |
 | FR-GATE-04 | Scan the full request each turn, including history, not only the newest message | Secret planted in turn 1 history is redacted in turn 5 | M2 |
 | FR-GATE-05 | Deterministic placeholders so the unchanged start of each request stays identical and provider prompt caching still works | Cache hit rate with Guard on within 5 points of Guard off | M3 |
@@ -174,8 +172,7 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | 13 | Unknown routes block (fail closed). The Codex features this disables are listed in `docs/gate-transport.md` |
 | 14 | The Codex row of the harness table: zstd and WebSocket apply only to the built-in OpenAI provider |
 | 15 | Strict parsing: duplicate JSON keys, invalid UTF-8 and nesting deeper than 128 are rejected |
-
-**FR-GATE-02's acceptance artifact (proposed, for Josh).** FR-GATE-02's acceptance test is "Spec in `docs/`", but the parser spec left the repo on Oct 21. Either restore `docs/gate-parser-spec.md`, or change the acceptance to "this decisions table, `docs/gate-transport.md`, and the `test_fr_gate_02_*` corpus tests". Until one is chosen, FR-GATE-02's acceptance is not met in the public repo.
+| 16 | Added (Josh, Oct 21, 2026): on Python before 3.14, `zstandard` is a runtime dependency, so a Codex ChatGPT-login session, whose bodies are zstd-compressed, is never blocked for want of a decoder. Python 3.14 has `compression.zstd` |
 
 **Commit gate, logging, and setup**
 
@@ -191,7 +188,7 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 
 | ID | Requirement | Acceptance test | Milestone |
 | --- | --- | --- | --- |
-| NFR-01 | Added latency under 50 ms p95 per request | Latency benchmark in CI | M3 |
+| NFR-01 | Added latency under 50 ms p95 per follow-up request. The first request of a session (cold cache) has its own target: under 500 ms p95 for bodies up to 1 MB, set (Josh, Oct 21, 2026), to revisit after the FR-SERVE-01 profile | Latency benchmark in CI | M3 |
 | NFR-02 | Task resolve rate within 3 points with Guard on vs off | Utility benchmark method below | M3 |
 | SEC-01 | Never store or log a plaintext secret | Automated grep of all logs and temp files after the canary run | M2 |
 | SEC-02 | HMAC with a random in-memory per-session key for placeholders and logs | Code review plus a test that keys differ across sessions | M1 |
@@ -217,13 +214,13 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | ID | Requirement | Acceptance test | Milestone |
 | --- | --- | --- | --- |
 | TEST-01 | Line coverage of the shipped package (`cli/Harpocrates`, excluding the untracked local training code) is measured in CI and fails below a floor. The floor starts at 90% (measured 92.9% on Oct 18, 2026, Apple M3 Pro) and rises toward the measured value as gaps close. It is never lowered without a trade-off note | The CI unit job fails a change that drops coverage below `fail_under` in `pyproject.toml` | R0 |
-| TEST-02 **(proposed)** | Every requirement ID from a finished milestone has at least one test whose name contains the ID (lowercase, `-` as `_`), or a named non-test acceptance artifact (a report or doc) | `scripts/check_req_tests.py` lists IDs without one; CI fails on any ID from a finished milestone | R0 |
-| TEST-03 **(proposed)** | End-to-end tests for the critical flows, run in CI against an installed wheel in a fixture home directory: (a) an agent read of a canary file is refused and `safe_read` returns placeholders; (b) the pre-commit hook blocks a staged canary; (c) `install`, then a hook call, then `uninstall` restores every settings file byte-identical | One `test_test_03_*` integration test per flow, all passing in CI | R0 |
-| TEST-04 **(proposed)** | Josh verifies every test. Each pull request lists its new and changed tests by requirement ID, and Josh ticks each one before merge | Pull request template has the checklist; no merge with an unticked test | R0 |
+| TEST-02 **(proposed; not approved on Oct 21, 2026)** | Every requirement ID from a finished milestone has at least one test whose name contains the ID (lowercase, `-` as `_`), or a named non-test acceptance artifact (a report or doc) | `scripts/check_req_tests.py` lists IDs without one; CI fails on any ID from a finished milestone | R0 |
+| TEST-03 (approved (Josh, Oct 21, 2026)) | End-to-end tests for the critical flows, run in CI against an installed wheel in a fixture home directory: (a) an agent read of a canary file is refused and `safe_read` returns placeholders; (b) the pre-commit hook blocks a staged canary; (c) `install`, then a hook call, then `uninstall` restores every settings file byte-identical | One `test_test_03_*` integration test per flow, all passing in CI | R0 |
+| TEST-04 (approved (Josh, Oct 21, 2026)) | Josh verifies every test. Each pull request lists its new and changed tests by requirement ID, and Josh ticks each one before merge | Pull request template has the checklist; no merge with an unticked test | R0 |
 
 **R0 rename, cleanup and docs**
 
-Restated Oct 21, 2026 from the R0 spec notes, which have been kept locally since Oct 21, so that the IDs cited in code, tests and `pyproject.toml` are defined in the repo. The FR-NAME, DOC-DOCSTRING and DOC-DEMO rows condense the approved notes without changing them. The FR-CLEAN rows were never written out as rows; they are reconstructed from how the IDs are used **(for Josh to confirm)**.
+Restated Oct 21, 2026 from the R0 spec notes, which have been kept locally since Oct 21, so that the IDs cited in code, tests and `pyproject.toml` are defined in the repo. The FR-NAME, DOC-DOCSTRING and DOC-DEMO rows condense the approved notes without changing them. The FR-CLEAN rows were never written out as rows; they were reconstructed from how the IDs are used and confirmed (Josh, Oct 21, 2026).
 
 | ID | Requirement | Acceptance test | Milestone |
 | --- | --- | --- | --- |
@@ -442,12 +439,11 @@ flowchart LR
 
 ```
 harpocrates/
-  core/            Rust detection library + Python bindings (FR-CORE)
-  read/            MCP read tool (FR-READ)
-  gate/            Egress proxy (FR-GATE)
-  cli/             harpo CLI, pre-commit, SARIF (FR-COMMIT, FR-UX)
+  core/            Rust scanner binary (FR-CORE)
+  cli/Harpocrates/ The Python package: detector, read tool and hook (FR-READ), gate/ (FR-GATE),
+                   install and doctor (FR-INSTALL), harpo CLI and pre-commit (FR-COMMIT, FR-UX)
+  cli/tests/       Unit, integration and end-to-end tests, named after requirement IDs
   inspect/         Repo preflight, added in v1.2 (FR-PF)
-  adapters/        Per-harness install adapters and doctor checks (FR-INSTALL)
   bench/           Detector, leakage, evasion, red-team, utility, latency suites
   bench/canaries/  Fake secrets only, generated by script
   docs/            design.md, threat-model.md, parser specs, data.md, bypasses.md
@@ -455,7 +451,7 @@ harpocrates/
 
 **As built (Oct 21, 2026).** The read tool, hook and gate live in the Python package, not in top-level folders: `cli/Harpocrates/` holds `read.py`, `hooks.py`, `mcp/`, `gate/`, `install.py` and `harness.py` (the per-harness install code that `adapters/` was meant for), with tests in `cli/tests/`. The Rust scanner is in `core/`; the mock provider, canary harness and end-to-end suites are in `bench/`, with generated canaries from `bench/canary_repo.py` and `bench/canaries/`. `inspect/` (v1.2) does not exist yet.
 
-**Layout (proposed, for Josh):** keep the code where it is and drop `read/`, `gate/` and `adapters/` from the target. Moving them would change every import and the installed hook commands for no change in behavior.
+**Layout decided (Josh, Oct 21, 2026):** the code stays where it is. The original target's `read/`, `gate/` and `adapters/` folders are dropped, since moving them would change every import and the installed hook commands for no change in behavior.
 
 ## Harness support and installer
 
@@ -744,29 +740,17 @@ A Linux x86-64 cloud container with 4 cores. Python 3.13.16, Rust 1.97.0, Claude
 | Requirement | Acceptance test | Status on Oct 21 |
 | --- | --- | --- |
 | FR-GATE-01 | An agent completes a normal session through the proxy | Only against the mock provider. No real-provider session was run |
-| FR-GATE-02 | Spec in `docs/` | The spec left the repo on Oct 21; see the proposal under Gate design decisions |
 | FR-GATE-05 | Cache hit rate with Guard on within 5 points of off | M3; needs the real provider |
 | FR-GATE-06 | Streaming works end to end in both agents | Against the mock's server-sent events only |
 | FR-GATE-07 | Policy documented and tested | Tested in unit tests; end to end, no agent sent a non-image file as media |
 | FR-INSTALL-05 | A Claude Code subscription session works through the gate | Needs a subscription login |
 | FR-READ-03 | Fresh-machine setup in under 5 minutes, verified by someone else | Needs another person |
 | FR-NAME-05 | Both hook ids run in a fixture repo | Skipped here: `pre-commit` is not installed |
-| NFR-01 | Latency benchmark in CI | Measured locally only; first turns are over the 50 ms target |
+| NFR-01 | Latency benchmark in CI | Measured locally only: follow-up turns 12.2 ms p95 (target 50), first turns 347 ms p95 (target 500); not in CI |
 | SEC-01 | Automated grep of all logs and temp files after the canary run | Not built |
 | TEST-01 | The CI unit job fails a change below the floor | CI has not run on this branch |
 
-**Proposals for Josh.** Each is also marked where it applies. Nothing here is decided.
-
-1. FR-GATE-02's acceptance artifact: restore `docs/gate-parser-spec.md`, or point the acceptance at the Gate design decisions table, `docs/gate-transport.md` and the corpus tests.
-2. FR-READ-04: reword "warn" to the deny that shipped with FR-READ-06, and list shell writes as a documented gap.
-3. Repo layout: keep the code in `cli/Harpocrates/` and drop `read/`, `gate/` and `adapters/` from the target.
-4. FR-CLEAN-01 to -04: confirm the reconstructed rows.
-5. zstd at run time: on Python before 3.14 the gate blocks every zstd body without the `zstandard` package (HARPO-BLOCK-ENCODING), and Codex sends zstd on its ChatGPT-login route. Make `zstandard` a dependency there (for example `zstandard; python_version < "3.14"`), or a `gate` extra.
-6. CI coverage for this branch: add `r0/**` to the push triggers, or open a draft pull request, so these commits get CI before merge.
-7. The block message names `harpo doctor`, which does not exist yet: keep it (doctor ships before the gate) or reword it until then.
-8. NFR-01: as written it covers every request, and first turns are about 7 times over. Either work on first-turn scanning (the M4 profile and daemon), or give first turns their own target.
-9. The parser corpus labels `anthropic_thinking` "block" while its test overrides it to "drop" (decision 5). Make the corpus row the only source.
-10. TEST-02 to TEST-04 are still proposals.
+**Decided by Josh on Oct 21, 2026.** FR-GATE-02's acceptance points at the Gate design decisions, `docs/gate-transport.md` and the corpus tests. FR-READ-04 is reworded to the deny that shipped. The code stays in `cli/Harpocrates/`. The FR-CLEAN rows are confirmed. `zstandard` is a runtime dependency before Python 3.14 (gate decision 16). This branch gets CI through a draft pull request. The block message keeps its pointer to `harpo doctor`, which ships with G7. NFR-01 has a separate first-turn target. The parser corpus becomes the only source of each case's expectation. TEST-03 and TEST-04 are approved; TEST-02 is not.
 
 No "Josh writes" item is in R0 to M2, so none was started.
 
