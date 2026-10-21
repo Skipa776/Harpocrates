@@ -1,18 +1,21 @@
 """The scan step (FR-GATE-02, FR-GATE-03, FR-GATE-04, FR-GATE-05, FR-GATE-10): parse a request, find the secrets in every
 string the model will see, and forward it with only those strings rewritten.
 
-Steps: scan the headers, path and query (a finding blocks); parse the body strictly; walk it by its format's tables;
-drop thinking blocks; scan each string (class R is rewritten, class S blocks on a finding, an object key blocks);
+Steps: scan the headers, path and query (decision 12: a header cannot be rewritten safely, so a finding there blocks;
+headers that carry the user's own credentials are skipped, not scanned); parse the body strictly; walk it by its format's
+tables; drop thinking blocks; scan each string (class R is rewritten, class S blocks on a finding, an object key blocks);
 splice the new strings and the cuts into the original text. A request with nothing to change is forwarded as the same bytes.
 """
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Iterator, Optional, Union
+from urllib.parse import unquote, unquote_plus
 
 from Harpocrates.gate import encoded, walk_anthropic, walk_responses
 from Harpocrates.gate.blocks import (
     ENCODED_SECRET,
     ENCODED_TOO_LARGE,
+    HEADER_SECRET,
     KEY_SECRET,
     MEDIA_SECRET,
     PARSE,
@@ -20,7 +23,6 @@ from Harpocrates.gate.blocks import (
     RefusalError,
 )
 from Harpocrates.gate.finder import Finder
-from Harpocrates.gate.header_scan import scan_head
 from Harpocrates.gate.jsontext import (
     BodyParseError,
     apply_edits,
@@ -34,6 +36,55 @@ from Harpocrates.gate.routes import Route
 from Harpocrates.gate.scan import Block, Forward, RequestHead
 from Harpocrates.gate.spancache import cache_key
 from Harpocrates.gate.walk_common import Drop, KeyText, Leaf, Media
+
+CREDENTIAL_WORDS = ("auth", "key", "token", "cookie", "secret")  # x-api-key, Authorization, x-codex-turn-state, set-cookie
+CREDENTIAL_NAMES = frozenset({"chatgpt-account-id"})
+CREDENTIAL_PREFIXES = ("anthropic-", "openai-")  # anthropic-version and -beta, OpenAI-Organization, -Project, -Beta
+
+
+def is_credential_header(name: str) -> bool:
+    """
+    Description: Decide whether a header carries a credential or protocol setting the user sends on purpose.
+    Parameters:
+        name: the header name, any case.
+    Output: True when the name contains auth, key, token, cookie or secret, is ChatGPT-Account-ID, or starts with
+        anthropic- or openai-. Such a header is forwarded byte for byte and not scanned.
+    """
+    lowered = name.lower()
+    return (lowered in CREDENTIAL_NAMES or lowered.startswith(CREDENTIAL_PREFIXES)
+            or any(word in lowered for word in CREDENTIAL_WORDS))
+
+
+def head_texts(head: RequestHead) -> Iterator[str]:
+    """
+    Description: List the strings of a request head that can hold a secret.
+    Parameters:
+        head: the headers, path and query.
+    Output: Each non-credential header value, then the path and the query; a path or query that changes when its percent
+        escapes are decoded is listed in both forms, so an encoded secret is found too.
+    """
+    for name, value in head.headers:
+        if value and not is_credential_header(name):
+            yield value
+    for part, decode in ((head.path, unquote), (head.query, unquote_plus)):
+        if part:
+            yield part
+            decoded = decode(part)
+            if decoded != part:
+                yield decoded
+
+
+def scan_head(head: RequestHead, finder: Finder) -> None:
+    """
+    Description: Block a request whose head holds a secret.
+    Parameters:
+        head: the headers, path and query.
+        finder: the session's finder.
+    Output: None. Raises RefusalError(HEADER_SECRET) at the first finding; never names the header.
+    """
+    for text in head_texts(head):
+        if finder.has_secret(text, "H"):
+            raise RefusalError(HEADER_SECRET)
 
 
 class RequestScanner:

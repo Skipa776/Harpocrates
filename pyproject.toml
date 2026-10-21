@@ -128,7 +128,6 @@ enforce = [
     "cli/Harpocrates/gate/encoded.py",
     "cli/Harpocrates/gate/errors.py",
     "cli/Harpocrates/gate/finder.py",
-    "cli/Harpocrates/gate/header_scan.py",
     "cli/Harpocrates/gate/headers.py",
     "cli/Harpocrates/gate/jsontext.py",
     "cli/Harpocrates/gate/media.py",
