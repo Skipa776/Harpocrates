@@ -340,6 +340,17 @@ def _line_base(line: str) -> Tuple[int, bool]:
     return len(line) - len(line.lstrip()) + len(stripped) - len(target), is_comment
 
 
+def _assigned_name(text: str, value_start: int) -> Optional[str]:
+    """
+    Description: Name the variable an assignment match assigns to.
+    Parameters:
+        text: the scanned text.
+        value_start: where the assigned value starts in text.
+    Output: Everything left of the value, cut at the first = or :, stripped; None when that is empty.
+    """
+    return text[:value_start].split("=")[0].split(":")[0].strip() or None
+
+
 def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[bool] = None) -> List[Finding]:
     """
     Description: Scan one line through all three detection phases.
@@ -372,6 +383,29 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
 
     in_comment = True if is_comment else None
 
+    def found(kind: str, token: str, evidence: EvidenceType, severity: Severity, confidence: float, inf,
+              start: Optional[int] = None, end: Optional[int] = None, entropy: Optional[float] = None) -> None:
+        """
+        Description: Add one finding on this line.
+        Parameters:
+            kind: the finding type, such as a signature name or ENTROPY_CANDIDATE.
+            token: the candidate value.
+            evidence: which phase found it.
+            severity: its severity.
+            confidence: its confidence before ML verification.
+            inf: the category inference for the token.
+            start, end: the token's offsets in the scanned text, when known.
+            entropy: the token's Shannon entropy, computed here when not given.
+        Output: None; appends to findings.
+        """
+        findings.append(Finding(
+            type=kind, file=file, line=lineno, snippet=stripped[:200],
+            entropy=shannon_entropy(token) if entropy is None else entropy,
+            evidence=evidence, severity=severity, confidence=confidence, token=token,
+            token_start=start, token_end=end, in_comment=in_comment,
+            category=inf.category.value, category_reason=inf.reason,
+        ))
+
     # ------------------------------------------------------------------
     # Phase 1: CRITICAL, then HIGH regex: deterministic, no ML needed.
     # ------------------------------------------------------------------
@@ -381,24 +415,9 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
             for match in pattern.finditer(scan_target):
                 token = match.group()
                 _inf = infer_category(signature_name=sig_name, var_name=None, token=token)
-                findings.append(
-                    Finding(
-                        type=sig_name,
-                        file=file,
-                        line=lineno,
-                        snippet=stripped[:200],
-                        entropy=shannon_entropy(token) if token else 0.0,
-                        evidence=EvidenceType.REGEX,
-                        severity=severity,
-                        confidence=confidence,
-                        token=token,
-                        token_start=match.start(),
-                        token_end=match.end(),
-                        in_comment=in_comment,
-                        category=_inf.category.value,
-                        category_reason=_inf.reason,
-                    )
-                )
+                found(sig_name, token, EvidenceType.REGEX, severity, confidence, _inf,
+                      start=match.start(), end=match.end(),
+                      entropy=shannon_entropy(token) if token else 0.0)
 
     # ------------------------------------------------------------------
     # Phase 2: Entropy fallback — only when regex found nothing.
@@ -438,22 +457,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
                 ent = shannon_entropy(token)
                 _vn = extract_var_name(scan_target, token)
                 _inf = infer_category(signature_name=None, var_name=_vn, token=token, line=scan_target)
-                findings.append(
-                    Finding(
-                        type="ENTROPY_CANDIDATE",
-                        file=file,
-                        line=lineno,
-                        snippet=stripped[:200],
-                        entropy=ent,
-                        evidence=EvidenceType.ENTROPY,
-                        severity=_severity_from_entropy(_inf),
-                        confidence=_calculate_entropy_confidence(ent),
-                        token=token,
-                        in_comment=in_comment,
-                        category=_inf.category.value,
-                        category_reason=_inf.reason,
-                    )
-                )
+                found("ENTROPY_CANDIDATE", token, EvidenceType.ENTROPY, _severity_from_entropy(_inf),
+                      _calculate_entropy_confidence(ent), _inf, entropy=ent)
 
         found_tokens = {f.token for f in findings}
         # These offsets count from scan_text (after URL stripping and, on a comment line, after the prefix), not
@@ -462,28 +467,10 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
             value = match.group(1)
             if value not in found_tokens:
                 ent = shannon_entropy(value)
-                # var name: everything left of the value in the match, stripped
-                _vn = scan_text[: match.start(1)].split("=")[0].split(":")[0].strip()
-                _vn = _vn or None
+                _vn = _assigned_name(scan_text, match.start(1))
                 _inf = infer_category(signature_name=None, var_name=_vn, token=value, line=scan_target)
-                findings.append(
-                    Finding(
-                        type="ML_CANDIDATE",
-                        file=file,
-                        line=lineno,
-                        snippet=stripped[:200],
-                        entropy=ent,
-                        evidence=EvidenceType.ML,
-                        severity=_severity_from_entropy(_inf),
-                        confidence=0.5,
-                        token=value,
-                        token_start=match.start(1),
-                        token_end=match.end(1),
-                        in_comment=in_comment,
-                        category=_inf.category.value,
-                        category_reason=_inf.reason,
-                    )
-                )
+                found("ML_CANDIDATE", value, EvidenceType.ML, _severity_from_entropy(_inf), 0.5, _inf,
+                      start=match.start(1), end=match.end(1), entropy=ent)
                 found_tokens.add(value)
 
         # Phase 2d: structured credential shapes (see _structured_candidates).
@@ -492,24 +479,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
                 continue
             _vn = extract_var_name(scan_target, value)
             _inf = infer_category(signature_name=None, var_name=_vn, token=value, line=scan_target)
-            findings.append(
-                Finding(
-                    type="ML_CANDIDATE",
-                    file=file,
-                    line=lineno,
-                    snippet=stripped[:200],
-                    entropy=shannon_entropy(value),
-                    evidence=EvidenceType.ML,
-                    severity=_severity_from_entropy(_inf),
-                    confidence=0.5,
-                    token=value,
-                    token_start=start,
-                    token_end=end,
-                    in_comment=in_comment,
-                    category=_inf.category.value,
-                    category_reason=_inf.reason,
-                )
-            )
+            found("ML_CANDIDATE", value, EvidenceType.ML, _severity_from_entropy(_inf), 0.5, _inf,
+                  start=start, end=end)
             found_tokens.add(value)
 
         # Phase 2c: unquoted KEY=VALUE for .env-style files. Runs on scan_text
@@ -522,27 +493,10 @@ def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[
                 value = match.group(1)
                 if value in found_tokens:
                     continue
-                _vn = scan_text[: match.start(1)].split("=")[0].split(":")[0].strip()
-                _vn = _vn or None
+                _vn = _assigned_name(scan_text, match.start(1))
                 _inf = infer_category(signature_name=None, var_name=_vn, token=value, line=scan_target)
-                findings.append(
-                    Finding(
-                        type="ENV_ASSIGNMENT",
-                        file=file,
-                        line=lineno,
-                        snippet=stripped[:200],
-                        entropy=shannon_entropy(value),
-                        evidence=EvidenceType.REGEX,
-                        severity=_severity_from_classification(_inf),
-                        confidence=_inf.confidence,
-                        token=value,
-                        token_start=match.start(1),
-                        token_end=match.end(1),
-                        in_comment=in_comment,
-                        category=_inf.category.value,
-                        category_reason=_inf.reason,
-                    )
-                )
+                found("ENV_ASSIGNMENT", value, EvidenceType.REGEX, _severity_from_classification(_inf),
+                      _inf.confidence, _inf, start=match.start(1), end=match.end(1))
                 found_tokens.add(value)
 
     return findings
