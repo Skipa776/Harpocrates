@@ -121,7 +121,7 @@ Both choices fail closed.
 - **The real PNG.** It reached the mock byte-identical in every run (`png.identical` equals `png.payloads` in the report) and was logged as `image/png` in each request that carried it.
 - **The agents' own image tools and MCP images.** Neither agent sent the text file as base64 this way (T11): both check the bytes, so nothing was blocked and 0 canaries were received, with the gate on or off.
 - **The MCP PDF resource through Codex is the one path that sent the file.** With the gate off, the mock received all 5 canaries from the `.env` (3 known-format) inside base64, but in a text field: Codex sends the resource as JSON text with the base64 blob in it. With the gate on, 0 were received at any base64 alignment. The whole blob was replaced by one `generic` placeholder. That is most likely the detector's entropy stage, since the gate log does not record which detector stage fired. The gate did not decode the blob.
-- **Open gap: the 0 above is accidental protection, not a proven one.**
+- **Open gap, closed by FR-GATE-11 (`docs/gate-base64-text-spec.md`, run `g5i`): the 0 above was accidental protection, not a proven one.**
   - **It isn't caught on purpose.** A secret base64-encoded inside a text field is caught only when the encoded run looks random to the detector, and a short one may not.
   - **Benign blobs get redacted.** A benign blob in text, such as a real PDF resource, gets redacted the same way.
   - **Proposed fix (not in this spec):** decode long base64 runs inside R and S text, scan the decoded text, and block on a finding. It needs its own decision.

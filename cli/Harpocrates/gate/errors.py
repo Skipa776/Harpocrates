@@ -29,7 +29,11 @@ _RECOVERY_PHRASES = ("thinking", "signature", "bound to a different conversation
 _ADVICE = {"HARPO-BLOCK-PROVIDER-TEXT": "The conversation holds a secret in text that only the provider can rewrite. "
                                         "Start a new session. ",
            "HARPO-BLOCK-MEDIA-SECRET": "A file sent as base64 holds a secret. Send the file as text instead, so Harpo "
-                                       "can redact it. "}
+                                       "can redact it. ",
+           "HARPO-BLOCK-ENCODED-SECRET": "Text in this request holds base64-encoded data with a secret in it. Remove it or "
+                                         "send the decoded text, so Harpo can redact it. ",
+           "HARPO-BLOCK-ENCODED-TOO-LARGE": "Text in this request holds more base64-encoded data than Harpo checks in one "
+                                            "request. Remove the large encoded blob. "}
 _KINDS = {
     "anthropic": {400: "invalid_request_error", 401: "authentication_error", 426: "invalid_request_error",
                   502: "api_error"},

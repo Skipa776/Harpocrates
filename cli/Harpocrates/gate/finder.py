@@ -83,7 +83,7 @@ class Finder:
         Description: Find the secrets in a leaf, from the cache when it has been seen.
         Parameters:
             text: the leaf text.
-            field_class: "R", "S", "K" or "H" (part of the cache key).
+            field_class: "R", "S", "K", "H" or "B" (a base64 decoding, FR-GATE-11); part of the cache key.
         Output: The spans, possibly empty. Detector errors propagate and nothing is cached for them.
         """
         key = cache_key(field_class, text)

@@ -37,7 +37,8 @@ def cache_key(field_class: str, text: str) -> bytes:
     """
     Description: Hash a leaf into the key under which its findings are kept.
     Parameters:
-        field_class: "R" (rewrite), "S" (scan only), "K" (object key) or "H" (header, path or query).
+        field_class: "R" (rewrite), "S" (scan only), "K" (object key), "H" (header, path or query), "B" (a base64
+            decoding), "E" or "J" (a leaf, plain or read as JSON, checked for base64; FR-GATE-11).
         text: the leaf text.
     Output: A 32-byte SHA-256 digest of the class and the text. The text itself is not recoverable from it.
     """

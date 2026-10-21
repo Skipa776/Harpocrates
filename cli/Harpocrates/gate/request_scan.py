@@ -9,8 +9,16 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
-from Harpocrates.gate import walk_anthropic, walk_responses
-from Harpocrates.gate.blocks import KEY_SECRET, MEDIA_SECRET, PARSE, PROVIDER_TEXT, RefusalError
+from Harpocrates.gate import encoded, walk_anthropic, walk_responses
+from Harpocrates.gate.blocks import (
+    ENCODED_SECRET,
+    ENCODED_TOO_LARGE,
+    KEY_SECRET,
+    MEDIA_SECRET,
+    PARSE,
+    PROVIDER_TEXT,
+    RefusalError,
+)
 from Harpocrates.gate.finder import Finder
 from Harpocrates.gate.header_scan import scan_head
 from Harpocrates.gate.jsonlocate import locate
@@ -19,6 +27,7 @@ from Harpocrates.gate.jsonstring import redact_json_string
 from Harpocrates.gate.media import MediaNote, binary_kind, decode_strict, readings
 from Harpocrates.gate.routes import Route
 from Harpocrates.gate.scan import Block, Forward, RequestHead
+from Harpocrates.gate.spancache import cache_key
 from Harpocrates.gate.walk_common import Drop, KeyText, Leaf, Media
 
 
@@ -74,6 +83,7 @@ class RequestScanner:
         replacements: dict[tuple, str] = {}
         drops: list[tuple] = []
         notes: list[MediaNote] = []
+        budget = [encoded.MAX_RUN_CHARS]
         for op in walk(tree):
             if isinstance(op, Media):
                 note = self._media(op)
@@ -87,8 +97,10 @@ class RequestScanner:
             elif op.cls == "S":
                 if self.finder.has_secret(op.text, "S"):
                     raise RefusalError(PROVIDER_TEXT)
+                self._encoded(op, budget)
             else:
                 new = self._rewrite(op)
+                self._encoded(op, budget)
                 if new is not None:
                     replacements[op.path] = new
         if not replacements and not drops:
@@ -114,6 +126,34 @@ class RequestScanner:
         if any(self.finder.has_secret(text, "S") for text in readings(data)):
             raise RefusalError(MEDIA_SECRET)
         return None
+
+    def _encoded(self, leaf: Leaf, budget: list[int]) -> None:
+        """
+        Description: Look for a secret base64-encoded inside one class R or S string (FR-GATE-11).
+        Parameters:
+            leaf: the string and how to read it.
+            budget: one-item list, the base64 characters this request may still decode; reduced by this leaf's runs.
+        Output: None. Raises RefusalError(ENCODED_SECRET) when the text in any decoding of a base64 run in the leaf
+            holds a secret, and RefusalError(ENCODED_TOO_LARGE) when the request's runs pass the budget. A leaf found
+            clean is remembered by its hash (cache class "E", or "J" for a leaf read as JSON, which is searched more
+            widely) and each decoding's findings under class "B", so a resent history is not decoded or scanned again;
+            no text is kept.
+        """
+        key = cache_key("J" if leaf.as_json else "E", leaf.text)
+        if self.finder.cache.get(key) is not None:
+            return
+        for text in encoded.strings_of(leaf.text, leaf.as_json):
+            found = []
+            for run in encoded.runs(text):  # the budget is checked as runs are found, before any decoding
+                budget[0] -= len(run)
+                if budget[0] < 0:
+                    raise RefusalError(ENCODED_TOO_LARGE)
+                found.append(run)
+            for run in found:
+                for decoded in encoded.texts_of_run(run):
+                    if self.finder.has_secret(decoded, "B"):
+                        raise RefusalError(ENCODED_SECRET)
+        self.finder.cache.put(key, ())
 
     def _rewrite(self, leaf: Leaf) -> Optional[str]:
         """

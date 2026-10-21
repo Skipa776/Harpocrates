@@ -67,6 +67,52 @@ Placeholders (`<<HARPO:...>>`) and media fields (class M, G5) are not affected. 
 
 Each one is a separate decision if needed.
 
+## Implementation notes (Oct 20, 2026, after review)
+
+The code is `cli/Harpocrates/gate/encoded.py` (run finder, decoder, text filter). `RequestScanner._encoded` runs it on every class R and S leaf, after that leaf's own scan.
+
+The security and python reviews found bypasses of rules 1 and 3 as first written. All of these are fixed, so the rule is now stricter than the text above. The tests are in `cli/tests/test_fr_gate_11_encoded_text.py`.
+
+- **Rule 1, separators.** A run may be split by spaces, tabs, real line breaks, or the two-character escapes `\n` and `\r\n` left in text, as when a tool result prints a JSON or notebook file. The split joins only between pieces of 16 or more characters, plus a short last piece, so prose never becomes a run.
+- **Rule 3, text filter.**
+  - A decoding is scanned whole when at least 90% of it is printable. Otherwise only its printable stretches of 32 or more characters are scanned, which catches a secret next to stray bytes, Latin-1 accents or a long garbage prefix. Random and compressed bytes essentially never hold a 32-character printable stretch.
+  - The bytes are also read as UTF-16, little- or big-endian, when their NUL bytes fall every other byte. A `.env` written by PowerShell then base64-encoded is caught.
+  - Bad UTF-8 bytes are replaced and count as not printable.
+- **Size cap (new).** One request may decode at most 2 MiB of base64 run characters. The budget is checked as runs are found, before any decoding. Past it the request blocks at once with `HARPO-BLOCK-ENCODED-TOO-LARGE`, not after a 5 s timeout. That leaves no scan thread decoding after its request was already blocked.
+  - **Why 2 MiB:** it sits below what one 5 s scan can decode (about 3 MB, measured in review) and far above anything recorded. The largest recorded request holds 2,202 run characters.
+  - **Trade-off (rule 4):** a legitimate request with more than 2 MiB of base64 in text is blocked. It would have hit the scan timeout and been blocked anyway, only more slowly.
+  - Runs in leaves already found clean on an earlier turn don't count against the cap.
+- **Cache.**
+  - A leaf found clean is remembered by SHA-256 under class `E`, or `J` when it was read as JSON. Keeping them apart matters because a JSON reading is searched more widely (escapes decoded). Text first seen as plain text, then sent as tool-call arguments, is searched again.
+  - Each decoding's findings are cached under class `B`. No text is kept (SEC-02).
+- **Order in a class S field.** The raw text is scanned first. If the detector flags the run itself, the request blocks with `PROVIDER-TEXT` before decoding.
+- **Still accepted limits** (each needs deliberate evasion rather than an accident, per the second security review):
+  - a secret interleaved with a non-printable byte every few bytes, which leaves no 32-character stretch;
+  - a secret under 32 characters inside a mostly binary decoding;
+  - a run split into pieces under 16 characters, or by commas, `+` or zero-width characters;
+  - encodings other than base64;
+  - compression;
+  - double encoding.
+- **Follow-up, not FR-GATE-11's to fix.** A scan that times out is blocked, but its worker thread cannot be cancelled and runs on. That is how the scan step has worked since G4. The size cap keeps base64 decoding from adding to it, but the general fix (a deadline checked inside the scan, or a process pool) belongs to its own requirement.
+
+## Results (Oct 20, 2026, final code)
+
+- **False-positive check.** `python -m bench.gate_encoded_fp`, report `bench/results/gate/encoded-fp-2026-10-20.json`, covering every recording in `bench/results/mock` (G2, G3 retro, G4, G5 and the canary harness runs).
+  - Volume: 1,038 unique requests on scan routes, 26,024 base64 runs, and 13 decodings with text.
+  - **Would block: 3 requests.** All are the Codex MCP gate-off controls (`g5f`, `g5g`, `g5h`), whose blob is the canary `.env`. **0 outside the canary cases.**
+- **End to end.** Suite `g5`, report `bench/results/proof/20261020-gate-e2e-g5i.json`.
+  - `codex-mcp-gate` ends with `HARPO-BLOCK-ENCODED-SECRET`. Codex shows the gate's message, the mock records 3 requests (the blocked fourth never left), and 0 canaries are received.
+  - The other seven scenarios are unchanged. The PNG stays byte-identical, and the Codex MCP control still leaks all 5 canaries.
+- **Latency (NFR-01).** `python -m bench.gate_scan_latency` on the G2 runs, report `bench/results/gate/scan-latency-2026-10-20-fr-gate-11.json`. G4's file is left as published.
+
+  | Case | G4 p95 | p95 with FR-GATE-11 |
+  | --- | --- | --- |
+  | Follow-up turns | 8.8 ms | 12.2 ms |
+  | Large follow-ups | 11.8 ms | 14.2 ms |
+  | First turns | 318 ms | 347 ms |
+
+  The follow-up target (under 50 ms) is still met.
+
 ## Decisions
 
 Josh approved the spec as written on Oct 20, 2026.

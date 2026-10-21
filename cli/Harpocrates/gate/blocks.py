@@ -12,6 +12,8 @@ HEADER_SECRET = "HARPO-BLOCK-HEADER-SECRET"  # a secret in a header value, the p
 HISTORY = "HARPO-BLOCK-HISTORY"  # server-side history the gate cannot see (previous_response_id, conversation)
 MEDIA_MALFORMED = "HARPO-BLOCK-MEDIA-MALFORMED"  # a media field that is not strict base64 to its end (FR-GATE-07)
 MEDIA_SECRET = "HARPO-BLOCK-MEDIA-SECRET"  # a secret in a text file sent as base64, which is not rewritten in v1
+ENCODED_SECRET = "HARPO-BLOCK-ENCODED-SECRET"  # a secret in base64 inside a text field (FR-GATE-11)
+ENCODED_TOO_LARGE = "HARPO-BLOCK-ENCODED-TOO-LARGE"  # more base64 in text than one request may decode (FR-GATE-11)
 JSON_ARGS = "HARPO-BLOCK-JSON-ARGS"  # tool-call arguments that parsed before redaction but not after
 
 
