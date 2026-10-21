@@ -78,15 +78,15 @@ Cause: Codex runs a new or changed hook only after you trust it.
 
 Fix: Start `codex`, type `/hooks`, and trust the Harpo hook.
 
-## The egress gate (development branch)
+## The egress gate
 
-The gate is built, but `harpo install` does not set it up yet, so it is started by hand with `python -m Harpocrates.gate --port N --token-file F`; it prints `{"listening": URL}` on stdout and writes one JSON line per request to stderr. The request log holds the decision and reason code, never header values or body content.
+`harpo guard up` starts the gate and routes the agents to it; `harpo doctor` checks the setup. The gate's request log is ~/.harpo/gate.log: one JSON line per request, with the decision and reason code, never a header value or body.
 
-**The block message says "Run `harpo doctor` for details", but there is no `harpo doctor`.**
+**A block message says "Run `harpo doctor` for details."**
 
-Cause: `harpo doctor` (FR-INSTALL-02) is not built yet.
+Cause: The gate refused the request; the reason code in the message says why (table below).
 
-Fix: Read the reason code in the message, and look it up in the table below. The request log line for that request has the same code.
+Fix: Run `harpo doctor`: it checks the gate and the routing and names the fix for each failure.
 
 **Every request from Codex with a ChatGPT login is blocked with HARPO-BLOCK-ENCODING.**
 
@@ -111,6 +111,24 @@ Fix: Remove the override from that file or the environment.
 Cause: Python 3.13 parses HTTP/0.9 headers differently. The request was blocked either way.
 
 Fix: Update the checkout. This was fixed on Oct 21, 2026.
+
+**`harpo guard up` refuses Claude Code or Codex.**
+
+Cause: That harness already routes elsewhere. The settings it refuses on are its own `ANTHROPIC_BASE_URL` or `ANTHROPIC_CUSTOM_HEADERS`, a `CLAUDE_CODE_USE_<provider>` setting that is on, or, for Codex, its own `model_provider` or `openai_base_url`. Chaining to an existing gateway is not supported yet.
+
+Fix: Remove that setting. Or leave that harness off the gate by naming only the other one with `--claude-code` or `--codex`.
+
+**Requests fail to connect after a reboot or after the gate stopped.**
+
+Cause: The agents are still routed to a gate that is not running. Nothing is sent unscanned; the requests just fail.
+
+Fix: Run `harpo guard up` to start the gate again, or `harpo guard down` to take the agents off the gate.
+
+**Codex through the gate gets no Authorization header.**
+
+Cause: With codex-cli 0.163.0, an API key that is only in the `OPENAI_API_KEY` environment variable was not sent through a custom provider (see [gate-transport.md](gate-transport.md), T4).
+
+Fix: Run `codex login`, with a ChatGPT login or `codex login --with-api-key`.
 
 ## Block reason codes
 

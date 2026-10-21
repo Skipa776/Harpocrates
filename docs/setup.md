@@ -2,7 +2,7 @@
 
 FR-READ-03. This guide makes Claude Code or Codex refuse their built-in reads of files that usually hold secrets. The agent reads those files through the Harpo MCP tools instead: `safe_read` and `safe_grep` return them with every detected secret replaced by a `<<HARPO:type:hash>>` placeholder.
 
-What this protects today, and what it doesn't, is in the [threat model](threat-model.md). In short, until the egress gate ships (M2), a secret the agent reaches through the shell in some other way still goes to the model. The gate is built on the development branch and passes its end-to-end suites against a mock provider, but `harpo install` does not set it up yet. How those suites run is in [testing.md](testing.md); common problems are in [troubleshooting.md](troubleshooting.md).
+What this protects today, and what it doesn't, is in the [threat model](threat-model.md). In short, the read tool and the hook cover the agent's own file reads; without the egress gate, a secret the agent reaches through the shell in some other way still goes to the model. The egress gate covers the rest: `harpo guard up` (section 5) routes every provider-bound request through it. How those suites run is in [testing.md](testing.md); common problems are in [troubleshooting.md](troubleshooting.md).
 
 ## 1. Install
 
@@ -149,6 +149,38 @@ codex sandbox -- cat .env           # cat: .env: Operation not permitted
 
 **Limit:** the profile is off when Codex runs unsandboxed, with `sandbox_mode = "danger-full-access"` or `--dangerously-bypass-approvals-and-sandbox`.
 
+## 5. Egress gate: `harpo guard up`
+
+The egress gate is a local proxy that scans every request the agents send to a provider. `harpo guard up` starts it in the background on 127.0.0.1, on port 47321 by default, with a new token. Use `--port N` to pick another port, or `--port 0` to take any free port.
+
+```bash
+harpo guard up              # start the gate and route every detected harness
+harpo guard up --dry-run    # show what would change, change nothing
+harpo doctor                # check the gate and the routing on this machine
+harpo guard down            # remove the routing and stop the gate
+```
+
+`guard up` routes every harness it detects. To route only one, use `--claude-code` or `--codex`.
+
+- **Claude Code** goes through the `env` block of `~/.claude/settings.json`: `ANTHROPIC_BASE_URL` points at the gate, and `ANTHROPIC_CUSTOM_HEADERS` carries the gate token.
+- **Codex** goes through a block marked `# >>> harpo gate >>>` in `~/.codex/config.toml`. It sets `model_provider = "harpo"` and adds a `[model_providers.harpo]` provider that points at the gate.
+
+The gate's files are in `~/.harpo`: `gate.token`, `gate.pid` and `gate.log`. All three are mode 0600. `gate.log` has one line per request with the decision. It never holds a header value or a body.
+
+`guard up` refuses a harness that already routes elsewhere. That means its own `ANTHROPIC_BASE_URL` or `ANTHROPIC_CUSTOM_HEADERS`, a `CLAUDE_CODE_USE_<provider>` setting that is on, or, for Codex, its own `model_provider` or `openai_base_url`. Chaining to an existing gateway is not supported yet. Remove that setting, or leave that harness off the gate.
+
+Running `harpo guard up` again replaces the gate and the token. Agent sessions that were already running must be restarted.
+
+`harpo guard down` removes the routing and stops the gate. A file nobody changed since `guard up` gets its exact earlier bytes back. A file that `guard up` created is deleted. A file edited since keeps the edits and loses only Harpo's lines.
+
+While the agents are routed, a stopped or crashed gate means their requests fail to connect. Nothing is sent unscanned. There is no login service, so after a reboot, run `harpo guard up` again.
+
+`harpo doctor` checks this machine only, and sends nothing to a provider. It checks the read hook, the gate entry, that the gate process runs, that the gate refuses a request without the token and accepts the token, that each routed harness names the gate with the current token, and that no setting in the current folder or the environment moves Claude Code off the gate (SEC-10). Use `harpo doctor --json` in scripts. It exits with status 1 if any check fails, and each failure names its fix.
+
+Codex through the gate uses Codex's own login (`requires_openai_auth = true`). Use a ChatGPT login, or `codex login --with-api-key`. With codex-cli 0.163.0, an API key that is only in the `OPENAI_API_KEY` environment variable was not sent through a custom provider (see [gate-transport.md](gate-transport.md), T4). Log in instead.
+
+The end-to-end check for this section is G7 in [testing.md](testing.md).
+
 ## Migrating from ~/.harpocrates
 
 **The MCP server was renamed too.** Before the rename it was registered as `harpocrates`, so the tools were `mcp__harpocrates__safe_read` and `mcp__harpocrates__safe_grep`. They are `harpo` and `mcp__harpo__safe_read` / `mcp__harpo__safe_grep` now. Re-run `harpo install`: it registers `harpo`, removes the `harpocrates` registration and the allow rules for the old tool names that the earlier install added, rewrites the marked blocks in `CLAUDE.md`, `AGENTS.md` and `~/.codex/config.toml` under the new names, and moves the Codex profile from `harpocrates` to `harpo`. It never drops a deny rule. A registration, rule or block you made yourself under the old names is left alone, and `harpo install` tells you how to remove the registration. `harpo uninstall` removes the new and the old names. Until you re-run it, the old setup keeps working, and a refusal names both tool spellings. The first original of each edited file is kept as `<file>.harpo.bak` (an existing `<file>.harpocrates.bak` counts as that backup).
@@ -193,3 +225,4 @@ The environment variables `HARPO_RUST_SCANNER`, `HARPO_RUST_TIMEOUT_SECONDS`, `H
 | Codex hook, live | Pending your one-time trust in `/hooks`. Then run `python bench/live_canary_check.py --agent codex --task --installed`. Its logic is unit-tested on that exact command shape. |
 | Fresh-machine setup in under 5 minutes, done by someone else | Pending. This is FR-READ-03's acceptance test. |
 | Claude Code 2.1.306 and Codex 0.163.0, Oct 21, 2026: the installed hook in a throwaway home, scripted Read `.env`, `cat` and `grep`, mock provider (`python bench/canary_harness.py --mode agent --agent all`) | 0 of 22 known-format canaries reached the provider; each agent made its 3 tool calls. The same run with nothing installed (`--control`): 10 of 22 reached it. Scripted calls and a mock provider, not a live model |
+| `harpo guard up` with real agents, Oct 21, 2026: Claude Code 2.1.306 and Codex 0.163.0 (`python -m bench.guard_e2e`) | With routing written only by `guard up`, the sessions leaked 0 of 11 known-format canaries to the mock provider, and `harpo doctor` passed. After `guard down` both files were byte-identical. The same reads with nothing routed leaked 5 of 11. |
