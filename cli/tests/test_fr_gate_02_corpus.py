@@ -25,18 +25,13 @@ from Harpocrates.read import Redactor
 
 CASES = gate_corpus.build_corpus(0)
 assert len(CASES) == 94
-# What G4 does where the G2 corpus still holds the pre-decision expectation (FR-GATE-10, docs/design.md):
-#  * thinking and redacted_thinking blocks are dropped, not blocked or passed (decision 5, FR-GATE-10);
-#  * previous_response_id blocks whether or not the gate has seen the id: v1 has no relay tee (decision 1).
-EXPECT = {"anthropic_thinking": "drop", "anthropic_redacted_thinking": "drop",
-          "responses_previous_response_id_seen_passes": "block"}
 CODES = {
     "anthropic_compaction": blocks.PROVIDER_TEXT, "anthropic_web_search_tool_result": blocks.PROVIDER_TEXT,
     "anthropic_mcp_tool_listing": blocks.PROVIDER_TEXT, "responses_reasoning": blocks.PROVIDER_TEXT,
     "anthropic_unknown_block_blocked": blocks.UNKNOWN_TYPE, "anthropic_tools_unknown_type_blocked": blocks.UNKNOWN_TYPE,
     "responses_unknown_item_blocked": blocks.UNKNOWN_TYPE, "responses_tools_unknown_type_blocked": blocks.UNKNOWN_TYPE,
     "responses_function_call_arguments_key_blocked": blocks.KEY_SECRET,
-    "responses_previous_response_id_seen_passes": blocks.HISTORY, "responses_previous_response_id_unseen_blocked": blocks.HISTORY,
+    "responses_previous_response_id_seen_blocked": blocks.HISTORY, "responses_previous_response_id_unseen_blocked": blocks.HISTORY,
     "responses_conversation_blocked": blocks.HISTORY,
 }
 FINDING_DEPENDENT = {blocks.PROVIDER_TEXT, blocks.KEY_SECRET}  # blocks that need the detector to find something
@@ -118,7 +113,7 @@ def check_bytes_outside_spans(case, original: bytes, out: bytes) -> None:
 def check_case(case, scan, with_oracle: bool) -> None:
     body = json.dumps(case.body).encode()
     result = run(scan, body, classify("POST", case.route, dict(head_for(case).headers)), head_for(case))
-    kind = EXPECT.get(case.case_id, case.expect)
+    kind = case.expect
     canary = case.canary_value
     if kind == "block":
         if CODES[case.case_id] in FINDING_DEPENDENT and isinstance(result, Forward) and not with_oracle:
@@ -161,8 +156,8 @@ for _case in CASES:
 
 def test_fr_gate_02_the_corpus_has_94_cases_and_the_g4_expectations_name_real_cases() -> None:
     ids = {c.case_id for c in CASES}
-    assert len(CASES) == 94 and set(EXPECT) <= ids and set(CODES) <= ids
-    assert {c.case_id for c in CASES if EXPECT.get(c.case_id, c.expect) == "block"} == set(CODES)
+    assert len(CASES) == 94 and set(CODES) <= ids
+    assert {c.case_id for c in CASES if c.expect == "block"} == set(CODES)
 
 
 def test_fr_gate_02_ml_only_corpus_misses_are_a_bounded_detector_limit() -> None:

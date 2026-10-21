@@ -209,7 +209,7 @@ def rows() -> list[Row]:
         Row("responses_text_format_schema", "top-level", "text.format", "redact", lambda c: _req(
             "hi", text={"format": {"type": "json_schema", "name": "out", "description": f"use {c}",
                                    "schema": _params("q")}}), spec=False),
-        Row("responses_previous_response_id_seen_passes", "policy", "previous_response_id", "pass", lambda c: _req(
+        Row("responses_previous_response_id_seen_blocked", "policy", "previous_response_id", "block", lambda c: _req(
             [{"type": "message", "role": "user", "content": "next"}], previous_response_id="resp_seen_001"), plant=False),
         Row("responses_previous_response_id_unseen_blocked", "policy", "previous_response_id", "block", lambda c: _req(
             [{"type": "message", "role": "user", "content": "next"}], previous_response_id="resp_unseen_999"), plant=False),

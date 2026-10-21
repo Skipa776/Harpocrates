@@ -114,9 +114,9 @@ def rows() -> list[Row]:
         Row("anthropic_tool_result_blocks", "content-block", "tool_result", "redact", lambda c: _tool_pair(
             [{"type": "text", "text": f"out {c}"}, {"type": "image", "source": {"type": "base64", "media_type": "image/png",
                                                                                 "data": PNG}}])),
-        Row("anthropic_thinking", "content-block", "thinking", "block", lambda c: _assistant(
+        Row("anthropic_thinking", "content-block", "thinking", "drop", lambda c: _assistant(
             {"type": "thinking", "thinking": f"I should use {c}", "signature": SIG})),
-        Row("anthropic_redacted_thinking", "content-block", "redacted_thinking", "pass", lambda c: _assistant(
+        Row("anthropic_redacted_thinking", "content-block", "redacted_thinking", "drop", lambda c: _assistant(
             {"type": "redacted_thinking", "data": SIG}), plant=False),
         Row("anthropic_compaction", "content-block", "compaction", "block", lambda c: _assistant(
             {"type": "compaction", "content": f"summary {c}", "signature": SIG})),

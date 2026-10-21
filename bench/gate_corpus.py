@@ -48,7 +48,7 @@ class Row(NamedTuple):
         case_id: unique id; for a case the parser spec lists, the spec's test name without the test_fr_gate_02_ prefix.
         section: content-block, system-role, tools, top-level, input-item or policy.
         block_type: the block, item, tool or field this case exercises.
-        expect: what a gate must do: redact (replace the canary), block (refuse the request) or pass (forward as is).
+        expect: what a gate must do: redact (replace the canary), block (refuse the request), drop (remove the block from the request, gate decision 5) or pass (forward as is).
         build: a function from the canary value to the request body.
         kind: a canary kind to use instead of the rotating one (private_key for a multi-line value), or None.
         plant: False for a case with no scannable text (a pass-through type): the body is built without a canary.
@@ -77,7 +77,7 @@ class Case:
         route: the path to send it to: /v1/messages or /v1/responses.
         section: content-block, system-role, tools, top-level, input-item or policy.
         block_type: the block, item, tool or field exercised.
-        expect: redact, block or pass.
+        expect: redact (replace the canary), block (refuse the request), drop (remove the block from the request, gate decision 5) or pass (forward as is).
         canary_kind: the kind planted (a key of canary_repo's canaries), or None.
         canary_class: known-format or ml-only, or None.
         canary_value: the planted value; never put it in a report.

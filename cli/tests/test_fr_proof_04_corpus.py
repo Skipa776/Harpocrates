@@ -15,7 +15,7 @@ from bench import canary_match as match
 from bench import gate_corpus as corpus
 
 CASES = corpus.build_corpus(0)
-EXPECTS = {"redact", "block", "pass"}
+EXPECTS = {"redact", "block", "drop", "pass"}
 
 # Frozen FR-GATE-02 coverage contract (docs/design.md), independent of the corpus builders.
 PARSER_CASE_NAMES = frozenset({
@@ -76,7 +76,7 @@ PARSER_CASE_NAMES = frozenset({
     "test_fr_gate_02_responses_mcp_list_tools",
     "test_fr_gate_02_responses_message_string",
     "test_fr_gate_02_responses_output_text",
-    "test_fr_gate_02_responses_previous_response_id_seen_passes",
+    "test_fr_gate_02_responses_previous_response_id_seen_blocked",
     "test_fr_gate_02_responses_previous_response_id_unseen_blocked",
     "test_fr_gate_02_responses_reasoning",
     "test_fr_gate_02_responses_refusal",
@@ -120,7 +120,7 @@ def test_fr_proof_04_corpus_every_planted_canary_is_in_its_body_at_the_named_fie
         text = json.dumps(case.body)
         if case.canary_value is None:
             assert case.canary_kind is None and case.field_path is None, case.case_id
-            assert case.expect == "pass" or (case.expect == "block" and case.section == "policy"), case.case_id
+            assert case.expect in ("pass", "drop") or (case.expect == "block" and case.section == "policy"), case.case_id
             continue
         hits = match.locate(text, case.canary_value)
         assert hits, case.case_id
@@ -140,12 +140,14 @@ def test_fr_proof_04_corpus_canaries_are_generated_and_both_classes_appear() -> 
 def test_fr_proof_04_corpus_expectations_follow_the_spec_classes() -> None:
     by_id = {c.case_id: c for c in CASES}
     assert {c.expect for c in CASES} == EXPECTS
-    blocked = {"anthropic_thinking", "anthropic_compaction", "anthropic_web_search_tool_result", "anthropic_mcp_tool_listing",
+    blocked = {"anthropic_compaction", "anthropic_web_search_tool_result", "anthropic_mcp_tool_listing",
                "anthropic_unknown_block_blocked", "anthropic_tools_unknown_type_blocked", "responses_reasoning",
                "responses_unknown_item_blocked", "responses_tools_unknown_type_blocked", "responses_conversation_blocked"}
     assert blocked <= {c.case_id for c in CASES if c.expect == "block"}
     assert all(by_id[i].canary_value is not None for i in blocked - {"responses_conversation_blocked"})
-    passed = {"anthropic_redacted_thinking", "anthropic_container_upload", "anthropic_tool_removal", "anthropic_tools_server",
+    dropped = {"anthropic_thinking", "anthropic_redacted_thinking"}
+    assert dropped == {c.case_id for c in CASES if c.expect == "drop"}
+    passed = {"anthropic_container_upload", "anthropic_tool_removal", "anthropic_tools_server",
               "anthropic_tools_mcp_toolset", "responses_item_reference", "responses_compaction",
               "responses_computer_call_output", "anthropic_tool_search_tool_result"}
     assert passed <= {c.case_id for c in CASES if c.expect == "pass"}
