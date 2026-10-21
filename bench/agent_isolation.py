@@ -54,8 +54,17 @@ import Harpocrates.paths as paths
 paths.home = lambda: target
 if installing:
     sys.executable = record_python
+upstream = os.environ.get("HARPO_E2E_UPSTREAM")
+if upstream and sys.argv[1] == "Harpocrates.gate":
+    import dataclasses
+    import Harpocrates.gate.config as config
+    names = ("anthropic_upstream", "openai_upstream", "chatgpt_upstream")
+    config.GateConfig = dataclasses.make_dataclass("GateConfig", [(n, str, dataclasses.field(default=upstream)) for n in names],
+                                                   bases=(config.GateConfig,), frozen=True)
 runpy.run_module(sys.argv.pop(1), run_name="__main__", alter_sys=True)
 """
+# HARPO_E2E_UPSTREAM (bench/guard_e2e.py only): a gate that `harpo guard up` starts inside the throwaway home forwards to the
+# mock provider. It exists only in this test bootstrap; the product has no setting that moves the gate's upstream.
 
 
 class IsolationError(Exception):
