@@ -196,7 +196,7 @@ def scan(
         help="Scan directories recursively"
     ),
     json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
-    max_file_size: int = typer.Option(10, "--max-size", help="Max file size in MB"),
+    max_file_size: int = typer.Option(10, "--max-size", help="Max file size in MB; a larger file is an error, not a partial scan."),
     engine: str = typer.Option(
         "auto",
         "--engine",

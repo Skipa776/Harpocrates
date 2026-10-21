@@ -295,7 +295,8 @@ def scan_file(
         engine: ``auto`` prefers a built Rust scanner, ``rust`` requires it, and ``python`` uses the
         original detector
     Output: ScanResult with findings, counts, timing, and captured errors; reads the file and may
-    initialize a native backend or ML verifier. Auto mode records native failures and falls back to
+    initialize a native backend or ML verifier. A file over max_file_size is not scanned: the result
+    holds the error "Skipped large file: PATH", as in a folder scan (the CLI then exits 2). Auto mode records native failures and falls back to
     Python; line-count read failures produce zero lines.
     ScanResult containing findings from this file
     Example: >>> result = scan_file("config.env") >>> if result.found_secrets: ... print(f"⚠️ Found
@@ -306,6 +307,12 @@ def scan_file(
 
     if not file_path.exists():
         return ScanResult(findings=[], errors=[f"File not found: {filepath}"])
+    try:
+        too_large = file_path.stat().st_size > max_file_size
+    except OSError as exc:
+        return ScanResult(findings=[], errors=[f"Cannot access {file_path}: {exc}"])
+    if too_large:  # as in a folder scan: an error, never a silent scan of the first max_file_size bytes
+        return ScanResult(findings=[], errors=[f"Skipped large file: {file_path}"])
 
     try:
         native_backend = _resolve_native_backend(engine)

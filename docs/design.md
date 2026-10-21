@@ -126,6 +126,17 @@ Every requirement has an ID, a milestone, and a test that proves it. Reference I
 | FR-CORE-06 | Separate thresholds per layer: recall-favoring for the gate, precision-favoring for commits | Thresholds set in config; both documented with their precision and recall | M1 |
 | FR-CORE-07 | Candidate and feature extraction run in time linear in line length, so a 100k+ character line (minified JS, inline base64) cannot stall a scan or a hook call | `test_fr_core_07_*`: a long minified line scans within a fixed time bound, including runs of whitespace, `#` and `/`, on every path including `--explain` and MCP `include_contributions`; findings snapshot unchanged | R0 |
 
+
+**FR-CORE-05 spec** (Oct 21, 2026; scope, cap and engines decided by Josh the same day).
+
+- **Inputs.** Files given to `harpo scan` and folder scans, on both engines; the read tool (`safe_read`, `safe_grep`); and the hook's file check. Piped input is not in scope.
+- **The cap is memory, not file size.** `--max-size N` (MB, default 64) bounds what one file's scan holds in memory. Any file is scanned whole: never cut short and never skipped for its size. Before this, a single file over 10 MB was scanned only to 10 MB, silently, so a secret after that point was missed with exit 0; on Oct 21 that became an error (exit 2), the same as a folder scan, until this streaming lands.
+- **Streaming unit: lines.** Both engines match line by line, so a file is read through a bounded line reader. A line longer than the chunk size (a quarter of the cap) is cut into pieces that overlap by 64 KiB, longer than any token the regex and entropy tiers match, and a finding seen in two pieces is reported once. Line numbers and columns stay those of the file.
+- **Model tier (Python).** Candidates come from the streaming pass; a second pass keeps only the context lines the verifier reads around each candidate (already cropped to a window around the token, FR-CORE-07).
+- **Rust engine.** The same reader in Rust (`BufRead` with a bounded line read), so it keeps its speed (2.3 s per 100 MB, Oct 21) without reading the file into memory (108 MB peak for a 100 MB file, Oct 21).
+- **Read tool and hook.** Two streaming passes: the first collects the secret values (a chunk is never cut inside a private-key block; a block larger than the chunk fails closed), the second replaces them and keeps only the lines asked for. Without a line range, `safe_read` of a file over 10 MB is refused with a message asking for one: the agent cannot use a 100 MB tool result. The hook checks a file of any size within its 25-second budget and refuses it, as now, when the budget runs out.
+- **Acceptance.** A 100 MB file on each engine: the scan grows peak memory by less than the cap (measured as peak RSS in a child process), a secret on the last line and one across a piece boundary of a 100 MB single-line file are found once, with the right line number. `test_fr_core_05_*`.
+
 **Read tool (harpo-read)**
 
 | ID | Requirement | Acceptance test | Milestone |
