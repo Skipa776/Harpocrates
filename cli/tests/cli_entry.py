@@ -18,7 +18,6 @@ from unittest import mock
 
 import click.testing
 import pytest
-from typer.testing import CliRunner
 
 from Harpocrates.cli import app, main
 
@@ -49,7 +48,7 @@ class CommandNameRunner:
     def __init__(self) -> None:
         self.name = "harpo"
         self.notices: list[str] = []
-        self._runner = CliRunner()
+        self._runner = click.testing.CliRunner()
 
     def use(self, name: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """Run the next invokes under `name`; for the old name, capture the deprecation notice line."""

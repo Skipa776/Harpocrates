@@ -132,7 +132,7 @@ def test_fr_name_01_generated_codex_config_uses_the_harpo_names_and_keeps_every_
     fs = cfg["permissions"]["harpo"]["filesystem"]
     for d in (*harness.SENSITIVE_HOME_DIRS, "~/.harpo", "~/.harpocrates"):  # both state folders stay denied
         assert fs[d] == "deny", d
-    text = harness.codex_config()
+    text = harness.codex_config().replace(sys.executable, "<python>")  # the interpreter path can contain "Harpocrates" (a venv inside a clone of the repo)
     assert "Harpocrates" not in text.replace("Harpocrates.", "") and "[mcp_servers.harpocrates" not in text and "[permissions.harpocrates" not in text
 
 

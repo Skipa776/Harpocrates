@@ -149,8 +149,15 @@ def test_fr_gate_06_a_certificate_the_system_does_not_trust_fails_and_nothing_is
             except OSError:
                 return
             try:
+                raw.settimeout(5)
                 with server_ctx.wrap_socket(raw, server_side=True) as tls:
-                    received.append(tls.recv(65536))
+                    request = b""
+                    while not request.endswith(BODY):  # read the whole request: closing with unread bytes resets the connection
+                        piece = tls.recv(65536)
+                        if not piece:
+                            break
+                        request += piece
+                    received.append(request)
                     tls.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
             except (ssl.SSLError, OSError):
                 pass

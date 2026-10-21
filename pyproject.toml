@@ -34,6 +34,8 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.0.0",
     "build>=1.0.0",
+    "zstandard>=0.22",  # zstd request bodies in the gate tests (FR-INSTALL-04); the gate itself loads it optionally
+    "pyyaml>=6.0",  # reads .pre-commit-hooks.yaml in the hook-id tests (FR-NAME-05)
 ]
 mcp = [
     "mcp>=1.27,<2",
