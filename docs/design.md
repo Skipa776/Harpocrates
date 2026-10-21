@@ -382,9 +382,9 @@ flowchart LR
 
 | Component | What it does | Status | Language |
 | --- | --- | --- | --- |
-| harpo-core | Three-stage detector (regex, Shannon entropy, XGBoost via ONNX). Adds secret-type labels, calibrated confidence, and a decode-and-rescan pass for base64, hex, and URL encoding. Streaming API for large inputs. | Exists on a side branch; needs merge and typing | Rust, Python bindings |
-| harpo-read | MCP server with `safe_read` and `safe_grep`. Returns file content with secrets replaced by placeholders. Paired with agent config that denies the built-in read tool on sensitive paths. | MCP server exists; read tool is new | Python or Rust |
-| harpo-gate | Local HTTP proxy. The agent's API base URL points here. Parses every request body, scans all text and tool-result blocks, redacts, then forwards over TLS to the real provider. Streams responses back unchanged. | New | Rust (axum or hyper) |
+| harpo-core | Three-stage detector (regex, Shannon entropy, XGBoost via ONNX). Adds secret-type labels, calibrated confidence, and a decode-and-rescan pass for base64, hex, and URL encoding. Streaming API for large inputs. | Merged in M0; secret-type labels and calibrated confidence added in M1 | Rust, Python bindings |
+| harpo-read | MCP server with `safe_read` and `safe_grep`. Returns file content with secrets replaced by placeholders. Paired with agent config that denies the built-in read tool on sensitive paths. | Done (M1) | Python or Rust |
+| harpo-gate | Local HTTP proxy. The agent's API base URL points here. Parses every request body, scans all text and tool-result blocks, redacts, then forwards over TLS to the real provider. Streams responses back unchanged. | Built for Anthropic Messages and OpenAI Responses (M2, see Progress) | Python (planned as Rust; written in Python first) |
 | harpo-commit | Existing pre-commit hook and CLI, plus a GitHub Action and SARIF output for GitHub code scanning. | Partly exists | Python CLI over core |
 | Audit log | One JSONL line per finding: timestamp, layer, secret type, keyed hash prefix, source path or tool name, action taken. | New | Shared |
 
@@ -630,6 +630,19 @@ v1 ships in about 8 weeks. Apply to internships from week 2 onward; don't wait f
 | M6: Model lifecycle | Dates set aside | Feedback export; one-command retrain; CI evaluation gate; shadow runs; versioned manifests and rollback | A deliberately worse model is rejected; feedback retrain target met |
 | M7: Org scanning service | Dates set aside | Replay generator; 3-broker Redpanda; scanner consumer group; dead-letter topic | 0 missed and 0 duplicated under worker kill and broker stop; NFR-07 load report |
 | M8: Detections, cloud and publication (deferred) | Deferred (Josh, Oct 18) | ATT&CK map; Sigma rules; Terraform deployment; cost runs; README benchmark section | Every rule fires on its recording and is silent on benign logs; cost report |
+
+### Progress (Oct 21, 2026)
+
+R0, M1 and the M2 work so far are on the `r0/cleanup` branch and not yet merged to `main`; the last release is v1.3.0. The full suite is 3,544 passing tests.
+
+| Milestone | Status | Done | Left |
+| --- | --- | --- | --- |
+| M0 | Done | Rust core, ONNX and MCP merged to `main` (PR #29); reproducible detector metrics | |
+| R0 | Done | Cleanup review and untracks (shipped code down 30%, findings byte-identical); docstring format enforced; rename to Harpo; two README demos; FR-CORE-07, SEC-01, SEC-07 to SEC-09. Oct 21: agent instructions and internal spec notes removed from the repo; code comments cite requirement IDs instead | FR-NAME-07 (rename the GitHub repo) waits for the release |
+| M1 | Done, two checks open | FR-READ-01 to FR-READ-03, SEC-02, SEC-06, FR-CORE-02, FR-CORE-03, FR-INSTALL-03; live run on Claude Code with 0 of 15 canaries in the agent's context | Fresh-machine setup by someone else; the one-time Codex `/hooks` trust |
+| M2 | In progress | Localhost proxy with per-session token (FR-GATE-01, SEC-03); per-format parsing (FR-GATE-02); fail closed (FR-GATE-03); full-history scan and deterministic placeholders (FR-GATE-04, FR-GATE-05); streaming, ChatGPT-login upstream and connection reuse (FR-GATE-06); media policy (FR-GATE-07); transport notes (FR-GATE-09); thinking blocks (FR-GATE-10); base64 inside text (FR-GATE-11); bypass check in the hook (SEC-10); mock provider and canary harness. Measured: follow-up turns add 12.2 ms p95 (NFR-01 target 50 ms); over TLS the gate adds 0.19 ms per request with connection reuse, 1.14 ms without; 0 false blocks over 1,038 recorded requests; end-to-end runs with real Claude Code and Codex sessions leak 0 canaries | Audit log (FR-LOG-01); log and temp-file canary grep (SEC-01); placeholder-write warning (FR-READ-04); install adapters (FR-INSTALL-01, -02, -06, -08) and `harpo doctor`; live check against chatgpt.com with a real login |
+| M3 to M7 | Not started | | |
+| M8 | Deferred | | |
 
 **After v1:** v1.1 (January 2027) ships the retrained detector from Detector training data. v1.2 (February 2027) ships repo preflight. The lab repo starts after that. Each release must leave the repo finished and demoable.
 
