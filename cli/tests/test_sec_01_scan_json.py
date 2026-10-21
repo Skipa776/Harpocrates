@@ -5,6 +5,7 @@ Every secret here is a generated canary (bench/canary_repo.py or built at runtim
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from Harpocrates.core.result import EvidenceType, Finding, ScanResult
 from Harpocrates.utils.redaction import mask_secrets, redact_token
 
 runner = CliRunner()
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")  # typer draws help as a colored panel when GITHUB_ACTIONS is set
 _RUN = 12  # a run this long of a secret in the output counts as a leak (same bar as test_mcp_no_raw_values)
 
 
@@ -73,7 +75,7 @@ def test_sec_01_scan_json_show_secrets_still_full(canary_repo: tuple[Path, list[
 def test_sec_01_scan_json_default_matches_help(canary_repo: tuple[Path, list[dict]]) -> None:
     """The documented default: redacted in JSON; only --show-secrets opts in."""
     repo, _ = canary_repo
-    help_text = " ".join(runner.invoke(app, ["scan", "--help"]).stdout.split())
+    help_text = " ".join(_ANSI.sub("", runner.invoke(app, ["scan", "--help"]).stdout).replace("│", " ").split())
     assert "redacted in both table and JSON output" in help_text
     _, redacted = _scan_json(repo)
     _, full = _scan_json(repo, "--show-secrets")
