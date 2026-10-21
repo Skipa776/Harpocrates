@@ -189,3 +189,15 @@ docs/cloud-session-delegation.md
 
 # Mock-provider recordings hold request bodies from agent sessions; never committed (FR-PROOF-04). Reports in bench/results/proof/ (counts only) may be.
 bench/results/mock/
+
+# Agent instructions and design notes, kept locally
+/AGENTS.md
+/CLAUDE.md
+/docs/gate-base64-text-spec.md
+/docs/gate-media-upstream-spec.md
+/docs/gate-mock-spec.md
+/docs/gate-parser-spec.md
+/docs/gate-proxy-spec.md
+/docs/gate-scan-spec.md
+/docs/r0-specs.md
+/docs/cleanup-report.md
