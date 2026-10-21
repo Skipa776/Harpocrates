@@ -90,9 +90,9 @@ Fix: Read the reason code in the message, and look it up in the table below. The
 
 **Every request from Codex with a ChatGPT login is blocked with HARPO-BLOCK-ENCODING.**
 
-Cause: Those requests are zstd-compressed. On Python before 3.14, the gate needs the `zstandard` package to decode them. Without it, the gate blocks rather than forwarding a body it cannot scan.
+Cause: Those requests are zstd-compressed. On Python before 3.14 the gate decodes them with the `zstandard` package, a dependency of Harpo since Oct 21, 2026; an older install, or one made with `--no-deps`, may lack it, and the gate then blocks rather than forward a body it cannot scan.
 
-Fix: Run `pip install zstandard` in the gate's environment.
+Fix: Reinstall Harpo, or run `pip install zstandard` in the gate's environment.
 
 **One prompt shows the same block several times, or the request log has four blocked requests for one prompt.**
 

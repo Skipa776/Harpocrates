@@ -25,6 +25,7 @@ dependencies = [
     "rich>=13.0.0",
     "onnxruntime>=1.17.0",
     "numpy>=1.24.0",
+    "zstandard>=0.22; python_version < '3.14'",  # the gate decodes zstd bodies (Codex ChatGPT login); 3.14 has compression.zstd
 ]
 
 [project.optional-dependencies]
@@ -34,7 +35,7 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.0.0",
     "build>=1.0.0",
-    "zstandard>=0.22",  # zstd request bodies in the gate tests (FR-INSTALL-04); the gate itself loads it optionally
+    "zstandard>=0.22",  # the gate tests compress with it on every Python version
     "pyyaml>=6.0",  # reads .pre-commit-hooks.yaml in the hook-id tests (FR-NAME-05)
 ]
 mcp = [

@@ -10,8 +10,10 @@ import importlib
 import os
 import time
 import types
+from pathlib import Path
 
 import pytest
+import tomllib
 
 from Harpocrates.gate import body_encoding
 from Harpocrates.gate.body_encoding import Decoded, Zstd, decode_body, encode_body, load_zstd
@@ -182,3 +184,8 @@ def test_fr_install_04_load_zstd_uses_the_python_3_14_module_shape(monkeypatch: 
     raw = encode_body(PLAIN, "zstd", codec)
     assert decode_body(raw, ["zstd"], CAP, codec) == Decoded("ok", PLAIN, "zstd")
     assert decode_body(raw[:-3], ["zstd"], CAP, codec).status == "corrupt"
+
+
+def test_fr_install_04_zstandard_is_a_runtime_dependency_before_python_3_14() -> None:
+    project = tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text())["project"]
+    assert "zstandard>=0.22; python_version < '3.14'" in project["dependencies"]
