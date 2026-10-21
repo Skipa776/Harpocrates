@@ -2,7 +2,7 @@
 
 FR-READ-03. This guide makes Claude Code or Codex refuse their built-in reads of files that usually hold secrets. The agent reads those files through the Harpo MCP tools instead: `safe_read` and `safe_grep` return them with every detected secret replaced by a `<<HARPO:type:hash>>` placeholder.
 
-What this protects today, and what it doesn't, is in the [threat model](threat-model.md). In short, until the egress gate ships (M2), a secret the agent reaches through the shell in some other way still goes to the model.
+What this protects today, and what it doesn't, is in the [threat model](threat-model.md). In short, until the egress gate ships (M2), a secret the agent reaches through the shell in some other way still goes to the model. The gate is built on the development branch and passes its end-to-end suites against a mock provider, but `harpo install` does not set it up yet. How those suites run is in [testing.md](testing.md); common problems are in [troubleshooting.md](troubleshooting.md).
 
 ## 1. Install
 
@@ -10,8 +10,8 @@ There are two install paths. Install the CLI (it includes the read tool and the 
 
 ```bash
 pip install "harpocrates[mcp]"      # CLI
-# or, for development from a clone:
-pip install -e ".[mcp]"
+# or, for development from a clone (dev adds the test tools; see testing.md):
+pip install -e ".[dev,explain,mcp]"
 ```
 
 **CLI path (FR-INSTALL-01).** Then write the setup into each agent's own config:
@@ -192,3 +192,4 @@ The environment variables `HARPO_RUST_SCANNER`, `HARPO_RUST_TIMEOUT_SECONDS`, `H
 | Codex 0.159.2, live, routine task, path rules only (hook not yet trusted) | 8 of 15 leaked: the same files, read with `nl` in one `zsh -lc` loop |
 | Codex hook, live | Pending your one-time trust in `/hooks`. Then run `python bench/live_canary_check.py --agent codex --task --installed`. Its logic is unit-tested on that exact command shape. |
 | Fresh-machine setup in under 5 minutes, done by someone else | Pending. This is FR-READ-03's acceptance test. |
+| Claude Code 2.1.306 and Codex 0.163.0, Oct 21, 2026: the installed hook in a throwaway home, scripted Read `.env`, `cat` and `grep`, mock provider (`python bench/canary_harness.py --mode agent --agent all`) | 0 of 22 known-format canaries reached the provider; each agent made its 3 tool calls. The same run with nothing installed (`--control`): 10 of 22 reached it. Scripted calls and a mock provider, not a live model |

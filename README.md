@@ -352,6 +352,7 @@ Full notes for each release are in that tag's README, for example `git show v0.4
 
 False negatives are the highest-priority reports. If Harpo missed a real secret, [open an issue with the `false-negative` label](https://github.com/Skipa776/Harpocrates/issues/new?labels=false-negative).
 For bugs, feature requests, and false positives, open an issue at [github.com/Skipa776/Harpocrates/issues](https://github.com/Skipa776/Harpocrates/issues).
+To run the tests and the end-to-end suites, see [docs/testing.md](docs/testing.md). Common problems are in [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## License
 
