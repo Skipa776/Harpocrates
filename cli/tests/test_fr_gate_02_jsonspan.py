@@ -1,6 +1,6 @@
 """FR-GATE-02 (decision 15) and FR-GATE-05: strict JSON parsing, literal encoding and byte-exact splicing.
 
-Nothing here holds a secret. Unit tests of Harpocrates.gate.jsonspan.
+Nothing here holds a secret. Unit tests of Harpocrates.gate.jsontext's parsing and splicing.
 """
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from Harpocrates.gate.jsonspan import (
+from Harpocrates.gate.jsontext import (
     MAX_DEPTH,
     BodyParseError,
     apply_edits,

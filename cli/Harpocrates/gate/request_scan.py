@@ -21,9 +21,14 @@ from Harpocrates.gate.blocks import (
 )
 from Harpocrates.gate.finder import Finder
 from Harpocrates.gate.header_scan import scan_head
-from Harpocrates.gate.jsonlocate import locate
-from Harpocrates.gate.jsonspan import BodyParseError, apply_edits, encode_literal, parse_strict
-from Harpocrates.gate.jsonstring import redact_json_string
+from Harpocrates.gate.jsontext import (
+    BodyParseError,
+    apply_edits,
+    encode_literal,
+    locate,
+    parse_strict,
+    redact_json_string,
+)
 from Harpocrates.gate.media import MediaNote, binary_kind, decode_strict, readings
 from Harpocrates.gate.routes import Route
 from Harpocrates.gate.scan import Block, Forward, RequestHead

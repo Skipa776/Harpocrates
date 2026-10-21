@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT / "cli"))
 from Harpocrates.gate import encoded, walk_anthropic, walk_responses  # noqa: E402
 from Harpocrates.gate.blocks import RefusalError  # noqa: E402
 from Harpocrates.gate.finder import Finder  # noqa: E402
-from Harpocrates.gate.jsonspan import BodyParseError, parse_strict  # noqa: E402
+from Harpocrates.gate.jsontext import BodyParseError, parse_strict  # noqa: E402
 from Harpocrates.gate.walk_common import Leaf  # noqa: E402
 
 SCAN_ROUTES = ("anthropic.messages", "anthropic.count_tokens", "openai.responses")

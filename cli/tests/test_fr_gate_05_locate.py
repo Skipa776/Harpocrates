@@ -1,6 +1,6 @@
 """FR-GATE-05: finding the character span of a value, or the span to cut out of an array, by its path in the tree.
 
-Unit tests of Harpocrates.gate.jsonlocate. Nothing here holds a secret.
+Unit tests of Harpocrates.gate.jsontext.locate. Nothing here holds a secret.
 """
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ import time
 
 import pytest
 
-from Harpocrates.gate.jsonlocate import locate
-from Harpocrates.gate.jsonspan import apply_edits
+from Harpocrates.gate.jsontext import apply_edits, locate
 
 DOC = ('  {"a": "one", "b" : [ 1 ,\n "two\\"]}", {"c": [ ] , "d":"é漢\\u00e9"} ] ,\t"e":{"f":{"g":"deep"}},"h":[[],[ "x" ]] }\n')
 

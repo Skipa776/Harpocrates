@@ -1,6 +1,6 @@
 """FR-GATE-02 decision 2: JSON inside a string (tool-call arguments). Parse it, redact the string leaves, splice them back
 and encode the whole once; scan the keys; scan what does not parse as plain text. Unit tests of
-Harpocrates.gate.jsonstring and the block codes of Harpocrates.gate.blocks."""
+Harpocrates.gate.jsontext and the block codes of Harpocrates.gate.blocks."""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,7 @@ import json
 import pytest
 from gate_canaries import PLACEHOLDER, known_format
 
-from Harpocrates.gate import jsonstring
+from Harpocrates.gate import jsontext
 from Harpocrates.gate.blocks import (
     HEADER_SECRET,
     HISTORY,
@@ -21,7 +21,7 @@ from Harpocrates.gate.blocks import (
 )
 from Harpocrates.gate.errors import is_block_code
 from Harpocrates.gate.finder import Finder
-from Harpocrates.gate.jsonstring import redact_json_string
+from Harpocrates.gate.jsontext import redact_json_string
 
 CANARY = known_format()["github_token"]
 
@@ -94,7 +94,7 @@ def test_fr_gate_02_secret_in_json_key_blocks() -> None:
 
 
 def test_fr_gate_02_arguments_must_still_parse_after_redaction(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(jsonstring, "encode_literal", lambda text: text)  # a broken encoder: unquoted, unescaped
+    monkeypatch.setattr(jsontext, "encode_literal", lambda text: text)  # a broken encoder: unquoted, unescaped
     with pytest.raises(RefusalError) as caught:
         redacted(json.dumps({"cmd": f"echo {CANARY}"}))
     assert caught.value.code == JSON_ARGS
