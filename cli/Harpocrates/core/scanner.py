@@ -126,6 +126,15 @@ def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
     return path.is_file()
 
 
+def _python_findings(
+    file_path: Path, verifier: Optional["Verifier"], memory_cap: int, ml_threshold: float
+) -> List[Finding]:
+    """The Python detector's findings for one file, through the ML verifier when one is given."""
+    if verifier is None:
+        return detect_file(file_path, memory_cap=memory_cap)
+    return detect_file_with_ml(file_path, verifier=verifier, memory_cap=memory_cap, ml_threshold=ml_threshold)
+
+
 def scan_directory(
     directory: str | Path,
     recursive: bool = True,
@@ -153,9 +162,6 @@ def scan_directory(
     start_time = time.time()
     dir_path = Path(directory)
 
-    if not dir_path.exists():
-        return ScanResult(findings=[], errors=[f"Not a directory: {directory}"])
-
     if not dir_path.is_dir():
         return ScanResult(findings=[], errors=[f"Not a directory: {directory}"])
 
@@ -175,7 +181,6 @@ def scan_directory(
     scanned_files = 0
     total_lines = 0
     errors: List[str] = []
-    eligible_files: list[Path] = []
 
     if native_backend is not None:
         try:
@@ -208,16 +213,12 @@ def scan_directory(
             errors.append(f"Rust directory scan failed; used Python fallback: {exc}")
             native_backend = None
         else:
-            all_findings.extend(batch.findings)
-            scanned_files += batch.scanned_files
-            total_lines += batch.total_lines
-            errors.extend(batch.errors)
             return ScanResult(
-                findings=all_findings,
-                scanned_files=scanned_files,
-                total_lines=total_lines,
+                findings=batch.findings,
+                scanned_files=batch.scanned_files,
+                total_lines=batch.total_lines,
                 duration_ms=(time.time() - start_time) * 1000,
-                errors=errors,
+                errors=[*errors, *batch.errors],
             )
 
     # Get all files and sort for deterministic ordering
@@ -230,21 +231,9 @@ def scan_directory(
         if not _should_scan_file(file_path, ignore):
             continue
 
-        eligible_files.append(file_path)
-
-    for file_path in eligible_files:
         try:
-            # Native directory scans return above; this loop is the Python
-            # engine or auto-mode fallback after a native failure.
-            if verifier is not None:
-                findings = detect_file_with_ml(
-                    file_path,
-                    verifier=verifier,
-                    memory_cap=memory_cap,
-                    ml_threshold=ml_threshold,
-                )
-            else:
-                findings = detect_file(file_path, memory_cap=memory_cap)
+            # Python engine, or the auto-mode fallback after a native failure.
+            findings = _python_findings(file_path, verifier, memory_cap, ml_threshold)
 
             all_findings.extend(findings)
             scanned_files += 1
@@ -326,15 +315,7 @@ def scan_file(
 
     if native_backend is None:
         try:
-            if verifier is not None:
-                findings = detect_file_with_ml(
-                    file_path,
-                    verifier=verifier,
-                    memory_cap=memory_cap,
-                    ml_threshold=ml_threshold,
-                )
-            else:
-                findings = detect_file(file_path, memory_cap=memory_cap)
+            findings = _python_findings(file_path, verifier, memory_cap, ml_threshold)
         except Exception as exc:
             return ScanResult(
                 findings=[],
