@@ -129,7 +129,15 @@ def _should_scan_file(path: Path, ignore_patterns: Set[str]) -> bool:
 def _python_findings(
     file_path: Path, verifier: Optional["Verifier"], memory_cap: int, ml_threshold: float
 ) -> List[Finding]:
-    """The Python detector's findings for one file, through the ML verifier when one is given."""
+    """
+    Description: Scan one file with the Python detector.
+    Parameters:
+        file_path: the file.
+        verifier: the ML verifier, or None for regex and entropy only.
+        memory_cap: the most bytes the scan may hold.
+        ml_threshold: the verifier's confidence threshold.
+    Output: The file's findings.
+    """
     if verifier is None:
         return detect_file(file_path, memory_cap=memory_cap)
     return detect_file_with_ml(file_path, verifier=verifier, memory_cap=memory_cap, ml_threshold=ml_threshold)
