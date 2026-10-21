@@ -418,7 +418,7 @@ def test_fr_read_06_bash_named_post_with_a_pending_id_grants_nothing(proj: Path,
 
 def _split(point: int = 6) -> tuple[str, str]:
     """A placeholder in two pieces, neither of which matches the placeholder pattern alone."""
-    assert not hooks._PLACEHOLDER_TYPE.search(PLACEHOLDER[:point] + "x")
+    assert not hooks.PLACEHOLDER.search(PLACEHOLDER[:point] + "x")
     return PLACEHOLDER[:point], PLACEHOLDER[point:]
 
 

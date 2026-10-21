@@ -33,7 +33,6 @@ _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".mypy_cac
 _PEM_BLOCK = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\Z)", re.S)
 # Entropy tokens on unquoted `NAME=value` lines include the name; redact only the value.
 _NAME_PREFIX = re.compile(r"^[A-Za-z_][\w.\-]*\s*[=:]\s*(?=\S)")
-_PLACEHOLDER = re.compile(r"<<HARPO:\w+:[0-9a-f]{4}>>")
 _KEY_MARK = re.compile(r"-----(BEGIN|END) [A-Z0-9 ]*PRIVATE KEY-----")
 CONTEXT_LINES = 3  # lines before a chunk that its detection still sees (the verifier reads 3 on each side)
 
@@ -489,7 +488,7 @@ def _footer(body: str) -> str:
     Output: Warning footer with the distinct placeholder count, or an empty string if none
         occur; no side effects.
     """
-    found = sorted(set(_PLACEHOLDER.findall(body)))
+    found = sorted(set(placeholders(body)))
     if not found:
         return ""
     return (f"\n[harpo: {len(found)} secret(s) redacted as <<HARPO:type:hash>>. "

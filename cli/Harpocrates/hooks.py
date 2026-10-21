@@ -54,9 +54,9 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from Harpocrates import gatecheck
+from Harpocrates.audit import PLACEHOLDER, placeholders
 from Harpocrates.harness import SENSITIVE_FILES
 
-_PLACEHOLDER_TYPE = re.compile(r"<<HARPO:(\w+):[0-9a-f]{4}>>")
 _READ_COMMANDS = {"cat", "head", "tail", "less", "more", "bat", "nl", "sed", "awk", "strings", "xxd", "od",
                   "hexdump", "base64", "tac", "cut", "sort", "uniq", "diff", "jq", "yq", "type", "Get-Content",
                   "cp", "dd", "paste", "column", "fold", "rev", "tee", "xargs", "zcat", "zless", "pr", "fmt",
@@ -348,7 +348,7 @@ def _found(redactor, text: str) -> list[str]:
     redacted = redactor.redact(text)
     if redacted == text:
         return []
-    grown = Counter(_PLACEHOLDER_TYPE.findall(redacted)) - Counter(_PLACEHOLDER_TYPE.findall(text))
+    grown = Counter(kind for kind, _ in placeholders(redacted)) - Counter(kind for kind, _ in placeholders(text))
     return sorted(grown) or ["generic"]
 
 
@@ -511,7 +511,7 @@ def _placeholders(text: str) -> Counter:
         text: Text in which to count placeholders.
     Output: Counter mapping complete matched placeholder strings to occurrence counts.
     """
-    return Counter(m.group(0) for m in _PLACEHOLDER_TYPE.finditer(text))
+    return Counter(m.group(0) for m in PLACEHOLDER.finditer(text))
 
 
 def _current(path: Path) -> Optional[str]:
@@ -554,13 +554,13 @@ def _adds_placeholder(tool: str, args: dict, path: Path) -> bool:
     if tool == "NotebookEdit":
         source = args.get("new_source")
         source = "".join(part for part in source if isinstance(part, str)) if isinstance(source, list) else source
-        return isinstance(source, str) and bool(_PLACEHOLDER_TYPE.search(source))
+        return isinstance(source, str) and bool(PLACEHOLDER.search(source))
     before = _current(path)
     if tool == "Write":
         content = args.get("content")
         if not isinstance(content, str):
             return False
-        return bool(_PLACEHOLDER_TYPE.search(content)) if before is None else bool(
+        return bool(PLACEHOLDER.search(content)) if before is None else bool(
             _placeholders(content) - _placeholders(before))
     after = before
     for step in (args.get("edits") or ()) if tool == "MultiEdit" else (args,):
@@ -569,7 +569,7 @@ def _adds_placeholder(tool: str, args: dict, path: Path) -> bool:
         old, new = step.get("old_string"), step["new_string"]
         if after is not None and isinstance(old, str) and old in after:
             after = after.replace(old, new, -1 if step.get("replace_all") else 1)
-        elif _PLACEHOLDER_TYPE.search(new):
+        elif PLACEHOLDER.search(new):
             return True
     return before is not None and bool(_placeholders(after) - _placeholders(before))
 

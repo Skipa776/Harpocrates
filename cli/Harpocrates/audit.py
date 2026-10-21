@@ -35,7 +35,9 @@ PROOF = "proof.jsonl"
 HEAD = "proof.head"
 ROTATE_BYTES = 10 * 1024 * 1024
 GENESIS = "0" * 64
-PLACEHOLDER = re.compile(rb"<<HARPO:(\w+):([0-9a-f]{4})>>")
+# A placeholder: the secret type, then four hex characters of the session-keyed hash (read.Redactor.placeholder).
+PLACEHOLDER = re.compile(r"<<HARPO:(\w+):([0-9a-f]{4})>>")
+_PLACEHOLDER_BYTES = re.compile(PLACEHOLDER.pattern.encode())
 _ENTRY_KEYS = ("seq", "time", "provider", "route", "bytes", "sha256", "placeholders", "prev", "hash")
 _TAIL_BYTES = 64 * 1024  # far more than one entry
 
@@ -56,8 +58,9 @@ def placeholders(text: Union[bytes, str]) -> list[tuple[str, str]]:
         text: the text.
     Output: (secret type, hash) for each one.
     """
-    raw = text.encode("utf-8") if isinstance(text, str) else text
-    return [(kind.decode(), digest.decode()) for kind, digest in PLACEHOLDER.findall(raw)]
+    if isinstance(text, str):
+        return PLACEHOLDER.findall(text)
+    return [(kind.decode(), digest.decode()) for kind, digest in _PLACEHOLDER_BYTES.findall(text)]
 
 
 def _usable(state: Path) -> Path:
