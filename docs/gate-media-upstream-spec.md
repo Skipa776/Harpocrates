@@ -92,6 +92,46 @@ Both choices fail closed.
 - **Closing.** `GateServer.close()` closes every pooled connection.
 - **Logging.** The request log gains `upstream_reused: bool` and `ms_connect`, which is 0 on reuse.
 
+## Implementation notes and results for parts 2 and 3 (Oct 20, 2026)
+
+**Part 2, the ChatGPT upstream.**
+- **Config.** `GateConfig.chatgpt_upstream` defaults to `https://chatgpt.com` and is checked like every upstream: scheme, host and port only. The prefix is the constant `CHATGPT_PATH_PREFIX`.
+- **Routing.** `GateHandler._destination` picks the upstream. It reads only whether a `chatgpt-account-id` header is present, in any case, and never its value.
+- **Tests.** `cli/tests/test_fr_gate_06_chatgpt_upstream.py`, 13 tests.
+- **End to end (rule 7).** Suite `g5`, report `bench/results/proof/20261020-gate-e2e-g5k.json`. Real `codex exec` (0.163.0) runs with the fake ChatGPT login from `bench/g2_probes.py`, and the gate's ChatGPT upstream is the mock.
+  - All 4 model requests arrive on `/backend-api/codex/responses` and none on `/v1`.
+  - The three scripted reads complete, and 0 known-format canaries are received (10 placeholders).
+  - The gate-off control leaks 5. The mock answers the ChatGPT paths as aliases of the OpenAI routes.
+- **Still open.** The live check against the real chatgpt.com (T12, needs Josh's login) is the last open item of part 2.
+
+**Part 3, connection reuse.**
+- **Code.** `UpstreamPool` in `cli/Harpocrates/gate/upstream.py`, owned by the gate server and closed with it. `open_upstream` still opens one new connection and is kept for direct use.
+- **When a connection is kept.** Only when all of these hold:
+  - the relay ended `complete`;
+  - the response object is closed, so its body was read to the framed end;
+  - the reply was HTTP/1.1;
+  - `will_close` is false.
+- **Bodiless replies are not kept.** A 204 or 304 reply, a reply to HEAD and an informational reply are relayed without reading a body, so they aren't kept, which is the simple choice.
+- **Known limit, not new.** `http.client` skips only `100 Continue`. A `103 Early Hints` followed by the real reply reaches the agent as a final 103, and the real reply is lost. That connection is closed, not pooled, so nothing crosses requests.
+- **Routing.** An agent that adds `chatgpt-account-id` to an API-key request sends that key to chatgpt.com. Both hosts are OpenAI's, the body is scanned first, and `routes.classify` lets only `/v1/responses` and `/v1/models` through, so no other path can be rewritten.
+- **Readable while idle (from review).** An idle connection is reused only if nothing is waiting to be read on it, checked with `select` and pending TLS bytes. A provider that closed it, sent an idle-timeout notice (a 408) or any stray reply makes it readable. It is then closed, and its bytes are never read as the reply to the next request, which may belong to another agent session. This also catches most idle closes before the send, so they need no retry.
+- **Stale connections, narrowed (from review).** A reused connection is retried once on a new connection only:
+  - for a reset, broken pipe or TLS EOF while *sending*;
+  - or for a close with **no** reply byte (`RemoteDisconnected`) while reading the reply.
+
+  Anything later is a 502 with no retry: a reset partway through the reply head, or a timeout. Either could follow a processed request.
+- **Log fields.** The request log has `upstream_reused` and `ms_connect`.
+- **Reuse with real agents.** In the `g5k` run, every request after a session's first went out on a pooled connection: 2 to 5 per session, across all ten Claude Code and Codex sessions. Nothing else in those runs changed.
+- **Tests.** `cli/tests/test_fr_gate_06_connection_reuse.py`, 18 tests.
+- **Latency.** `python -m bench.gate_latency [--tls] [--no-pool]`, pass-through scan, 100 KB body, 200 calls. Reports are `bench/results/gate/latency-2026-10-21{,-nopool,-tls,-tls-nopool}.json`, dated in UTC.
+
+  | Upstream | Pool off, added p50 / p95 | Pool on, added p50 / p95 |
+  | --- | --- | --- |
+  | TLS (throwaway cert) | 1.14 / 1.31 ms | 0.19 / 0.24 ms |
+  | Plain HTTP | 0.30 / 0.93 ms | 0.19 / 0.21 ms |
+
+  On loopback the saving is about one TLS handshake, 1 ms. Over a real network a handshake costs one or two round trips more, so the saving there is larger. These runs used the synthetic 100 KB body of the G3 reference, not the G2 replay the test plan named. The pool changes only the transport, which `bench/gate_scan_latency.py` (the G2 replay) does not measure.
+
 ## Test plan, tests first
 
 **Media**

@@ -8,6 +8,7 @@ from typing import NamedTuple
 from urllib.parse import urlsplit
 
 BIND_HOST = "127.0.0.1"
+CHATGPT_PATH_PREFIX = "/backend-api/codex"  # replaces /v1 for a ChatGPT login (G5 spec, part 2; transport notes T5)
 MAX_BODY_BYTES = 64 * 1024 * 1024  # decision 9: applied after decoding
 _HOST_CHARS = re.compile(r"[A-Za-z0-9.\-]+|[0-9A-Fa-f:.]+")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -80,6 +81,8 @@ class GateConfig:
         port: the TCP port, 0 to let the system choose.
         anthropic_upstream: base URL for Anthropic routes (default https://api.anthropic.com).
         openai_upstream: base URL for OpenAI routes (default https://api.openai.com).
+        chatgpt_upstream: base URL for OpenAI routes that carry chatgpt-account-id, a Codex ChatGPT login (default
+            https://chatgpt.com); the path prefix /backend-api/codex is fixed (CHATGPT_PATH_PREFIX).
         max_body: the largest request body, raw and after decoding, in bytes (default 64 MiB).
         scan_timeout: seconds the scan step may take before the request is blocked (default 5).
         connect_timeout: seconds to reach the provider before answering 502.
@@ -93,6 +96,7 @@ class GateConfig:
     port: int = 0
     anthropic_upstream: str = "https://api.anthropic.com"
     openai_upstream: str = "https://api.openai.com"
+    chatgpt_upstream: str = "https://chatgpt.com"
     max_body: int = MAX_BODY_BYTES
     scan_timeout: float = 5.0
     connect_timeout: float = 10.0
@@ -114,14 +118,16 @@ class GateConfig:
                 raise ValueError(f"{field}: must be greater than zero")
         parse_upstream(self.anthropic_upstream)
         parse_upstream(self.openai_upstream)
+        parse_upstream(self.chatgpt_upstream)
 
     def upstream_for(self, provider: str) -> Upstream:
         """
         Description: Pick the upstream for a provider.
         Parameters:
-            provider: "anthropic" or "openai".
+            provider: "anthropic", "openai" or "chatgpt".
         Output: The Upstream parsed from that provider's URL. Raises ValueError for any other provider name.
         """
-        if provider not in ("anthropic", "openai"):
-            raise ValueError(f"provider: {provider!r} is not anthropic or openai")
-        return parse_upstream(self.anthropic_upstream if provider == "anthropic" else self.openai_upstream)
+        urls = {"anthropic": self.anthropic_upstream, "openai": self.openai_upstream, "chatgpt": self.chatgpt_upstream}
+        if provider not in urls:
+            raise ValueError(f"provider: {provider!r} is not anthropic, openai or chatgpt")
+        return parse_upstream(urls[provider])

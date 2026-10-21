@@ -88,11 +88,11 @@ def test_fr_gate_01_e2e_counts_placeholders_in_the_last_model_request_only() -> 
 
 def test_fr_gate_01_e2e_gate_log_summary_counts_without_content() -> None:
     lines = [json.dumps({"route": "anthropic.messages", "decision": "blocked", "reason": "HARPO-BLOCK-SCAN-ERROR"}),
-             json.dumps({"route": "anthropic.messages", "decision": "forwarded",
+             json.dumps({"route": "anthropic.messages", "decision": "forwarded", "upstream_reused": True,
                          "media": [{"kind": "image/png", "bytes": 3}, {"kind": "image/png", "bytes": 9}]})]
     assert e2e.gate_log_summary(lines) == {"lines": 2, "by_decision": {"blocked": 1, "forwarded": 1},
                                            "by_reason": {"HARPO-BLOCK-SCAN-ERROR": 1}, "by_route": {"anthropic.messages": 2},
-                                           "media": {"image/png": 2}}
+                                           "media": {"image/png": 2}, "upstream_reused": 1}
 
 
 def test_fr_gate_07_e2e_base64_search_finds_a_canary_only_inside_an_encoded_payload() -> None:

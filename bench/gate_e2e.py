@@ -48,6 +48,7 @@ sys.path.insert(0, str(ROOT))
 from bench import agent_isolation as iso  # noqa: E402
 from bench import agent_runner as runner  # noqa: E402
 from bench import canary_report as report  # noqa: E402
+from bench import g2_probes as g2  # noqa: E402
 from Harpocrates.gate.config import GateConfig  # noqa: E402
 from Harpocrates.gate.scan import Forward  # noqa: E402
 from Harpocrates.gate.server import RunningGate, start_gate  # noqa: E402
@@ -106,7 +107,9 @@ SUITES: dict[str, list[Scenario]] = {
            Scenario("claude-mcp-gate", "claude", "default", False, "none", True, "mcp"),
            Scenario("claude-mcp-gate-off-control", "claude", "passthrough", False, "none", False, "mcp"),
            Scenario("codex-mcp-gate", "codex", "default", False, "none", True, "mcp"),
-           Scenario("codex-mcp-gate-off-control", "codex", "passthrough", False, "none", False, "mcp")],
+           Scenario("codex-mcp-gate-off-control", "codex", "passthrough", False, "none", False, "mcp"),
+           Scenario("codex-chatgpt-gate", "codex", "default", False, "none", False, "chatgpt"),
+           Scenario("codex-chatgpt-gate-off-control", "codex", "passthrough", False, "none", False, "chatgpt")],
 }
 _BASE64_RUN = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
 
@@ -290,6 +293,21 @@ def png_identical(records: Iterable[dict]) -> dict:
     return {"payloads": seen, "identical": identical}
 
 
+def model_paths(records: Iterable[dict]) -> dict:
+    """
+    Description: Count where the model requests landed on the mock: the OpenAI path or the ChatGPT backend path.
+    Parameters:
+        records: the mock's recording entries.
+    Output: {path without query: count} for every openai.responses request.
+    """
+    found: dict[str, int] = {}
+    for rec in records:
+        if rec.get("route") == "openai.responses":
+            path = str(rec.get("path", "")).partition("?")[0]
+            found[path] = found.get(path, 0) + 1
+    return found
+
+
 def received_in_base64(records: Iterable[dict], canaries: Iterable[report.Canary]) -> dict:
     """
     Description: Count the canaries the mock received inside base64 payloads, which the plain-text search cannot see.
@@ -446,11 +464,14 @@ def gate_log_summary(lines: list[str]) -> dict:
     Description: Summarise the gate's request log without any content.
     Parameters:
         lines: the JSONL lines the gate wrote.
-    Output: {"lines": n, "by_decision": {...}, "by_reason": {...}, "by_route": {...}, "media": {kind: count}}.
+    Output: {"lines": n, "by_decision": {...}, "by_reason": {...}, "by_route": {...}, "media": {kind: count},
+        "upstream_reused": n} (requests answered on a pooled provider connection).
     """
-    summary: dict = {"lines": len(lines), "by_decision": {}, "by_reason": {}, "by_route": {}, "media": {}}
+    summary: dict = {"lines": len(lines), "by_decision": {}, "by_reason": {}, "by_route": {}, "media": {},
+                     "upstream_reused": 0}
     for line in lines:
         entry = json.loads(line)
+        summary["upstream_reused"] += entry.get("upstream_reused") is True
         for note in entry.get("media", []):
             summary["media"][note["kind"]] = summary["media"].get(note["kind"], 0) + 1
         for key, name in (("decision", "by_decision"), ("reason", "by_reason"), ("route", "by_route")):
@@ -485,7 +506,7 @@ class _Rig:
         """
         if self.gate is None:
             extra = {} if self.scan == "default" else {"scan_step": stub_scan if self.scan == "stub" else passthrough_scan}
-            config = GateConfig(anthropic_upstream=mock_url, openai_upstream=mock_url)
+            config = GateConfig(anthropic_upstream=mock_url, openai_upstream=mock_url, chatgpt_upstream=mock_url)
             self.gate = start_gate(config, self.token, log_sink=self.log_lines.append, **extra)
         return self.gate
 
@@ -510,6 +531,18 @@ def run_scenario(sc: Scenario, seed: int, out_root: Path, run_id: str, timeout: 
         return {**out, "status": "skipped", "reason": f"`{sc.agent}` is not on PATH", "_canaries": []}
     token_line = f'http_headers = {{ "{TOKEN_HEADER}" = "{rig.token}" }}\n'
 
+    def before_install(tw: iso.Throwaway, server: object) -> None:
+        """
+        Description: Start the gate, and for a "chatgpt" scenario give the throwaway home a fake ChatGPT login.
+        Parameters:
+            tw: the throwaway session.
+            server: the mock provider.
+        Output: None.
+        """
+        rig.start(server.url)
+        if sc.script == "chatgpt":
+            g2.write_chatgpt_auth(tw, server.url)
+
     def codex_config(tw: iso.Throwaway, url: str) -> Path:
         """
         Description: Write the throwaway Codex config pointed at the gate, with the MCP image server for "mcp" scenarios.
@@ -526,11 +559,11 @@ def run_scenario(sc: Scenario, seed: int, out_root: Path, run_id: str, timeout: 
                                           "mcp": codex_mcp_script if sc.agent == "codex" else mcp_script,
                                           "media": codex_media_script if sc.agent == "codex" else media_script}.get(sc.script),
                                   codex_config=codex_config,
-                                  before_install=lambda tw, server: rig.start(server.url)) as session:
+                                  before_install=lambda tw, server: before_install(tw, server)) as session:
             gate = rig.start(session.server.url)
             if sc.agent == "claude" and sc.hook:
                 write_gate_install(session.tw, gate, rig.token, sc.record)
-            env = session.env()
+            env = g2.chatgpt_env(session.tw, session.server.url) if sc.script == "chatgpt" else session.env()
             if sc.agent == "claude":  # Codex reads the gate address and token from its config.toml
                 env.update({"ANTHROPIC_BASE_URL": gate.url, "ANTHROPIC_CUSTOM_HEADERS": f"{TOKEN_HEADER}: {rig.token}"})
             argv = with_mcp(session.argv(), session.tw) if sc.script == "mcp" and sc.agent == "claude" else session.argv()
@@ -557,6 +590,7 @@ def run_scenario(sc: Scenario, seed: int, out_root: Path, run_id: str, timeout: 
         "planted": report.counts(canaries), "received": report.received_counts(canaries, findings),
         "placeholders": placeholder_counts(records), "tool_results_with_placeholder": tool_results_with_placeholder(records)[0],
         "received_in_base64": received_in_base64(records, canaries), "png": png_identical(records),
+        "model_paths": model_paths(records),
         "_canaries": canaries})
     return out
 
@@ -612,7 +646,8 @@ def main(argv: Optional[list[str]] = None) -> int:
               f"results_seen={r.get('tool_results_seen')} received_known={r.get('received', {}).get('known_format')} "
               f"placeholders={r.get('placeholders', {}).get('total')} "
               f"received_in_base64={r.get('received_in_base64', {}).get('known_format')} "
-              f"media={r.get('gate_log', {}).get('media')} reasons={r.get('gate_log', {}).get('by_reason')}")
+              f"media={r.get('gate_log', {}).get('media')} reasons={r.get('gate_log', {}).get('by_reason')} "
+              f"paths={r.get('model_paths')} reused={r.get('gate_log', {}).get('upstream_reused')}")
     print(f"report: {path}")
     return 1 if data["isolation"]["real_home_changed"] else 0
 

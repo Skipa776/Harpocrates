@@ -671,6 +671,8 @@ ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/v1/messages/count_tokens"): "anthropic.count_tokens",
     ("POST", "/v1/responses"): "openai.responses",
     ("GET", "/v1/models"): "models",
+    ("POST", "/backend-api/codex/responses"): "openai.responses",  # where the gate sends a Codex ChatGPT login (G5)
+    ("GET", "/backend-api/codex/models"): "models",
 }  # (method, path) -> route name
 JSON_ROUTES = ("anthropic.messages", "anthropic.count_tokens", "openai.responses")  # routes whose body must be a JSON object
 ERROR_KINDS = {400: "invalid_request_error", 401: "authentication_error", 403: "permission_error", 404: "not_found_error",

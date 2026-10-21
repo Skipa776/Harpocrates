@@ -1,25 +1,33 @@
-"""Timing reference for the gate (G3, FR-GATE-01): latency added over direct-to-mock for a 100 KB body.
+"""Timing reference for the gate (G3, FR-GATE-01; G5 connection reuse, NFR-01): latency added over direct-to-mock.
 
-    python -m bench.gate_latency [--calls 200] [--warmup 20] [--body-bytes 102400] [--out bench/results/gate]
+    python -m bench.gate_latency [--calls 200] [--warmup 20] [--body-bytes 102400] [--tls] [--no-pool] [--out DIR]
 
 Everything runs on 127.0.0.1: bench/mock_provider.py is the upstream, and the gate runs with a pass-through scan step
-defined here (the gate itself ships none), so these numbers leave the scan out; bench/gate_scan_latency.py measures the scan. The calls alternate direct, then through the gate, so drift in the machine hits both. The client keeps one
-connection to each; the gate opens a new one to the mock per request, as it will to a provider. The record holds
-numbers and the machine and date only, never a request. A reference for NFR-01 (M3), not a gate on G3.
+defined here (the gate itself ships none), so these numbers leave the scan out; bench/gate_scan_latency.py measures the
+scan. The calls alternate direct, then through the gate, so drift in the machine hits both. The client keeps one
+connection to each. --tls puts the mock behind TLS with a throwaway certificate (made with the openssl command and
+trusted only by this run), as a provider is; --no-pool makes the gate open a new upstream connection per request, as
+it did before G5. The record holds numbers and the machine and date only, never a request. On loopback a TLS handshake
+costs a few milliseconds; over a real network it costs one or two round trips more, so these numbers understate what
+the pool saves.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import http.client
 import json
 import os
 import platform
+import ssl
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import Harpocrates.gate.upstream as upstream_module
 from bench import mock_provider as mock
 from Harpocrates.gate.config import GateConfig
 from Harpocrates.gate.scan import Forward
@@ -106,31 +114,81 @@ def _timed_post(conn: http.client.HTTPConnection, body: bytes, headers: dict) ->
     return elapsed
 
 
-def measure(calls: int = 200, warmup: int = 20, body_bytes: int = 100 * 1024) -> dict[str, object]:
+def _throwaway_tls() -> tuple[ssl.SSLContext, ssl.SSLContext]:
+    """
+    Description: Make a one-day certificate for 127.0.0.1 and the server and client TLS settings that use it.
+    Parameters: None
+    Output: (server context, client context that trusts only that certificate and checks the name). The key and
+        certificate files are deleted before returning; the contexts keep what they loaded. Raises OSError when the
+        openssl command is missing.
+    """
+    with tempfile.TemporaryDirectory() as folder:
+        cert, key = Path(folder) / "cert.pem", Path(folder) / "key.pem"
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out",
+                        str(cert), "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"],
+                       check=True, capture_output=True)
+        server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server.load_cert_chain(str(cert), str(key))
+        client = ssl.create_default_context(cafile=str(cert))
+    return server, client
+
+
+@contextlib.contextmanager
+def _pool_size(size: int):
+    """
+    Description: Set how many idle upstream connections the gate keeps, for one measurement.
+    Parameters:
+        size: the limit; 0 turns reuse off.
+    Output: A context manager that restores the gate's limit on exit.
+    """
+    saved = upstream_module.POOL_MAX_IDLE
+    upstream_module.POOL_MAX_IDLE = size
+    try:
+        yield
+    finally:
+        upstream_module.POOL_MAX_IDLE = saved
+
+
+def measure(calls: int = 200, warmup: int = 20, body_bytes: int = 100 * 1024, tls: bool = False,
+            pool: bool = True) -> dict[str, object]:
     """
     Description: Time the same request direct to the mock and through the gate.
     Parameters:
         calls: how many timed calls per path.
         warmup: how many untimed calls first, per path.
         body_bytes: the request body size.
-    Output: The record: date, hardware, sizes, scan step, client connection kind, and direct_ms, via_gate_ms and
-        added_ms (the gate's p50 and p95 minus direct's). Starts and stops a mock and a gate on 127.0.0.1.
+        tls: put the mock behind TLS (a throwaway certificate) for both paths.
+        pool: let the gate reuse upstream connections (the default); False opens one per request.
+    Output: The record: date, hardware, sizes, scan step, client connection kind, upstream TLS, pool, and direct_ms,
+        via_gate_ms and added_ms (the gate's p50 and p95 minus direct's). Starts and stops a mock and a gate on 127.0.0.1.
     """
     body, token = make_body(body_bytes), new_token()
     headers = {"Content-Type": "application/json", "anthropic-version": "2023-06-01"}
     upstream = mock.start_server()
-    config = GateConfig(anthropic_upstream=upstream.url, openai_upstream=upstream.url)
+    client_ctx = None
+    if tls:
+        server_ctx, client_ctx = _throwaway_tls()
+        # ponytail: wraps the listening socket in place while serving; fine for this serial bench (each TLS handshake runs
+        # in accept), a TLS-aware mock if a bench ever needs parallel clients.
+        upstream.server.socket = server_ctx.wrap_socket(upstream.server.socket, server_side=True)
+    base = f"{'https' if tls else 'http'}://127.0.0.1:{upstream.port}"
+    config = GateConfig(anthropic_upstream=base, openai_upstream=base)
     gate = start_gate(config, token, scan_step=lambda data, route, head: Forward(data))
-    direct_conn = http.client.HTTPConnection(upstream.host, upstream.port, timeout=30)
+    if tls:  # trust the throwaway certificate on the gate's side too
+        gate.server.pool.close()
+        gate.server.pool = upstream_module.UpstreamPool(client_ctx)
+    direct_conn = (http.client.HTTPSConnection(upstream.host, upstream.port, timeout=30, context=client_ctx) if tls
+                   else http.client.HTTPConnection(upstream.host, upstream.port, timeout=30))
     gate_conn = http.client.HTTPConnection(gate.host, gate.port, timeout=30)
     direct, via = [], []
     try:
-        for index in range(warmup + calls):
-            d = _timed_post(direct_conn, body, headers)
-            g = _timed_post(gate_conn, body, {**headers, TOKEN_HEADER: token})
-            if index >= warmup:
-                direct.append(d)
-                via.append(g)
+        with _pool_size(upstream_module.POOL_MAX_IDLE if pool else 0):
+            for index in range(warmup + calls):
+                d = _timed_post(direct_conn, body, headers)
+                g = _timed_post(gate_conn, body, {**headers, TOKEN_HEADER: token})
+                if index >= warmup:
+                    direct.append(d)
+                    via.append(g)
     finally:
         direct_conn.close()
         gate_conn.close()
@@ -139,20 +197,22 @@ def measure(calls: int = 200, warmup: int = 20, body_bytes: int = 100 * 1024) ->
     direct_s, via_s = summarize(direct), summarize(via)
     return {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "hardware": describe_hardware(),
             "body_bytes": body_bytes, "calls": calls, "warmup": warmup, "scan_step": "pass-through",
-            "client_connection": "keep-alive", "direct_ms": direct_s, "via_gate_ms": via_s,
+            "client_connection": "keep-alive", "upstream_tls": tls, "pool": pool, "direct_ms": direct_s,
+            "via_gate_ms": via_s,
             "added_ms": {"p50": round(via_s["p50"] - direct_s["p50"], 3), "p95": round(via_s["p95"] - direct_s["p95"], 3)}}
 
 
 def write_record(record: dict[str, object], out_dir: Path) -> Path:
     """
-    Description: Save a record as bench/results/gate/latency-DATE.json.
+    Description: Save a record as bench/results/gate/latency-DATE[-tls][-nopool].json.
     Parameters:
         record: the dict from measure.
         out_dir: the folder, created if missing.
-    Output: The path written. An earlier record of the same date is replaced.
+    Output: The path written. An earlier record of the same date and settings is replaced.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"latency-{record['date']}.json"
+    suffix = ("-tls" if record.get("upstream_tls") else "") + ("" if record.get("pool", True) else "-nopool")
+    path = out_dir / f"latency-{record['date']}{suffix}.json"
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     return path
 
@@ -168,9 +228,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--calls", type=int, default=200)
     parser.add_argument("--warmup", type=int, default=20)
     parser.add_argument("--body-bytes", type=int, default=100 * 1024)
+    parser.add_argument("--tls", action="store_true", help="put the mock behind TLS with a throwaway certificate")
+    parser.add_argument("--no-pool", action="store_true", help="open a new upstream connection per request")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
-    record = measure(args.calls, args.warmup, args.body_bytes)
+    record = measure(args.calls, args.warmup, args.body_bytes, tls=args.tls, pool=not args.no_pool)
     path = write_record(record, args.out)
     print(f"{path}  added p50 {record['added_ms']['p50']} ms, p95 {record['added_ms']['p95']} ms")
     return 0

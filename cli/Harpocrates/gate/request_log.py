@@ -17,7 +17,7 @@ ROUTE_NAMES = frozenset({"anthropic.messages", "anthropic.count_tokens", "openai
                          "openai.models", "websocket-upgrade", "unknown"})
 _DECISIONS = frozenset({"forwarded", "blocked", "upgrade-refused", "upstream-error"})
 _COUNTS = ("bytes_in", "bytes_out", "bytes_back")
-_TIMINGS = ("ms_scan", "ms_upstream", "ms_total")
+_TIMINGS = ("ms_scan", "ms_connect", "ms_upstream", "ms_total")
 _TIME = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z")
 
 
@@ -41,11 +41,11 @@ def format_entry(entry: Mapping[str, object]) -> str:
     Description: Turn one request's facts into a log line, keeping only fields that cannot carry request content.
     Parameters:
         entry: facts about the request. Read: time, method, route, status, decision, reason, bytes_in, bytes_out,
-            bytes_back, ms_scan, ms_upstream, ms_total, media. Every other key is ignored.
+            bytes_back, ms_scan, ms_connect, ms_upstream, ms_total, upstream_reused, media. Every other key is ignored.
     Output: One compact JSON object ending in a newline, fields in that order. A method outside the usual seven
         is logged as "OTHER". A route, decision or reason outside the gate's fixed vocabulary, a status outside 100 to 599,
         and a bad number are left out. media (FR-GATE-07) keeps only {"kind", "bytes"} pairs with a kind from the fixed list
-        and a count, and is left out when none remain. No side effects.
+        and a count, and is left out when none remain. upstream_reused is kept only as a bool. No side effects.
     """
     method, route = entry.get("method"), entry.get("route")
     status, decision, reason = entry.get("status"), entry.get("decision"), entry.get("reason")
@@ -68,6 +68,8 @@ def format_entry(entry: Mapping[str, object]) -> str:
             value = _number(entry.get(name), integer)
             if value is not None:
                 fields[name] = value
+    if isinstance(entry.get("upstream_reused"), bool):
+        fields["upstream_reused"] = entry["upstream_reused"]
     media = entry.get("media")
     notes = [{"kind": item["kind"], "bytes": item["bytes"]} for item in media if isinstance(item, dict)
              and item.get("kind") in KINDS and _number(item.get("bytes"), True) is not None] if isinstance(media, list) else []

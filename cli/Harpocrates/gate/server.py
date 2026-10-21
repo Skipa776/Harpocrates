@@ -11,7 +11,7 @@ from typing import Callable, Optional
 
 from Harpocrates.gate.body_encoding import Zstd, decode_body, encode_body, load_zstd
 from Harpocrates.gate.body_read import read_body
-from Harpocrates.gate.config import BIND_HOST, GateConfig
+from Harpocrates.gate.config import BIND_HOST, CHATGPT_PATH_PREFIX, GateConfig
 from Harpocrates.gate.errors import UPSTREAM_FAILED, error_response
 from Harpocrates.gate.headers import upstream_request_headers
 from Harpocrates.gate.relay import relay_response
@@ -20,7 +20,7 @@ from Harpocrates.gate.request_scan import RequestScanner
 from Harpocrates.gate.routes import Route, classify
 from Harpocrates.gate.scan import Block, RequestHead, ScanStep, run_scan
 from Harpocrates.gate.session_token import TOKEN_HEADER, check_token
-from Harpocrates.gate.upstream import UpstreamError, open_upstream
+from Harpocrates.gate.upstream import UpstreamError, UpstreamPool
 
 _BODY_CODES = {"too-large": "HARPO-BLOCK-BODY-TOO-LARGE", "bad-framing": "HARPO-BLOCK-BODY-FRAMING",
                "truncated": "HARPO-BLOCK-BODY-TRUNCATED"}
@@ -54,10 +54,11 @@ class GateServer(ThreadingHTTPServer):
             scan_step: the scan step.
             log: the request log.
             zstd: the zstd functions or None.
-        Output: None.
+        Output: None. Also makes the pool of idle provider connections (closed with the server).
         """
         super().__init__((config.host, config.port), GateHandler)
         self.config, self.token, self.scan_step, self.log, self.zstd = config, token, scan_step, log, zstd
+        self.pool = UpstreamPool()
 
     def handle_error(self, request: object, client_address: object) -> None:
         """
@@ -169,21 +170,40 @@ class GateHandler(BaseHTTPRequestHandler):
         has_body = route.action != "pass"
         headers = upstream_request_headers(list(self.headers.items()), encoding, len(body) if has_body else None)
         self._facts["bytes_out"] = len(body) if has_body else 0
+        provider, target = self._destination(route)
+        upstream = config.upstream_for(provider)
         sent_at = time.monotonic()
         try:
-            connection, response = open_upstream(config.upstream_for(route.provider), config, self.command, self.path,
-                                                 headers, body if has_body else None)
+            exchange = self.server.pool.exchange(upstream, config, self.command, target, headers,
+                                                 body if has_body else None)
         except UpstreamError:
             return self._refuse(route, UPSTREAM_FAILED, body_unread=False)
-        self._facts["ms_upstream"] = (time.monotonic() - sent_at) * 1000
+        self._facts.update(ms_upstream=(time.monotonic() - sent_at) * 1000, upstream_reused=exchange.reused,
+                           ms_connect=exchange.ms_connect)
         self._responded = True
+        relayed = None
         try:
-            relayed = relay_response(response, self.wfile, self.request_version == "HTTP/1.0")
+            relayed = relay_response(exchange.response, self.wfile, self.request_version == "HTTP/1.0")
         finally:
-            connection.close()
+            self.server.pool.release(upstream, exchange, relayed is not None and relayed.ended == "complete")
         self._facts.update(status=relayed.status, decision="forwarded", bytes_back=relayed.bytes_back)
         if relayed.ended != "complete":
             self.close_connection = True
+
+    def _destination(self, route: Route) -> tuple[str, str]:
+        """
+        Description: Choose where a request goes (G5 spec, part 2): an OpenAI route that carries chatgpt-account-id is a
+            Codex ChatGPT login, which goes to the ChatGPT upstream with /v1 replaced by /backend-api/codex.
+        Parameters:
+            route: the request's route.
+        Output: (provider for GateConfig.upstream_for, request target). Every other request keeps its provider and its
+            target as received. Only the header's presence is read, never its value.
+        """
+        # Only /v1/responses and /v1/models reach here (routes.classify), so the prefix is always "/v1/".
+        chatgpt = route.provider == "openai" and any(name.lower() == "chatgpt-account-id" for name in self.headers.keys())
+        if chatgpt and self.path.startswith("/v1/"):
+            return "chatgpt", CHATGPT_PATH_PREFIX + self.path[len("/v1"):]
+        return route.provider, self.path
 
     def _head(self) -> RequestHead:
         """
@@ -344,6 +364,7 @@ class RunningGate:
             self.server.shutdown()
             self.thread.join(timeout=10)
         self.server.server_close()
+        self.server.pool.close()
 
     def __enter__(self) -> "RunningGate":
         """
