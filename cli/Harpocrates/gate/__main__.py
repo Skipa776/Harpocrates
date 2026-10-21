@@ -1,7 +1,7 @@
-"""Run the gate: python -m Harpocrates.gate --port N --token-file F
+"""Run the gate: python -m Harpocrates.gate --port N --token-file F [--audit-dir D]
 
 There is no bind-address option (the gate listens on 127.0.0.1 only) and no way to skip the scan: no override flag exists
-(FR-GATE-03). `harpo guard up` wraps this command later (G7).
+(FR-GATE-03). `harpo guard up` runs this command with --audit-dir ~/.harpo (G6, G7).
 """
 from __future__ import annotations
 
@@ -42,6 +42,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--port", type=int, default=0, help="TCP port on 127.0.0.1; 0 lets the system choose")
     parser.add_argument("--token-file", type=Path, required=True,
                         help="file holding the session token, mode 0600 (see session_token.write_token_file)")
+    parser.add_argument("--audit-dir", type=Path, default=None,
+                        help="folder for findings.jsonl and proof.jsonl; without it the gate writes neither")
     args = parser.parse_args(argv)
     try:
         token = read_token_file(args.token_file)
@@ -50,7 +52,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"harpo-gate: {error}", file=sys.stderr)
         return 2
     try:
-        gate = start_gate(config, token, log_sink=_log_to_stderr)
+        gate = start_gate(config, token, log_sink=_log_to_stderr, audit_dir=args.audit_dir)
     except OSError as error:
         print(f"harpo-gate: cannot bind {config.host}:{config.port}: {error.strerror or type(error).__name__}",
               file=sys.stderr)

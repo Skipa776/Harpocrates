@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
 
-from Harpocrates import gatecheck, harness, install, paths
+from Harpocrates import audit, gatecheck, harness, install, paths
 from Harpocrates.gate import session_token
 from Harpocrates.install import RefusalError
 
@@ -335,16 +335,17 @@ def stop_gate(files: Files) -> Optional[int]:
     return pid
 
 
-def gate_command(port: int, token_file: Path) -> list[str]:
+def gate_command(port: int, token_file: Path, audit_dir: Path) -> list[str]:
     """
     Description: The command that runs the gate: this interpreter, with the flags of the hook commands (harness.python_flags).
     Parameters:
         port: the port to listen on (0: any free port).
         token_file: the token file.
+        audit_dir: where the gate writes the findings and proof logs (G6).
     Output: The argument list.
     """
     return [sys.executable, *harness.python_flags(), "-m", "Harpocrates.gate", "--port", str(port),
-            "--token-file", str(token_file)]
+            "--token-file", str(token_file), "--audit-dir", str(audit_dir)]
 
 
 def start_gate(files: Files, port: int, token: str) -> tuple[int, int]:
@@ -364,7 +365,7 @@ def start_gate(files: Files, port: int, token: str) -> tuple[int, int]:
     log_fd = os.open(files.log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try:
         os.fchmod(log_fd, 0o600)
-        proc = subprocess.Popen(gate_command(port, files.token), stdin=subprocess.DEVNULL, stdout=out_fd, stderr=log_fd,
+        proc = subprocess.Popen(gate_command(port, files.token, files.state), stdin=subprocess.DEVNULL, stdout=out_fd, stderr=log_fd,
                                 cwd=files.state, start_new_session=True, close_fds=True)
     finally:
         os.close(out_fd)
@@ -649,6 +650,10 @@ def doctor(cwd: Path, environ: Optional[Mapping[str, str]] = None) -> list[Check
     hooks = [install.NAMES[t] for t in install.TARGETS if isinstance(record.get(t), dict)]
     checks.append(Check("read hook", "ok" if hooks else "warn",
                         f"installed for {', '.join(hooks)}" if hooks else "not installed: run `harpo install`"))
+    proof = audit.verify(state)
+    checks.append(Check("proof log", "fail" if proof.problem else "ok",
+                        f"{proof.problem}: see `harpo proof`" if proof.problem
+                        else f"{len(proof.entries)} entries, the chain verifies"))
     try:
         entry = gatecheck.read_gate_entry()
     except gatecheck.GateRecordError as exc:

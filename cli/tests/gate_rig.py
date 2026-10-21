@@ -86,13 +86,13 @@ class Rig:
 
 
 @contextmanager
-def running_rig(scan_step=None, mock_kwargs: Optional[dict] = None, **config: object) -> Iterator[Rig]:
+def running_rig(scan_step=None, mock_kwargs: Optional[dict] = None, audit_dir=None, **config: object) -> Iterator[Rig]:
     """Start the mock provider and a gate pointed at it. The default scan step is the gate's own (the real scanner,
-    G4); a test that wants requests to go through passes passthrough_scan."""
+    G4); a test that wants requests to go through passes passthrough_scan. audit_dir turns on the G6 logs."""
     upstream = mock.start_server(**(mock_kwargs or {}))
     token, log_lines = new_token(), []
     settings = GateConfig(**{"anthropic_upstream": upstream.url, "openai_upstream": upstream.url, **config})
-    gate = start_gate(settings, token, scan_step=scan_step, log_sink=log_lines.append)
+    gate = start_gate(settings, token, scan_step=scan_step, log_sink=log_lines.append, audit_dir=audit_dir)
     try:
         yield Rig(upstream, gate, token, log_lines)
     finally:

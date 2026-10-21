@@ -20,13 +20,18 @@ def _good_report() -> dict:
         "scenario": "claude-guard-routed", "agent": "claude", "mode": "routed", "status": "ok",
         "guard_up_exit": 0, "routing_written": True, "tool_results_seen": 2,
         "doctor_exit": 0, "received": {"known_format": 0},
-        "guard_down_exit": 0, "restored_exactly": True,
+        "guard_down_exit": 0, "restored_exactly": True, "mock_model_requests": 4,
+        "audit": {"proof_entries": 4, "proof_problem": None, "proof_matches_mock": True,
+                  "findings": {"gate:secret_redacted": 8}},
+        "sec01": {"files": [".harpo/proof.jsonl"], "hits": []},
     }
     after = {
         "scenario": "codex-guard-after-down", "agent": "codex", "mode": "after-down", "status": "ok",
         "guard_up_exit": 0, "routing_written": True, "tool_results_seen": 2,
         "received": {"known_format": 3},
-        "guard_down_exit": 0, "restored_exactly": True,
+        "guard_down_exit": 0, "restored_exactly": True, "mock_model_requests": 4,
+        "audit": {"proof_entries": 0, "proof_problem": None, "proof_matches_mock": False, "findings": {}},
+        "sec01": {"files": [".harpo/gate.log"], "hits": []},
     }
     return {"isolation": {"real_home_changed": []}, "scenarios": [routed, after]}
 
@@ -50,6 +55,12 @@ def test_fr_install_01_guard_e2e_verdict_accepts_a_good_report():
     pytest.param("after", ("received", "known_format"), 0, id="after-down-control-did-not-leak"),
     pytest.param("after", ("tool_results_seen",), 0, id="after-down-no-tool-results"),
     pytest.param("isolation", ("real_home_changed",), ["~/.claude/settings.json"], id="real-home-changed"),
+    pytest.param("routed", ("audit", "proof_entries"), 3, id="routed-a-request-without-a-proof-entry"),
+    pytest.param("routed", ("audit", "proof_matches_mock"), False, id="routed-proof-hashes-differ"),
+    pytest.param("routed", ("audit", "proof_problem"), "proof.jsonl line 2 was changed", id="routed-chain-broken"),
+    pytest.param("routed", ("audit", "findings"), {}, id="routed-no-findings"),
+    pytest.param("after", ("audit", "proof_entries"), 1, id="after-down-gate-still-forwarding"),
+    pytest.param("after", ("sec01", "hits"), [{"file": "tmp/x", "canaries": 1}], id="sec01-canary-in-a-file"),
 ])
 def test_fr_install_01_guard_e2e_verdict_rejects_each_failure(where, path, value):
     assert g7.passed(_good_report())  # the base report passes, so each mutation below is what fails it

@@ -167,6 +167,21 @@ harpo guard down            # remove the routing and stop the gate
 
 The gate's files are in `~/.harpo`: `gate.token`, `gate.pid` and `gate.log`. All three are mode 0600. `gate.log` has one line per request with the decision. It never holds a header value or a body.
 
+### Findings and proof logs
+
+Two more files in `~/.harpo` record what Harpo did. Neither holds a secret value or a request body. Both are mode 0600, and each rotates at 10 MB, keeping one previous file (`findings.1.jsonl`, `proof.1.jsonl`).
+
+- `findings.jsonl` has one line per finding: a secret the gate or `safe_read` replaced (`secret_redacted`), a request the gate blocked (`request_blocked`, with its reason code) and a read the hook refused (`read_refused`). Each line names the layer, the secret type, the placeholder's four-character hash, the source (the gate route, or the file) and the session. A secret is logged once per session and source, not on every turn that resends it. A request without the gate token is not logged, so a program that lacks the token cannot fill the log. `harpo doctor`'s own probe shows up as one `request_blocked` line with HARPO-BLOCK-ROUTE per run.
+- `proof.jsonl` has one entry per request the gate forwards, written before the request is sent: the provider, the route, the size and SHA-256 of the exact body bytes sent, and how many placeholders of each type it carried. Each entry includes the previous entry's hash, and `proof.head` records both ends of the chain, so an edited, inserted or removed entry is detected. If the gate cannot write the entry, it blocks the request with HARPO-BLOCK-AUDIT.
+
+```bash
+harpo proof             # the last 10 forwarded requests, and whether the chain verifies
+harpo proof --last 50   # more entries
+harpo proof --json      # for scripts; exit status 1 when the chain does not verify
+```
+
+The SHA-256 lets you check a body you captured elsewhere against what the gate sent, without Harpo keeping a copy of it. `harpo doctor` checks the chain too. A gate started directly (`python -m Harpocrates.gate`) writes these logs only when given `--audit-dir`; `harpo guard up` passes `~/.harpo`.
+
 `guard up` refuses a harness that already routes elsewhere. That means its own `ANTHROPIC_BASE_URL` or `ANTHROPIC_CUSTOM_HEADERS`, a `CLAUDE_CODE_USE_<provider>` setting that is on, or, for Codex, its own `model_provider` or `openai_base_url`. Chaining to an existing gateway is not supported yet. Remove that setting, or leave that harness off the gate.
 
 Running `harpo guard up` again replaces the gate and the token. Agent sessions that were already running must be restarted.
@@ -175,7 +190,7 @@ Running `harpo guard up` again replaces the gate and the token. Agent sessions t
 
 While the agents are routed, a stopped or crashed gate means their requests fail to connect. Nothing is sent unscanned. There is no login service, so after a reboot, run `harpo guard up` again.
 
-`harpo doctor` checks this machine only, and sends nothing to a provider. It checks the read hook, the gate entry, that the gate process runs, that the gate refuses a request without the token and accepts the token, that each routed harness names the gate with the current token, and that no setting in the current folder or the environment moves Claude Code off the gate (SEC-10). Use `harpo doctor --json` in scripts. It exits with status 1 if any check fails, and each failure names its fix.
+`harpo doctor` checks this machine only, and sends nothing to a provider. It checks the read hook, the proof chain, the gate entry, that the gate process runs, that the gate refuses a request without the token and accepts the token, that each routed harness names the gate with the current token, and that no setting in the current folder or the environment moves Claude Code off the gate (SEC-10). Use `harpo doctor --json` in scripts. It exits with status 1 if any check fails, and each failure names its fix.
 
 Codex through the gate uses Codex's own login (`requires_openai_auth = true`). Use a ChatGPT login, or `codex login --with-api-key`. With codex-cli 0.163.0, an API key that is only in the `OPENAI_API_KEY` environment variable was not sent through a custom provider (see [gate-transport.md](gate-transport.md), T4). Log in instead.
 
@@ -226,3 +241,4 @@ The environment variables `HARPO_RUST_SCANNER`, `HARPO_RUST_TIMEOUT_SECONDS`, `H
 | Fresh-machine setup in under 5 minutes, done by someone else | Pending. This is FR-READ-03's acceptance test. |
 | Claude Code 2.1.306 and Codex 0.163.0, Oct 21, 2026: the installed hook in a throwaway home, scripted Read `.env`, `cat` and `grep`, mock provider (`python bench/canary_harness.py --mode agent --agent all`) | 0 of 22 known-format canaries reached the provider; each agent made its 3 tool calls. The same run with nothing installed (`--control`): 10 of 22 reached it. Scripted calls and a mock provider, not a live model |
 | `harpo guard up` with real agents, Oct 21, 2026: Claude Code 2.1.306 and Codex 0.163.0 (`python -m bench.guard_e2e`) | With routing written only by `guard up`, the sessions leaked 0 of 11 known-format canaries to the mock provider, and `harpo doctor` passed. After `guard down` both files were byte-identical. The same reads with nothing routed leaked 5 of 11. |
+| The findings and proof logs in the same runs, Oct 21, 2026 (seeds 6 and 7) | Each routed session: 4 proof entries for the 4 requests the mock received, with the same SHA-256 values, and the chain verified; 7 or 8 `secret_redacted` lines from the gate. No canary value in any file under the throwaway `~/.harpo` or the agents' TMPDIR (SEC-01). |

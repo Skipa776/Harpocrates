@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""End-to-end test of G7 with real agents (FR-INSTALL-01, FR-INSTALL-02, FR-INSTALL-06, FR-INSTALL-08, FR-UX-01).
+"""End-to-end test of G7 and G6 with real agents (FR-INSTALL-01, -02, -06, -08, FR-UX-01, FR-LOG-01, FR-PROOF-01, -02,
+SEC-01).
 
     python -m bench.guard_e2e [--seed N] [--out-dir DIR]
 
@@ -8,6 +9,9 @@ Each scenario runs `harpo guard up` through the real CLI in a throwaway home (be
 "routed": no known-format canary may reach the mock, and `harpo doctor` must pass. "after-down": `harpo guard down` runs
 before the agent; the files must be byte-identical to before guard up, and the same reads must then reach the mock,
 which shows that guard down took the routing out and that the counter works.
+
+G6 and SEC-01, read after each session: every request the mock received has a proof entry with the same SHA-256, the
+chain verifies, the gate logged findings, and no canary value is in any file under the throwaway ~/.harpo or TMPDIR.
 
 Only here is the gate's upstream the mock: the throwaway bootstrap swaps in a GateConfig whose upstream defaults are the
 mock, for the gate process, when HARPO_E2E_UPSTREAM is set. The product has no such switch. Output: DIR/proof/<run>.json,
@@ -20,6 +24,7 @@ import hashlib
 import json
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple, Optional
@@ -31,6 +36,7 @@ sys.path.insert(0, str(ROOT))
 from bench import agent_isolation as iso  # noqa: E402
 from bench import agent_runner as runner  # noqa: E402
 from bench import canary_report as report  # noqa: E402
+from Harpocrates import audit  # noqa: E402
 
 DEFAULT_OUT = ROOT / "bench" / "results"
 ROUTING_VARS = ("ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "OPENAI_BASE_URL")
@@ -104,6 +110,43 @@ def _digest(path: Path) -> Optional[str]:
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
+def sweep(roots: list[Path], canaries: list) -> dict:
+    """
+    Description: SEC-01: look for every canary value in every file under some folders.
+    Parameters:
+        roots: the folders.
+        canaries: the planted Canary records.
+    Output: {"files": the files read, "hits": [{"file", "canaries": how many}]}, each file named relative to its root's
+        parent. A value counts as found as is or JSON-escaped (a private key's newlines). Never the values themselves.
+    """
+    needles = [{c.value.encode(), json.dumps(c.value)[1:-1].encode()} for c in canaries]
+    files, hits = [], []
+    for root in roots:
+        for path in sorted(p for p in root.rglob("*") if p.is_file() and not p.is_symlink()):
+            name = str(path.relative_to(root.parent))
+            files.append(name)
+            found = sum(any(n in path.read_bytes() for n in forms) for forms in needles)
+            if found:
+                hits.append({"file": name, "canaries": found})
+    return {"files": files, "hits": hits}
+
+
+def audit_facts(state: Path, records: list[dict]) -> dict:
+    """
+    Description: What the gate's G6 logs say about a session, next to what the mock received.
+    Parameters:
+        state: the throwaway ~/.harpo.
+        records: the mock's records.
+    Output: {"proof_entries", "proof_problem", "proof_matches_mock" (the same SHA-256 values, as many times each),
+        "findings" ({"layer:event_type": count})}.
+    """
+    proof = audit.verify(state)
+    lines = [json.loads(line) for line in audit._lines(state / audit.FINDINGS)]
+    return {"proof_entries": len(proof.entries), "proof_problem": proof.problem,
+            "proof_matches_mock": sorted(e["sha256"] for e in proof.entries) == sorted(r["body_sha256"] for r in records),
+            "findings": dict(Counter(f"{f['layer']}:{f['event_type']}" for f in lines))}
+
+
 def run_scenario(sc: Scenario, seed: int, out_root: Path, run_id: str, timeout: int) -> dict:
     """
     Description: Run one scenario and describe what the mock received.
@@ -143,6 +186,8 @@ def run_scenario(sc: Scenario, seed: int, out_root: Path, run_id: str, timeout: 
                 runner.write_codex_config(tw, url)
         code, timed_out, seconds = session.run(session.argv(), env, timeout)
         records = session.server.records()
+        out["audit"] = audit_facts(tw.home / ".harpo", records)
+        out["sec01"] = sweep([tw.home / ".harpo", tw.tmp], session.canaries)  # before guard down removes gate.out
         if sc.mode == "routed":
             out["guard_down_exit"] = harpo(tw, ["guard", "down"], url).returncode
             out["restored_exactly"] = _digest(routed) == before
@@ -192,10 +237,13 @@ def passed(data: dict) -> bool:
             continue
         ran = s["status"] == "ok" and s["guard_up_exit"] == 0 and s["routing_written"] and s["tool_results_seen"] >= 1
         restored = s.get("guard_down_exit") == 0 and s.get("restored_exactly")
+        logs = s["audit"]["proof_problem"] is None and not s["sec01"]["hits"]
         if s["mode"] == "routed":
-            ok = ran and restored and s["doctor_exit"] == 0 and s["received"]["known_format"] == 0
+            ok = (ran and restored and logs and s["doctor_exit"] == 0 and s["received"]["known_format"] == 0
+                  and s["audit"]["proof_entries"] == s["mock_model_requests"] > 0 and s["audit"]["proof_matches_mock"]
+                  and s["audit"]["findings"].get("gate:secret_redacted", 0) > 0)
         else:
-            ok = ran and restored and s["received"]["known_format"] > 0
+            ok = ran and restored and logs and s["received"]["known_format"] > 0 and s["audit"]["proof_entries"] == 0
         if not ok:
             return False
     return True
@@ -219,7 +267,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     for s in data["scenarios"]:
         print(f"{s['scenario']}: {s.get('status')} up={s.get('guard_up_exit')} doctor={s.get('doctor_exit')} "
               f"down={s.get('guard_down_exit')} restored={s.get('restored_exactly')} "
-              f"received_kf={(s.get('received') or {}).get('known_format')}")
+              f"received_kf={(s.get('received') or {}).get('known_format')} audit={s.get('audit')} "
+              f"sec01_hits={len((s.get('sec01') or {}).get('hits', []))}")
     print(f"report: {path}")
     if all(s.get("status") == "skipped" for s in data["scenarios"]):
         return 2

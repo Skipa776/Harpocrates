@@ -816,6 +816,43 @@ def doctor_cmd(
         raise typer.Exit(code=1)
 
 
+@app.command("proof", help=(
+    "Show the last requests the gate forwarded, as hashes and placeholder counts, and verify the proof chain. "
+    "No request body is stored."
+))
+def proof_cmd(
+    last: int = typer.Option(10, "--last", min=1, help="How many of the newest entries to show."),
+    json_output: bool = typer.Option(False, "--json", help="Print the entries and the result as JSON."),
+) -> None:
+    """
+    Description: `harpo proof` (G6, FR-PROOF-03).
+    Parameters:
+        last: how many entries to show.
+        json_output: print JSON instead of lines.
+    Output: None; exits 1 when the chain does not verify or the state folder is unusable.
+    """
+    from Harpocrates import audit, paths
+
+    state = paths.peek_state_dir()
+    if paths.unusable(state):
+        typer.echo(f"Error: {state} is a symlink or a file; move it away.", err=True)
+        raise typer.Exit(code=1)
+    result = audit.verify(state)
+    shown = result.entries[-last:]
+    if json_output:
+        typer.echo(json.dumps({"entries": shown, "total": len(result.entries), "verified": result.problem is None,
+                               "problem": result.problem}, indent=2))
+    else:
+        for e in shown:
+            counts = ", ".join(f"{kind} {n}" for kind, n in e["placeholders"].items()) or "no placeholders"
+            typer.echo(f"{e['seq']:>6}  {e['time']}  {e['route']:<26} {e['bytes']:>9} B  sha256 {e['sha256'][:16]}  "
+                       f"{counts}")
+        typer.echo(f"Chain does not verify: {result.problem}" if result.problem
+                   else f"Chain verifies: {len(result.entries)} entries.")
+    if result.problem:
+        raise typer.Exit(code=1)
+
+
 def main() -> None:
     """
     Description: Run the Typer application as the CLI entry point.

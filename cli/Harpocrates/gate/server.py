@@ -6,9 +6,12 @@ import socket
 import sys
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Callable, Optional
 
+from Harpocrates.audit import FindingsLog, ProofChain, placeholders
 from Harpocrates.gate.body_encoding import Zstd, decode_body, encode_body, load_zstd
 from Harpocrates.gate.body_read import read_body
 from Harpocrates.gate.config import BIND_HOST, CHATGPT_PATH_PREFIX, GateConfig
@@ -39,13 +42,15 @@ class GateServer(ThreadingHTTPServer):
         scan_step: the scan step.
         log: where one line per request goes.
         zstd: the zstd functions, or None when no zstd module is available.
+        audit_dir: the folder for the findings and proof logs (G6), or None to write neither.
     Output: A bound server. Raises OSError when the port is taken.
     """
 
     daemon_threads = True
     request_queue_size = 64
 
-    def __init__(self, config: GateConfig, token: str, scan_step: ScanStep, log: RequestLog, zstd: Optional[Zstd]) -> None:
+    def __init__(self, config: GateConfig, token: str, scan_step: ScanStep, log: RequestLog, zstd: Optional[Zstd],
+                 audit_dir: Optional[Path] = None) -> None:
         """
         Description: Bind the socket and keep what the handlers need.
         Parameters:
@@ -54,11 +59,14 @@ class GateServer(ThreadingHTTPServer):
             scan_step: the scan step.
             log: the request log.
             zstd: the zstd functions or None.
+            audit_dir: the audit folder or None.
         Output: None. Also makes the pool of idle provider connections (closed with the server).
         """
         super().__init__((config.host, config.port), GateHandler)
         self.config, self.token, self.scan_step, self.log, self.zstd = config, token, scan_step, log, zstd
         self.pool = UpstreamPool()
+        self.proof = ProofChain(audit_dir) if audit_dir is not None else None
+        self.findings = FindingsLog("gate", uuid.uuid4().hex, audit_dir) if audit_dir is not None else None
 
     def handle_error(self, request: object, client_address: object) -> None:
         """
@@ -140,11 +148,15 @@ class GateHandler(BaseHTTPRequestHandler):
             code: the reason code.
             body_unread: True when part of the request body may still be on the connection.
         Output: None. Writes the answer and notes the status, decision and reason for the log; the connection is closed
-            afterwards (after the log line is written, when part of the body must still be drained).
+            afterwards (after the log line is written, when part of the body must still be drained). A block of a
+            request that carried the token is also a finding; one without it is not, so a local process that lacks the
+            token cannot fill the findings log.
         """
         status, payload = error_response(route.provider, code)
         decision = {"HARPO-BLOCK-UPGRADE": "upgrade-refused", UPSTREAM_FAILED: "upstream-error"}.get(code, "blocked")
         self._facts.update(status=status, decision=decision, reason=code)
+        if decision == "blocked" and self._authenticated and self.server.findings is not None:
+            self.server.findings.record("request_blocked", None, None, route.name, "block", code)
         self._responded = True
         self.close_connection = True
         self.send_response(status)
@@ -190,6 +202,30 @@ class GateHandler(BaseHTTPRequestHandler):
         if relayed.ended != "complete":
             self.close_connection = True
 
+    def _record(self, route: Route, sent: bytes, plain: bytes, received: bytes) -> bool:
+        """
+        Description: Write the proof entry, and the findings, of a request that is about to be sent (G6).
+        Parameters:
+            route: its route.
+            sent: the exact body bytes that will be sent.
+            plain: the same body before encoding, where placeholders are counted.
+            received: the decoded body as the agent sent it, before the scan.
+        Output: True when the request may go: no audit folder, or the proof entry was written. A proof write that
+            fails stops it; a findings write that fails does not. A finding is a placeholder the scan made: one that
+            was already in the request (from safe_read, say) is not this layer's.
+        """
+        proof, findings = self.server.proof, self.server.findings
+        if proof is None or findings is None:
+            return True
+        has_body = route.action != "pass"
+        try:
+            proof.append(self._destination(route)[0], route.name, sent if has_body else b"", plain if has_body else b"")
+        except (OSError, ValueError):
+            return False
+        before = set(placeholders(received))
+        findings.redactions([p for p in placeholders(plain) if p not in before], route.name)
+        return True
+
     def _destination(self, route: Route) -> tuple[str, str]:
         """
         Description: Choose where a request goes (G5 spec, part 2): an OpenAI route that carries chatgpt-account-id is a
@@ -230,6 +266,7 @@ class GateHandler(BaseHTTPRequestHandler):
         """
         if not check_token(self.headers.get_all(TOKEN_HEADER, []), self.server.token):
             return self._refuse(route, "HARPO-BLOCK-TOKEN", body_unread=True)
+        self._authenticated = True
         if route.action == "upgrade":
             return self._refuse(route, "HARPO-BLOCK-UPGRADE", body_unread=True)
         if route.action == "block":
@@ -250,7 +287,10 @@ class GateHandler(BaseHTTPRequestHandler):
             return self._refuse(route, outcome.reason, body_unread=False)
         if outcome.media:
             self._facts["media"] = [{"kind": note.kind, "bytes": note.size} for note in outcome.media]
-        self._forward(route, encode_body(outcome.body, decoded.encoding, self.server.zstd), decoded.encoding)
+        body = encode_body(outcome.body, decoded.encoding, self.server.zstd)
+        if not self._record(route, body, outcome.body, decoded.body):
+            return self._refuse(route, "HARPO-BLOCK-AUDIT", body_unread=False)
+        self._forward(route, body, decoded.encoding)
 
     def parse_request(self) -> bool:
         """
@@ -281,7 +321,7 @@ class GateHandler(BaseHTTPRequestHandler):
             closes the connection.
         """
         started = time.monotonic()
-        self._responded = False
+        self._responded = self._authenticated = False
         self._drain = False
         self._facts = {"method": self.command or "", "route": "unknown"}
         headers = getattr(self, "headers", None)  # missing when the request line was too long to parse
@@ -305,7 +345,7 @@ class GateHandler(BaseHTTPRequestHandler):
             shown or logged. A socket error means the agent went away. Always writes one line to the request log.
         """
         started = time.monotonic()
-        self._responded = False
+        self._responded = self._authenticated = False
         self._drain = False
         self._facts: dict[str, object] = {"method": self.command, "route": "unknown"}
         route = Route("unknown", "openai", "block")
@@ -390,7 +430,7 @@ class RunningGate:
 
 
 def start_gate(config: GateConfig, token: str, scan_step: Optional[ScanStep] = None,
-               log_sink: Optional[Callable[[str], None]] = None) -> RunningGate:
+               log_sink: Optional[Callable[[str], None]] = None, audit_dir: Optional[Path] = None) -> RunningGate:
     """
     Description: Bind 127.0.0.1 and start serving in a background thread.
     Parameters:
@@ -399,13 +439,15 @@ def start_gate(config: GateConfig, token: str, scan_step: Optional[ScanStep] = N
         scan_step: the scan step, or None for a new RequestScanner: the real scanner, with a session key made now (SEC-02)
             that dies with this gate. Only a test passes another. There is no way to skip scanning (FR-GATE-03).
         log_sink: a function that takes one request-log line, or None to log nothing.
+        audit_dir: the folder for the findings and proof logs (`harpo guard up` passes ~/.harpo), or None to write
+            neither.
     Output: The running gate. Raises ValueError, before anything listens, when the settings do not name 127.0.0.1 or the
         socket ends up bound elsewhere; OSError when the port is taken.
     """
     if config.host != BIND_HOST:
         raise ValueError(f"host: the gate binds {BIND_HOST} only")
     server = GateServer(config, token, scan_step if scan_step is not None else RequestScanner(), RequestLog(log_sink),
-                        load_zstd())
+                        load_zstd(), audit_dir)
     if server.server_address[0] != BIND_HOST:  # belt and braces after the bind
         server.server_close()
         raise ValueError(f"host: the gate bound a socket other than {BIND_HOST}; refusing to serve")

@@ -154,6 +154,7 @@ STATE_REFUSAL = ("Only the user can change the Harpo allowlist. Ask them to run 
                  "`harpo allow <path>` in their own terminal.")
 _PROMPTING_MODES = {"default", "acceptEdits", "plan", "auto"}  # auto: a hook's ask forces a real prompt
 _can_ask = False
+_session: object = None  # the event's session_id, for the findings log
 
 # Child-process matcher for when ripgrep isn't installed: Python re, killed after MATCH_TIMEOUT, so an
 # agent-supplied pattern with catastrophic backtracking can't stall the hook into a timeout (= allow).
@@ -424,8 +425,8 @@ def _first_flagged(paths: Iterable[Path], cwd: Path, grep_args: Optional[dict] =
         cwd: Working directory used for relative display names.
         grep_args: Optional structured Grep arguments for oversize output checks.
         session_id: Session identifier for approved real paths, or None to use no session grants.
-    Output: Tuple of the first (display name, secret types) hit or None and preceding allowlisted
-        paths; does not log uses. Allowlist resolution errors disable that exemption; other scan and
+    Output: Tuple of the first (display name, secret types, their list) hit or None and preceding
+        allowlisted paths; does not log uses. Allowlist resolution errors disable that exemption; other scan and
         resolution errors propagate.
     Notes: ((name to show, secret types) of the first file that holds a secret, or None), and the
         allowlisted paths that passed on the way. Not scanned: a path on the user's allowlist, and
@@ -452,7 +453,7 @@ def _first_flagged(paths: Iterable[Path], cwd: Path, grep_args: Optional[dict] =
         if found:
             shown = allowlist.printable(str(path.relative_to(cwd) if path.is_relative_to(cwd) else path))
             kinds = {"unscanned": "unscanned (over the size limit)", "unreadable": "unreadable (can't be checked)"}
-            return (shown, kinds.get(found[0], found[0]) if len(found) == 1 else ", ".join(found)), passed
+            return (shown, kinds.get(found[0], found[0]) if len(found) == 1 else ", ".join(found), found), passed
     return None, passed
 
 
@@ -477,11 +478,30 @@ def _check_files(paths: Iterable[Path], tool: str, cwd: Path, event_tool: str = 
 
     hit, passed = _first_flagged(paths, cwd, grep_args, session_id)
     if hit is not None:
+        _log_refusal(hit[0], hit[2], event_tool)
         return _deny(f"{hit[0]} ({hit[1]}) contains secrets. Use {_tool_ref(tool)} instead: it returns the "
                      "same content with each secret replaced by a <<HARPO:type:hash>> placeholder.")
     for path in passed:  # the call may run: log the allowlist uses (not on a refusal)
         allowlist.log_use(path, event_tool)
     return 0
+
+
+def _log_refusal(shown: str, found: list[str], tool: str) -> None:
+    """
+    Description: Log a refused read to the findings log, one line per secret type (FR-LOG-01).
+    Parameters:
+        shown: the file as the refusal names it.
+        found: its secret types, or "unscanned" or "unreadable" for a file that could not be checked.
+        tool: the agent's tool.
+    Output: None. The hook holds no session key, so a line has no hash. A failed write changes nothing.
+    """
+    from Harpocrates.audit import FindingsLog
+
+    log = FindingsLog("hook", str(_session) if _session is not None else "")
+    for kind in found:
+        unchecked = kind in ("unscanned", "unreadable")
+        log.record("read_refused", None if unchecked else kind, None, f"{shown} ({tool})", "refuse",
+                   kind if unchecked else None)
 
 
 def _placeholders(text: str) -> Counter:
@@ -646,7 +666,7 @@ def _edit(tool: str, args: dict, cwd: Path, event: dict) -> int:
         for allowed in passed:
             allowlist.log_use(allowed, tool)
         return 0
-    shown, kinds = hit
+    shown, kinds, _ = hit
     if _can_ask and grants.add_pending(session_id, event.get("tool_use_id"), path, tool):
         return _ask(f"Harpo: Claude wants to edit {shown} without secret protection. It contains secrets "
                     f"({kinds}). Allowing lets Claude read and edit this file with its built-in tools for the rest "
@@ -1704,10 +1724,11 @@ def decide(raw: str, ask: bool = False) -> int:
         looked at and whatever `ask` and the permission mode are; this never prompts.
     Notes: Hook entry point: print a deny or ask decision, or nothing; 2 (block) on any error.
     """
-    global _deadline, _can_ask
+    global _deadline, _can_ask, _session
     _deadline = time.monotonic() + BUDGET
     try:
         event = json.loads(raw)
+        _session = event.get("session_id")
         tool, args = event.get("tool_name"), event.get("tool_input") or {}
         cwd = Path(event.get("cwd") or ".")
         if not _from_codex(event):

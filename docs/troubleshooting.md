@@ -80,7 +80,7 @@ Fix: Start `codex`, type `/hooks`, and trust the Harpo hook.
 
 ## The egress gate
 
-`harpo guard up` starts the gate and routes the agents to it; `harpo doctor` checks the setup. The gate's request log is ~/.harpo/gate.log: one JSON line per request, with the decision and reason code, never a header value or body.
+`harpo guard up` starts the gate and routes the agents to it; `harpo doctor` checks the setup. The gate's request log is ~/.harpo/gate.log: one JSON line per request, with the decision and reason code, never a header value or body. Findings are in ~/.harpo/findings.jsonl and the forwarded requests' hashes in ~/.harpo/proof.jsonl ([setup](setup.md#findings-and-proof-logs)).
 
 **A block message says "Run `harpo doctor` for details."**
 
@@ -99,6 +99,18 @@ Fix: Reinstall Harpo, or run `pip install zstandard` in the gate's environment.
 Cause: Claude Code retries a request that was answered with 400. Version 2.1.306 sent it four times in total (2.1.303: twice). Every retry is blocked too.
 
 Fix: None needed.
+
+**Every request is blocked with HARPO-BLOCK-AUDIT.**
+
+Cause: The gate writes a proof entry before it forwards a request, and blocks any request it could not record. Either `~/.harpo` cannot be written (a full disk, or `~/.harpo` is a symlink or a file), or the proof log does not match `proof.head`: the head file is missing or damaged, entries were removed, or the last line is damaged. The gate does not start a new chain over one it cannot verify.
+
+Fix: Run `harpo proof`; it names the first entry that does not fit. If the disk or the folder was the problem, fix it, and the next request goes through. If the chain is damaged, keep the old files as evidence: move `proof.jsonl`, `proof.1.jsonl` and `proof.head` out of `~/.harpo`. The gate then starts a new chain with its next request.
+
+**`harpo proof` says "Chain does not verify".**
+
+Cause: An entry was edited, inserted or removed, or `proof.head` was. The message names the first entry that does not fit.
+
+Fix: Find out who changed `~/.harpo` (the hook refuses an agent's access to it, SEC-09). Then move the three proof files aside as above.
 
 **Every tool call in a Claude Code session is refused with a message containing "Harpo gate bypass".**
 
@@ -135,6 +147,7 @@ Fix: Run `codex login`, with a ChatGPT login or `codex login --with-api-key`.
 | Code | HTTP status | Meaning |
 |---|---|---|
 | HARPO-BLOCK-INTERNAL | 400 | An unexpected error in the request pipeline, before any reply was sent. The error text is never shown or logged. |
+| HARPO-BLOCK-AUDIT | 400 | The gate could not write the request's proof entry, so it did not send it (see above). |
 | HARPO-BLOCK-ROUTE | 400 | A route or method the gate does not know; unknown routes are blocked, never forwarded (gate decision 13). |
 | HARPO-BLOCK-UPGRADE | 426 | A WebSocket upgrade request; the gate refuses it with 426 and Codex falls back to HTTP (gate decision 3). |
 | HARPO-BLOCK-UNKNOWN-TYPE | 400 | A block, item, tool or source type that the parser spec does not list. |

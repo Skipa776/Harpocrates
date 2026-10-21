@@ -17,6 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
+from Harpocrates.audit import FindingsLog, placeholders
 from Harpocrates.core.classification import secret_type
 from Harpocrates.core.detector import _apply_ml_verification, _collect_text_findings
 from Harpocrates.core.result import EvidenceType, Finding
@@ -102,18 +103,21 @@ class Redactor:
     """
     Description: Represent one agent session's secret redactor, whose HMAC key lives only
         in memory and dies with the process.
-    Parameters: None
+    Parameters:
+        log: the findings log that safe_read and safe_grep report what they redact to, or None.
     Output: Instances provide session-keyed placeholders, redacted file reads, and searches;
         construction generates a random in-memory key.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, log: Optional[FindingsLog] = None) -> None:
         """
         Description: Generate the in-memory HMAC key used for session-scoped placeholders (SEC-02).
-        Parameters: None
+        Parameters:
+            log: the findings log, or None.
         Output: None; stores 32 random bytes on the instance.
         """
         self._key = secrets.token_bytes(32)  # SEC-02
+        self._log = log
 
     def placeholder(self, value: str, stype: str) -> str:
         """
@@ -184,6 +188,20 @@ class Redactor:
             text = text.replace(value, "\n".join([ph] * (value.count("\n") + 1)))
         return text
 
+    def _redact_file(self, text: str, path: Path) -> str:
+        """
+        Description: Redact a file's text and log the secrets this made placeholders for (FR-LOG-01).
+        Parameters:
+            text: the file's text.
+            path: the file.
+        Output: The redacted text. Placeholders already in the file are not findings.
+        """
+        redacted = self.redact(text)
+        if self._log is not None:
+            before = set(placeholders(text))
+            self._log.redactions([p for p in placeholders(redacted) if p not in before], str(path))
+        return redacted
+
     def safe_read(self, path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
         """
         Description: Read and redact the whole file before selecting lines so secrets spanning
@@ -196,7 +214,7 @@ class Redactor:
             needed; reads the file. Raises ValueError for nonregular, oversized, or binary files;
             filesystem and detection errors propagate, and verification failures may be logged.
         """
-        lines = self.redact(_read_text(Path(path))).split("\n")
+        lines = self._redact_file(_read_text(Path(path)), Path(path)).split("\n")
         if lines and lines[-1] == "":
             lines.pop()
         start = max(start_line or 1, 1)
@@ -234,7 +252,7 @@ class Redactor:
             if not rx.search(text):
                 continue
             rel = file.relative_to(root) if file != root else file
-            for n, line in enumerate(self.redact(text).split("\n"), start=1):
+            for n, line in enumerate(self._redact_file(text, file).split("\n"), start=1):
                 if rx.search(line):
                     out.append(f"{rel}:{n}:{line}")
                     if len(out) >= max_matches:

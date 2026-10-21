@@ -16,11 +16,13 @@ from __future__ import annotations
 import logging
 import stat
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from Harpocrates.audit import FindingsLog
 from Harpocrates.core.classification import secret_type
 from Harpocrates.core.detector import detect_file, detect_text
 from Harpocrates.core.result import Finding
@@ -58,8 +60,9 @@ def _check_path(path: Path) -> None:
 
 
 # One redactor per server process: the MCP session. Its HMAC key keeps placeholders stable
-# within the session and differs across sessions (FR-READ-02, SEC-02).
-_redactor = Redactor()
+# within the session and differs across sessions (FR-READ-02, SEC-02). What safe_read and
+# safe_grep redact goes to ~/.harpo/findings.jsonl, once per session and file (FR-LOG-01).
+_redactor = Redactor(FindingsLog("read", uuid.uuid4().hex))
 
 
 def _safe_finding(f: Finding) -> Dict[str, Any]:

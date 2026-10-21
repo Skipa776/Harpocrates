@@ -17,6 +17,7 @@ REASONS: dict[str, int] = {
     "HARPO-BLOCK-SCAN-ERROR": 400,
     "HARPO-BLOCK-SCAN-TIMEOUT": 400,
     "HARPO-BLOCK-INTERNAL": 400,
+    "HARPO-BLOCK-AUDIT": 400,
     "HARPO-UPSTREAM-FAILED": 502,
 }  # every reason the gate itself gives; the scan step may add codes that pass is_block_code
 UPSTREAM_FAILED = "HARPO-UPSTREAM-FAILED"
@@ -33,7 +34,9 @@ _ADVICE = {"HARPO-BLOCK-PROVIDER-TEXT": "The conversation holds a secret in text
            "HARPO-BLOCK-ENCODED-SECRET": "Text in this request holds base64-encoded data with a secret in it. Remove it or "
                                          "send the decoded text, so Harpo can redact it. ",
            "HARPO-BLOCK-ENCODED-TOO-LARGE": "Text in this request holds more base64-encoded data than Harpo checks in one "
-                                            "request. Remove the large encoded blob. "}
+                                            "request. Remove the large encoded blob. ",
+           "HARPO-BLOCK-AUDIT": "Harpo could not write its proof log, and it sends nothing it has not recorded. Check "
+                                "that ~/.harpo is writable and the disk is not full. "}
 _KINDS = {
     "anthropic": {400: "invalid_request_error", 401: "authentication_error", 426: "invalid_request_error",
                   502: "api_error"},
