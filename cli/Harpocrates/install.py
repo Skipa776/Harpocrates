@@ -139,6 +139,7 @@ class _Edit:
     new: Optional[str]  # None: delete the file
     remove: bool
     private: bool = False  # the install record: dir 0700, no backup copy
+    backup_first: bool = True  # False: never copy the current text to <file>.harpo.bak (it may hold the gate token)
 
     @property
     def changed(self) -> bool:
@@ -178,7 +179,8 @@ class _Edit:
             lookup errors may propagate.
         """
         legacy = self.path.with_name(self.path.name + LEGACY_BACKUP_SUFFIX)  # that first original already exists
-        return self.changed and self.old is not None and not self.private and not self.backup.exists() and not legacy.exists()
+        return (self.changed and self.old is not None and not self.private and self.backup_first
+                and not self.backup.exists() and not legacy.exists())
 
 
 # --- reading and writing files -------------------------------------------------------------------------------------
@@ -582,15 +584,7 @@ def _settings_edit(path: Path, remove: bool, prior: Optional[dict]) -> tuple[_Ed
     Notes: (the edit, this install's record for the file). `prior` is the earlier record, None if
         there is none.
     """
-    old = _read(path)
-    cur: dict = {}
-    if old is not None:
-        try:
-            cur = json.loads(old)
-        except ValueError as exc:
-            raise RefusalError(f"{_tilde(path)} isn't valid JSON ({exc}); fix it first, nothing was written.") from exc
-        if not isinstance(cur, dict):
-            raise RefusalError(f"{_tilde(path)} isn't a JSON object; fix it first, nothing was written.")
+    old, cur = read_json_object(path)
     added: dict = {}
     if remove:
         out = _strip_settings(cur, prior)
@@ -600,10 +594,40 @@ def _settings_edit(path: Path, remove: bool, prior: Optional[dict]) -> tuple[_Ed
         return _Edit("settings.json", path, old, old, remove), added
     if remove and not out:
         return _Edit("settings.json", path, old, None, remove), added  # nothing of the user's left
-    indent = (re.match(r'\s*\{\s*\n([ \t]+)"', old or "") or [None, "  "])[1]  # keep their indentation
+    return _Edit("settings.json", path, old, dump_json_like(old, out), remove), added
+
+
+def read_json_object(path: Path) -> tuple[Optional[str], dict]:
+    """
+    Description: Read a JSON settings file that must hold one object.
+    Parameters:
+        path: the file.
+    Output: (its text, or None when it does not exist; the object, {} when it does not exist). Raises RefusalError for
+        a file that cannot be read, is not JSON, or is not an object.
+    """
+    old = _read(path)
+    if old is None:
+        return None, {}
+    try:
+        data = json.loads(old)
+    except ValueError as exc:
+        raise RefusalError(f"{_tilde(path)} isn't valid JSON ({exc}); fix it first, nothing was written.") from exc
+    if not isinstance(data, dict):
+        raise RefusalError(f"{_tilde(path)} isn't a JSON object; fix it first, nothing was written.")
+    return old, data
+
+
+def dump_json_like(old: Optional[str], data: dict) -> str:
+    """
+    Description: Serialize settings with the indentation and final newline of the text they replace.
+    Parameters:
+        old: the file's current text, or None for a new file.
+        data: the object to write.
+    Output: The JSON text.
+    """
+    indent = (re.match(r'\s*\{\s*\n([ \t]+)"', old or "") or [None, "  "])[1]
     tail = "\n" if old is None or old.endswith("\n") else ""
-    text = json.dumps(out, indent=indent, ensure_ascii=False) + tail
-    return _Edit("settings.json", path, old, text, remove), added
+    return json.dumps(data, indent=indent, ensure_ascii=False) + tail
 
 
 # --- Claude Code: MCP registration ---------------------------------------------------------------------------------
@@ -953,7 +977,9 @@ def _run(targets: Sequence[str], dry_run: bool, remove: bool) -> list[Report]:
         extra["python"] = python
         if isinstance(python_args, list):
             extra["python_args"] = python_args
-    text = json.dumps({"version": 1, **extra, **sections}, indent=2) + "\n" if sections else None
+    if "gate" in record:  # written by `harpo guard up`; dropping it would switch the hook's SEC-10 check off
+        extra["gate"] = record["gate"]
+    text = json.dumps({"version": 1, **extra, **sections}, indent=2) + "\n" if sections or "gate" in record else None
     host = next((r for r in reversed(reports) if not r.refused), None)
     if host is not None:
         _apply(_Edit("install record", rpath, rtext, text, remove, private=True), dry_run, host)

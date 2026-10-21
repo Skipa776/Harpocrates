@@ -20,6 +20,9 @@ one more top-level entry, written by `harpo guard up` (G7) and read here:
     does not contain it, or is JSON but not an object, cannot hold a gate entry and counts as no gate; the existing
     state-folder tests keep junk in install.json and expect the hook not to change. A ~/.harpo that is a symlink or a
     file reads as no record, as every other reader does (SEC-09). Unknown keys are ignored.
+  * "routes", which `harpo guard up` writes, names the harnesses it routed. When it is there and has no "claude-code"
+    key, the gate is on for other harnesses only and this check stays off for Claude Code; a "routes" that is not an
+    object is an error like the others. An entry without "routes" (written by hand, or by a test) applies to Claude Code.
 
 What counts as a bypass. For ANTHROPIC_BASE_URL, ANTHROPIC_CUSTOM_HEADERS and every CLAUDE_CODE_USE_<NAME> variable that
 any source sets, the effective value is the one from the highest-precedence source that sets it, even to an empty
@@ -283,13 +286,13 @@ def _load(path: Path) -> _Doc:
     return _Doc(present=True, data=data, text=text)
 
 
-def load_gate() -> Optional[Gate]:
+def read_gate_entry() -> Optional[tuple[Gate, Optional[dict]]]:
     """
-    Description: Read the gate entry of the install record.
+    Description: Read and check the gate entry of the install record, for any harness.
     Parameters:
         None: the record is paths.peek_state_dir() / install.json, looked up on every call, with no side effects.
-    Output: The Gate when the record says the gate is on; None when there is no gate (no record, a state folder that
-        is a symlink or a file, no gate entry, or "enabled": false). Raises GateRecordError when the record or its
+    Output: (the Gate, its "routes" object or None) when the record says the gate is on; None when there is no gate
+        (no record, a state folder that is a symlink or a file, no gate entry, or "enabled": false). Raises GateRecordError when the record or its
         gate entry cannot be used (see the module docstring); only paths.home can raise anything else.
     """
     state = paths.peek_state_dir()
@@ -320,7 +323,24 @@ def load_gate() -> Optional[Gate]:
         raise GateRecordError(label, "gate.port is not a port number")
     if not isinstance(header, str) or not _HEADER_NAME.fullmatch(header):
         raise GateRecordError(label, "gate.token_header is not an HTTP header name")
-    return Gate(port=port, token_header=header)
+    routes = entry.get("routes")
+    if routes is not None and not isinstance(routes, dict):
+        raise GateRecordError(label, "gate.routes is not an object")
+    return Gate(port=port, token_header=header), routes
+
+
+def load_gate() -> Optional[Gate]:
+    """
+    Description: The gate Claude Code must use, from the install record.
+    Parameters: None
+    Output: The Gate when the gate is on and routes Claude Code ("routes" absent, or naming "claude-code"); None
+        when there is no gate or `harpo guard up` routed other harnesses only. Raises GateRecordError as
+        read_gate_entry does.
+    """
+    found = read_gate_entry()
+    if found is None or (found[1] is not None and "claude-code" not in found[1]):
+        return None
+    return found[0]
 
 
 def _line_of(text: str, name: str) -> Optional[int]:
@@ -348,6 +368,17 @@ def _is_provider_flag(name: str) -> bool:
         documented non-provider names (_NOT_PROVIDERS); False otherwise. No side effects.
     """
     return _USE_FLAG.fullmatch(name) is not None and name.upper() not in _NOT_PROVIDERS
+
+
+def provider_flag_on(name: str, value: object) -> bool:
+    """
+    Description: Whether a setting switches Claude Code to another model provider, by the same rule as the bypass check.
+    Parameters:
+        name: the environment variable name.
+        value: its value from a settings file or the environment.
+    Output: True for a CLAUDE_CODE_USE_<provider> flag whose value is not one of the off words (`harpo guard up` refuses it).
+    """
+    return _is_provider_flag(name) and str(value).strip().lower() not in _OFF
 
 
 def _watched(doc: _Doc) -> tuple[dict[str, str], dict[str, int], str]:

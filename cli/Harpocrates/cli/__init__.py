@@ -728,6 +728,94 @@ def allow(
          f"{'Already allowed' if existed else 'Allowed'} {what}. {logged}")
 
 
+guard_app = typer.Typer(help="Route Claude Code and Codex through the egress gate, or take them off it.",
+                        no_args_is_help=True)
+app.add_typer(guard_app, name="guard")
+
+
+@guard_app.command("up", help=(
+    "Start the gate in the background with a new token and route each harness to it. "
+    "No flag: every detected harness."
+))
+def guard_up(
+    port: int = typer.Option(47321, "--port", help="Port on 127.0.0.1 (0: any free port)."),
+    claude_code: bool = typer.Option(False, "--claude-code", help="Route Claude Code."),
+    codex: bool = typer.Option(False, "--codex", help="Route Codex CLI."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; start and write nothing."),
+) -> None:
+    """
+    Description: `harpo guard up` (G7, FR-UX-01).
+    Parameters:
+        port: the gate's port.
+        claude_code: route Claude Code.
+        codex: route Codex CLI.
+        dry_run: report only.
+    Output: None; prints the outcome and exits 1 if anything was refused or failed.
+    """
+    from Harpocrates import guard
+    from Harpocrates import install as _install
+
+    targets = [t for t, wanted in (("claude-code", claude_code), ("codex", codex)) if wanted]
+    targets = targets or _install.detected_targets()
+    if not targets:
+        typer.echo("No Claude Code or Codex CLI detected. Name one: --claude-code or --codex.", err=True)
+        raise typer.Exit(code=1)
+    _print_outcome(guard.up(targets, port, dry_run))
+
+
+@guard_app.command("down", help="Take the agents off the gate, restore their settings, and stop the gate.")
+def guard_down(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write and stop nothing."),
+) -> None:
+    """
+    Description: `harpo guard down` (G7, FR-INSTALL-08).
+    Parameters:
+        dry_run: report only.
+    Output: None; prints the outcome and exits 1 if a file could not be restored.
+    """
+    from Harpocrates import guard
+
+    _print_outcome(guard.down(dry_run))
+
+
+def _print_outcome(outcome: object) -> None:
+    """
+    Description: Print a guard Outcome and exit 1 if it failed.
+    Parameters:
+        outcome: a Harpocrates.guard.Outcome.
+    Output: None, or typer.Exit(1).
+    """
+    typer.echo("\n".join(outcome.lines))  # type: ignore[attr-defined]  # plain echo: rich would eat [brackets]
+    if outcome.failed:  # type: ignore[attr-defined]
+        raise typer.Exit(code=1)
+
+
+@app.command("doctor", help=(
+    "Check on this machine that the agents are routed through a running gate with the current token, "
+    "and that no setting bypasses it. Sends nothing to a provider."
+))
+def doctor_cmd(
+    json_output: bool = typer.Option(False, "--json", help="Print the checks as JSON."),
+) -> None:
+    """
+    Description: `harpo doctor` (G7, FR-INSTALL-02, FR-PROOF-05).
+    Parameters:
+        json_output: print JSON instead of lines.
+    Output: None; exits 1 if any check fails.
+    """
+    from dataclasses import asdict
+
+    from Harpocrates import guard
+
+    checks = guard.doctor(Path.cwd())
+    if json_output:
+        typer.echo(json.dumps([asdict(c) for c in checks], indent=2))
+    else:
+        typer.echo(guard.render_checks(checks))
+    if any(c.status == "fail" for c in checks):
+        raise typer.Exit(code=1)
+
+
 def main() -> None:
     """
     Description: Run the Typer application as the CLI entry point.

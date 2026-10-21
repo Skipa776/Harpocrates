@@ -609,3 +609,30 @@ def test_sec_10_the_module_does_not_import_the_scanner() -> None:
                          env={**os.environ, "PYTHONPATH": str(cli)}).stdout
     assert "Harpocrates.core" not in out and "Harpocrates.ml" not in out and "onnxruntime" not in out, out
     assert stat.S_ISREG(os.stat(cli / "Harpocrates" / "gatecheck.py").st_mode)
+
+
+# ------------------------------------------------------------------------------------------ the gate entry's routes
+
+
+def test_sec_10_routes_without_claude_code_turn_the_check_off_for_claude_code(world: World) -> None:
+    world.set_record(gate={"enabled": True, "port": PORT, "token_header": HEADER, "routes": {"codex": {}}})
+    assert gatecheck.load_gate() is None
+    entry = gatecheck.read_gate_entry()
+    assert entry is not None and entry[0].port == PORT
+    assert _findings(world, {}) == []
+
+
+def test_sec_10_routes_with_claude_code_keep_the_check_on(world: World) -> None:
+    world.set_record(gate={"enabled": True, "port": PORT, "token_header": HEADER,
+                           "routes": {"claude-code": {}, "codex": {}}})
+    assert gatecheck.load_gate() is not None
+    world.set_user({"ANTHROPIC_CUSTOM_HEADERS": HEADERS_OK})
+    found = _findings(world, {})
+    assert found
+    assert any(f.setting == "ANTHROPIC_BASE_URL" for f in found)
+
+
+def test_sec_10_routes_that_are_not_an_object_refuse(world: World) -> None:
+    world.set_record(gate={"enabled": True, "port": PORT, "token_header": HEADER, "routes": ["claude-code"]})
+    with pytest.raises(gatecheck.GateRecordError):
+        gatecheck.load_gate()
