@@ -1,12 +1,12 @@
 # The optional Python extension module `harpo_native`: the Rust detection rules, called in process.
-# Install from a clone with `pip install ./core`; Harpo uses it when it is present and its rules match.
+# Install from a clone with `pip install ./core` or from PyPI with `pip install "harpo-scan[native]"`; Harpo uses it when it is present and its rules match.
 [build-system]
 requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
 name = "harpo-native"
-version = "0.1.0"
+version = "1.4.0"
 description = "Harpo's regex and entropy rules in Rust, as an optional Python extension module"
 license = { text = "MIT" }
 requires-python = ">=3.10"

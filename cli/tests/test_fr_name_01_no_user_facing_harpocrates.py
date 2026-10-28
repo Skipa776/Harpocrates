@@ -41,7 +41,7 @@ ALLOWED_TOKENS: tuple[tuple[str, str], ...] = (
     (r"mcp__harpocrates__\w*", "tool names of an install made before the rename, named in refusals until it is re-run"),
     (r"HARPOCRATES_\w*", "the pre-rename environment variable names, still read (FR-NAME-04)"),
     (r"harpocrates(?=\[)|(?<=pip install )harpocrates|(?<=pip install ')harpocrates|(?<=pip install \")harpocrates",
-     "the PyPI distribution name until it is renamed (FR-NAME-03)"),
+     "the old PyPI name, now a shim that installs harpo-scan (FR-NAME-03)"),
     (r"harpocrates-prompt", "the Claude Code plugin id; the plugin is renamed with the repo (FR-NAME-07)"),
     (r"harpocrates-rust-scanner", "the file name of the native scanner binary, not shown as a product name"),
     (r"harpocrates:(?:start|end)|[<>]{3} harpocrates [<>]{3}",

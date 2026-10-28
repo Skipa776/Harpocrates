@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-mcp = pytest.importorskip("mcp", reason="mcp package not installed; install harpocrates[mcp]")
+mcp = pytest.importorskip("mcp", reason="mcp package not installed; install harpo-scan[mcp]")
 
 
 def test_scan_text_tool_returns_finding_dicts() -> None:
