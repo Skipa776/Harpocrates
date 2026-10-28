@@ -153,7 +153,7 @@ Known limits:
 
 ## Install
 
-**Names.** Version 1.4.0 renamed the tool to Harpo: the command is `harpo` and the PyPI package is `harpo-scan`. The old names still work for two more minor releases; see [Renamed from Harpocrates](#renamed-from-harpocrates).
+**Names.** Version 1.4.0 renamed the tool to Harpo: the command is `harpo` and the PyPI package is `harpo-scan`. The old names still work for two more minor releases; see the rename note near the end.
 
 ### 1. Scanner CLI
 
