@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from Harpocrates.detectors.entropy_detector import shannon_entropy
 from Harpocrates.ml.context import (
     CodeContext,
-    extract_var_name,
+    feature_var_name,
 )
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ UUID_V4_PATTERN = re.compile(
 )
 
 
-# v0.2.0: AI-generated placeholder detection (design doc §2 "AI Leftover" Paradigm).
+# AI-generated placeholder detection: values an LLM writes in place of a real key.
 # Word-boundary anchors are intentionally omitted for underscore-joined patterns like
 # dummy_token, DUMMY_SECRET, FAKE_API_KEY which are the primary LLM leftovers.
 _AI_PLACEHOLDER_RE = re.compile(
@@ -93,7 +93,7 @@ _AI_PLACEHOLDER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# v0.2.0: Connection-string and credential-context keywords
+# Connection-string and credential-context keywords
 _CONNECTION_KEYWORDS = [
     "jdbc:", "bearer", "authorization:", "database", "password",
     "credentials", "connection_string", "dsn", "api_key", "access_key",
@@ -199,7 +199,7 @@ FEATURE_NAMES: Tuple[str, ...] = (
     # Env-loading awareness features (2)
     "env_loader_in_context",
     "is_env_fallback_value",
-    # Phase 7.0 value-shape features (7)
+    # Value-shape features (7)
     "value_starts_with_slash",
     "value_contains_path_separator",
     "value_ends_with_known_ext",
@@ -213,67 +213,75 @@ FEATURE_NAMES: Tuple[str, ...] = (
 @dataclass
 class FeatureVector:
     """
-    64 extracted features for ML classification.
-
-    Organized into seven categories:
-    - Token features (20): Properties of the token itself
-    - Variable name features (9): Properties of the variable/key name
-    - Context features (16): Properties of surrounding code
-    - Stage B precision features (6): Targeted FP reduction features
-    - Stage B generalization features (4): Hex disambiguation features
-    - Env-loading awareness features (2): Env-loader and fallback detection
-    - Phase 7.0 value-shape features (7): Value-shape FP suppression
-
-    NOTE: The following features were REMOVED to prevent shortcut learning:
-    - has_known_prefix: Directly encodes token type based on prefix
-    - prefix_type: Maps prefixes to secret categories
-    - is_hex_like: Strongly correlated with non-secrets (git SHAs)
-
-    Phase 7.0 drops (collinear / label-leak / skewed):
-    - normalized_entropy: collinear with token_entropy
-    - cryptographic_score: collinear
-    - is_known_hash_length: inverted signal
-    - var_contains_secret: label-leak (25.4% importance mirrors heuristic)
-    - line_position_ratio: train/serve skew (always ~0.5 in synthetic data)
-
-    Phase 7.0.11 drops (SHAP/XAI collinearity sweep — Groups 3-5):
-    - cross_line_entropy: same full_text source as surrounding_entropy_avg; both call
-      shannon_entropy(), per-line entropy dominated by long tokens → high Pearson r
-    - contains_example_keyword: same vocabulary as context_mentions_test
-      (test|mock|fake|example|sample|dummy) on token instead of context
-    - hex_context_git_keywords: subset of context_mentions_git, gated on hex shape;
-      co-fires >90% with context_mentions_git on hex tokens in git contexts
-
-    DISCRIMINATIVE FEATURES (for precision boost):
-    - is_uuid_v4: Detects UUID v4 format (strong non-secret indicator)
-    - jwt_structure_valid: JWT has valid base64-encoded JSON header
-    - entropy_charset_mismatch: High entropy but low charset diversity (suspicious)
-    - has_hash_prefix: Starts with hash algorithm prefix (sha256:, md5:)
-
-    STAGE B PRECISION FEATURES (targeting observed FP patterns):
-    - is_hex_len_40: Token is exactly 40 hex chars (git SHA/SHA1)
-    - is_hex_len_64: Token is exactly 64 hex chars (SHA256)
-    - is_test_token: Has _test_, _staging_, test_ prefix
-    - file_is_git_related: Path contains .git/, hash, commit
-    - file_is_build: Path contains build/, dist/, node_modules/
-    - file_is_example: Path contains example/, docs/, demo/
-
-    STAGE B GENERALIZATION FEATURES (hex disambiguation):
-    - hex_context_crypto_keywords: Context contains encrypt, sign, key keywords
-    - hex_adjacent_assignment_pattern: Assignment pattern (env_var, config, func_arg)
-    - hex_in_url_or_dsn: Token is embedded in URL/DSN
-    - hex_file_suggests_secret: File path suggests secrets (secrets/, .env)
-
-    PHASE 7.0 VALUE-SHAPE FEATURES (FP suppression):
-    - value_starts_with_slash: "/" or "~" or "./" prefix → file path
-    - value_contains_path_separator: "/" or "\\" in value (non-URL) → path
-    - value_ends_with_known_ext: .pem/.key/.crt/.jks/.p12/.json/.yaml/.txt
-    - value_is_lowercase_word: re.fullmatch([a-z]+) → enum/literal
-    - value_is_dotted_quad_or_host: 0.0.0.0, 127.0.0.1, localhost, ::1
-    - value_is_template_syntax: ${...}, {{...}}, __X__, <<...>>, or AI placeholder (YOUR_KEY, CHANGEME)
-    - is_hex_with_no_alpha_mix: all hex but no uppercase letter → hash
-
-    The model should learn from CONTEXT, not token format.
+    Description: 64 extracted features for ML classification. The model should learn from context, not token format.
+    Parameters:
+        token_length: Token length.
+        token_entropy: Base-2 Shannon entropy of the candidate.
+        char_class_count: Number of character classes present
+        digit_ratio: Fraction of token characters that are digits.
+        uppercase_ratio: Fraction of token characters that are uppercase.
+        special_char_ratio: Fraction of token characters that are non-alphanumeric.
+        is_base64_like: Is base64 like.
+        has_padding: Ends with = or ==
+        regex_match_type: 0 = entropy, 1+ = regex pattern
+        token_structure_score: 0=random, 1=structured (words, separators)
+        has_version_pattern: Contains v1.2.3, 1.0.0 patterns
+        vendor_prefix_boost: Boost for known vendor prefixes (AKIA, ghp_, etc.)
+        token_span_offset: Position within line (0=start, 1=end)
+        token_in_multiline_block: Part of PEM/SSH block
+        embedded_token_flag: Extracted from URL/DSN
+        token_quote_type: 0=none, 1=single, 2=double, 3=backtick
+        is_uuid_v4: Matches UUID v4 format (strong non-secret signal)
+        jwt_structure_valid: JWT has valid JSON header
+        entropy_charset_mismatch: High entropy but low charset diversity
+        has_hash_prefix: Starts with sha256:, md5:, etc.
+        var_name_extracted: Var name extracted.
+        var_contains_safe: Var contains safe.
+        var_name_length: Var name length.
+        var_is_uppercase: CONSTANT_STYLE
+        var_is_camelcase: Var is camelcase.
+        assignment_type: 0=unknown, 1==, 2=:, 3=:=, 4=func_arg
+        in_string_literal: In string literal.
+        var_ngram_secret_score: Weighted sum of secret N-gram matches
+        var_ngram_safe_score: Weighted sum of safe N-gram matches
+        line_is_comment: Line is comment.
+        context_mentions_test: Context mentions test.
+        context_mentions_git: Context mentions git.
+        context_mentions_hash: Context mentions hash.
+        context_has_import: Context has import.
+        context_has_function_def: Context has function def.
+        file_is_test: File is test.
+        file_is_config: File is config.
+        file_extension_risk: 0=low, 1=medium, 2=high
+        surrounding_entropy_avg: Mean entropy of up to ten nearby token candidates.
+        semantic_context_score: -1=safe, 0=neutral, 1=risky
+        surrounding_secret_density: Ratio of nearby secret-like tokens
+        surrounding_token_count: Count of high-entropy tokens on same line
+        key_value_distance: Distance between var name and token (-1 if no var)
+        json_path_hint: Depth in JSON/YAML structure (0=root)
+        adjacency_ngram_score: Sum of N-gram scores in nearby var names
+        is_hex_len_40: Token is exactly 40 hex chars (git SHA/SHA1)
+        is_hex_len_64: Token is exactly 64 hex chars (SHA256)
+        is_test_token: Has _test_, _staging_, test_ prefix
+        file_is_git_related: Path contains .git/, hash, commit
+        file_is_build: Path contains build/, dist/, node_modules/
+        file_is_example: Path contains example/, docs/, demo/
+        hex_context_crypto_keywords: Context contains encrypt, sign, key, secret
+        hex_adjacent_assignment_pattern: 0=unknown, 1=env_var, 2=config, 3=func_arg
+        hex_in_url_or_dsn: Token is embedded in URL/DSN
+        hex_file_suggests_secret: Path suggests secrets (secrets/, .env, credentials/)
+        env_loader_in_context: Context contains env-loading pattern
+        is_env_fallback_value: Token is the fallback/default arg in env-loader call
+        value_starts_with_slash: "/" or "~" or "./" prefix → file path
+        value_contains_path_separator: Slash or backslash in value (non-URL) → path
+        value_ends_with_known_ext: .pem/.key/.crt/.jks/.p12/.json/.yaml/.txt
+        value_is_lowercase_word: re.fullmatch([a-z]+) → enum/literal
+        value_is_dotted_quad_or_host: 0.0.0.0, 127.0.0.1, localhost, ::1
+        value_is_template_syntax: ${...}, {{...}}, __X__, <<...>>, or AI placeholder (YOUR_KEY,
+        CHANGEME)
+        is_hex_with_no_alpha_mix: all hex but no uppercase letter → hash
+    Output: Instances provide 64 feature fields in canonical model input order; features removed for shortcut
+        learning or collinearity are not fields.
     """
 
     # Token features (20) - dropped normalized_entropy, cryptographic_score, is_known_hash_length
@@ -350,7 +358,7 @@ class FeatureVector:
     env_loader_in_context: bool = False  # Context contains env-loading pattern
     is_env_fallback_value: bool = False  # Token is the fallback/default arg in env-loader call
 
-    # Phase 7.0: value-shape features for FP suppression (64-feature vector)
+    # Value-shape features, which suppress false positives
     value_starts_with_slash: bool = False        # "/" or "~" or "./" prefix → file path
     value_contains_path_separator: bool = False  # "/" or "\" in value (non-URL) → path
     value_ends_with_known_ext: bool = False      # .pem/.key/.crt/.jks/.p12/.json/.yaml/.txt
@@ -360,7 +368,12 @@ class FeatureVector:
     is_hex_with_no_alpha_mix: bool = False       # all hex but no uppercase letter → hash
 
     def to_array(self) -> List[float]:
-        """Convert to numpy-compatible array of 64 floats."""
+        """
+        Description: Convert to numpy-compatible array of 64 floats.
+        Parameters: None
+        Output: List of 64 numeric feature values in canonical order; invalid field values may raise
+        TypeError or ValueError during float conversion.
+        """
         return [
             # Token features (20)
             float(self.token_length),
@@ -428,7 +441,7 @@ class FeatureVector:
             # Env-loading awareness features (2)
             float(self.env_loader_in_context),
             float(self.is_env_fallback_value),
-            # Phase 7.0 value-shape features (7)
+            # Value-shape features (7)
             float(self.value_starts_with_slash),
             float(self.value_contains_path_separator),
             float(self.value_ends_with_known_ext),
@@ -440,11 +453,21 @@ class FeatureVector:
 
     @staticmethod
     def get_feature_names() -> List[str]:
-        """Get ordered list of 64 feature names."""
+        """
+        Description: Get ordered list of 64 feature names.
+        Parameters: None
+        Output: New list of the 64 canonical feature names.
+        """
         return list(FEATURE_NAMES)
 
 def _get_char_class_count(token: str) -> int:
-    """Count distinct character classes in token."""
+    """
+    Description: Count distinct character classes in token.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: Number of lowercase, uppercase, digit, and non-alphanumeric classes present, from zero
+        to four.
+    """
     classes = 0
     if any(c.islower() for c in token):
         classes += 1
@@ -458,7 +481,12 @@ def _get_char_class_count(token: str) -> int:
 
 
 def _get_prefix_type(token: str) -> int:
-    """Get encoded prefix type for known secret formats."""
+    """
+    Description: Get encoded prefix type for known secret formats.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: Category code of the first known prefix, or zero if none matches.
+    """
     for prefix, prefix_type in KNOWN_PREFIXES.items():
         if token.startswith(prefix):
             return prefix_type
@@ -466,7 +494,13 @@ def _get_prefix_type(token: str) -> int:
 
 
 def _is_base64_like(token: str) -> bool:
-    """Check if token looks like base64 encoded data."""
+    """
+    Description: Check if token looks like base64 encoded data.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: True for at least four characters with at least 95% standard or URL-safe base64
+        characters; otherwise False.
+    """
     if len(token) < 4:
         return False
     # Check if mostly base64 characters
@@ -476,14 +510,25 @@ def _is_base64_like(token: str) -> bool:
 
 
 def _is_hex_like(token: str) -> bool:
-    """Check if token is pure hexadecimal."""
+    """
+    Description: Check if token is pure hexadecimal.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: True for at least eight characters consisting entirely of hexadecimal digits; otherwise
+        False.
+    """
     if len(token) < 8:
         return False
     return all(c in HEX_CHARS for c in token)
 
 
 def _is_camelcase(name: str) -> bool:
-    """Check if variable name uses camelCase."""
+    """
+    Description: Check if variable name uses camelCase.
+    Parameters:
+        name: Variable name to inspect.
+    Output: True for a lowercase initial character and a later uppercase character; otherwise False.
+    """
     if not name or name.isupper() or name.islower():
         return False
     # Has mix of upper and lower with lower start
@@ -492,11 +537,11 @@ def _is_camelcase(name: str) -> bool:
 
 def _calculate_token_structure_score(token: str) -> float:
     """
-    Calculate how structured (non-random) a token appears.
-
-    Returns:
-        0.0 = completely random (likely secret)
-        1.0 = highly structured (likely not secret)
+    Description: Calculate how structured (non-random) a token appears. Low scores (near 0.0) suggest
+        a random, likely secret value, and high scores (near 1.0) suggest a likely non-secret.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: Structure score capped at 1.0, or 0.0 for fewer than four characters.
     """
     if not token or len(token) < 4:
         return 0.0
@@ -535,7 +580,12 @@ def _calculate_token_structure_score(token: str) -> float:
 
 
 def _has_version_pattern(token: str) -> bool:
-    """Check if token contains version-like patterns."""
+    """
+    Description: Check if token contains version-like patterns.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: True when a configured version pattern matches; otherwise False.
+    """
     if not token:
         return False
     # Match patterns like v1.2.3, 1.0.0, v2.0, etc.
@@ -549,13 +599,11 @@ def _has_version_pattern(token: str) -> bool:
 
 def _get_vendor_prefix_boost(token: str) -> float:
     """
-    Return a boost score for tokens with known vendor secret prefixes.
-
-    Known prefixes indicate high probability of being a real secret.
-
-    Returns:
-        0.0 = no known prefix
-        0.5-1.0 = known vendor prefix with confidence level
+    Description: Return a boost score for tokens with known vendor secret prefixes. A known prefix
+        indicates a high probability of a real secret.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: Prefix confidence of 1.0, 0.8, or 0.6, or 0.0 for no match.
     """
     if not token:
         return 0.0
@@ -617,15 +665,12 @@ def _get_vendor_prefix_boost(token: str) -> float:
 
 def _is_uuid_v4(token: str) -> bool:
     """
-    Check if token matches UUID v4 format.
-
-    UUID v4 has the format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-    where x is a hex digit and y is one of 8, 9, a, or b.
-
-    UUIDs are strong non-secret indicators - they are identifiers, not credentials.
-
-    Returns:
-        True if token is a valid UUID v4 format
+    Description: Check if token matches UUID v4 format. UUIDs are identifiers, not credentials, so a
+        match is a strong non-secret signal.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: True for a 36-character UUID v4 with a valid variant marker; otherwise False. The format
+        is xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx, where x is a hex digit and y is one of 8, 9, a, or b.
     """
     if not token or len(token) != 36:
         return False
@@ -633,7 +678,13 @@ def _is_uuid_v4(token: str) -> bool:
 
 
 def _is_hex_with_no_alpha_mix(token: str) -> bool:
-    """True if token is all lowercase hex with no uppercase — typical of hashes, not credentials."""
+    """
+    Description: True if token is all lowercase hex with no uppercase — typical of hashes, not
+    credentials.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: True for at least 20 lowercase hexadecimal characters; otherwise False.
+    """
     return bool(re.fullmatch(r"[a-f0-9]+", token) and len(token) >= 20)
 
 
@@ -654,7 +705,12 @@ _TEMPLATE_SYNTAX_RE = re.compile(
 
 
 def _value_shape_features(token: str) -> dict:
-    """Compute Phase 7.0 value-shape features for a token."""
+    """
+    Description: Compute Phase 7.0 value-shape features for a token.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: Dictionary of seven boolean path, word, host, placeholder, and hexadecimal features.
+    """
     starts_with_slash = token.startswith(("/", "~", "./", "../"))
     # Path separator: exclude any URL scheme (s3://, gs://, ftp://, postgres://, etc.)
     has_path_sep = ("/" in token or "\\" in token) and "://" not in token
@@ -678,21 +734,12 @@ def _value_shape_features(token: str) -> dict:
 
 def _is_jwt_structure_valid(token: str) -> bool:
     """
-    Check if a JWT-like token has valid structure.
-
-    A valid JWT has:
-    1. Three parts separated by dots
-    2. First part (header) is valid base64-encoded JSON with 'alg' field
-    3. Second part (payload) is valid base64-encoded JSON
-
-    Invalid/test JWTs often have:
-    - alg: "none"
-    - Obviously fake/test payloads
-    - Expired timestamps from the past
-
-    Returns:
-        True if JWT structure appears valid (could be a real secret)
-        False if JWT is invalid/test/expired (likely not a real secret)
+    Description: Check if a JWT-like token has valid structure, which suggests a real secret. Invalid
+        or test JWTs (alg "none", fake payloads, expired timestamps) are likely not secrets.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: True if decoding and the header, subject, and expiry heuristics pass; False on any caught
+        exception. A missing alg field is accepted, and only an expiry before 2020 is rejected.
     """
     if not token or "." not in token:
         return False
@@ -753,19 +800,13 @@ def _is_jwt_structure_valid(token: str) -> bool:
 
 def _calculate_entropy_charset_mismatch(token: str) -> float:
     """
-    Calculate mismatch between entropy and charset diversity.
-
-    A secret-like token should have:
-    - High entropy AND high charset diversity (uses many character types)
-
-    A non-secret often has:
-    - High entropy but low charset diversity (e.g., hex hashes, UUIDs)
-    - Low entropy with high charset diversity (e.g., words with special chars)
-
-    Returns:
-        0.0 = entropy matches charset expectations (likely real secret or benign)
-        0.3-0.6 = moderate mismatch (suspicious)
-        0.6-1.0 = high mismatch (likely not a secret)
+    Description: Calculate mismatch between entropy and charset diversity. Hashes and UUIDs (high
+        entropy, low diversity) and special-character words (low entropy, high diversity) suggest a
+        non-secret.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: Mismatch score from 0.0 to 1.0, or 0.0 for short inputs or no detected mismatch. Scores of
+        0.3 to 0.6 are moderate and suspicious; 0.6 to 1.0 are likely not secrets.
     """
     if not token or len(token) < 8:
         return 0.0
@@ -791,18 +832,12 @@ def _calculate_entropy_charset_mismatch(token: str) -> float:
 
 def _has_hash_prefix(token: str) -> bool:
     """
-    Check if token starts with a hash algorithm prefix.
-
-    Common patterns:
-    - sha256:xxxx
-    - sha1:xxxx
-    - md5:xxxx
-    - sha512:xxxx
-
-    These prefixes strongly indicate the value is a hash, not a secret.
-
-    Returns:
-        True if token has a hash algorithm prefix
+    Description: Check if token starts with a hash algorithm prefix. Such prefixes strongly indicate a
+        hash, not a secret.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: True for a supported lowercase or uppercase hash algorithm prefix, such as sha256:, sha1:,
+        md5:, or sha512:; otherwise False.
     """
     if not token:
         return False
@@ -825,14 +860,12 @@ def _has_hash_prefix(token: str) -> bool:
 
 def _is_hex_exact_length(token: str, length: int) -> bool:
     """
-    Check if token is exactly `length` hex characters.
-
-    Args:
-        token: The token to check
-        length: Expected length (40 for SHA1/git, 64 for SHA256)
-
-    Returns:
-        True if token is exactly `length` hex characters
+    Description: Check if token is exactly `length` hex characters.
+    Parameters:
+        token: The token to check.
+        length: Expected length (40 for SHA1/git, 64 for SHA256).
+    Output: True for a nonempty token of the requested length made only of hexadecimal digits;
+        otherwise False.
     """
     if not token or len(token) != length:
         return False
@@ -841,13 +874,11 @@ def _is_hex_exact_length(token: str, length: int) -> bool:
 
 def _is_test_token(token: str) -> bool:
     """
-    Check if token has test/staging prefix patterns.
-
-    Targets FP pattern: sk_test_*, pk_test_*, rk_test_* tokens that are
-    NOT real secrets but test/sandbox credentials.
-
-    Returns:
-        True if token contains test/staging indicators
+    Description: Check if token has test or staging prefix patterns. This targets false positives such
+        as sk_test_, pk_test_, and rk_test_ tokens, which are sandbox credentials rather than secrets.
+    Parameters:
+        token: Candidate text to analyze.
+    Output: True if any configured test or staging substring occurs; otherwise False.
     """
     if not token:
         return False
@@ -861,13 +892,11 @@ def _is_test_token(token: str) -> bool:
 
 def _is_git_related_path(file_path: Optional[str]) -> bool:
     """
-    Check if file path is git-related.
-
-    Targets FP pattern: 40-char hex tokens in .git/ directories or
-    files with git-related names that contain commit SHAs.
-
-    Returns:
-        True if path indicates git-related content
+    Description: Check if file path is git-related. This targets false positives: 40-character hex
+        tokens in .git/ directories or in git-named files that hold commit SHAs.
+    Parameters:
+        file_path: Optional source file path.
+    Output: True for a configured Git-related path substring; False for absent paths or no match.
     """
     if not file_path:
         return False
@@ -882,13 +911,12 @@ def _is_git_related_path(file_path: Optional[str]) -> bool:
 
 def _is_build_path(file_path: Optional[str]) -> bool:
     """
-    Check if file path is in build/dist directories.
-
-    Targets FP pattern: Hex tokens in build artifacts, node_modules,
-    vendor directories that are checksums or asset hashes.
-
-    Returns:
-        True if path is a build/artifact directory
+    Description: Check if file path is in a build or dist directory. This targets false positives: hex
+        tokens in build artifacts, node_modules, or vendor directories that are checksums or asset
+        hashes.
+    Parameters:
+        file_path: Optional source file path.
+    Output: True for a configured build or artifact directory substring; otherwise False.
     """
     if not file_path:
         return False
@@ -904,13 +932,12 @@ def _is_build_path(file_path: Optional[str]) -> bool:
 
 def _is_example_path(file_path: Optional[str]) -> bool:
     """
-    Check if file path is in example/docs directories.
-
-    Targets FP pattern: Tokens in documentation, examples, or demo
-    directories that are often placeholder/example credentials.
-
-    Returns:
-        True if path indicates example/documentation content
+    Description: Check if file path is in an example or docs directory. This targets false positives:
+        tokens in documentation, examples, or demo directories, which are often placeholder credentials.
+    Parameters:
+        file_path: Optional source file path.
+    Output: True for README or CONTRIBUTING, or an example or documentation path substring; otherwise
+        False.
     """
     if not file_path:
         return False
@@ -930,19 +957,12 @@ def _is_example_path(file_path: Optional[str]) -> bool:
 
 def _calculate_ngram_score(var_name: str, ngram_dict: Dict[str, float]) -> float:
     """
-    Calculate weighted N-gram score for a variable name.
-
-    STAGE B GENERALIZATION: Changed from MAX to SUM calculation.
-    Using sum requires multiple signals to accumulate a high score,
-    preventing single-feature domination. The 0.3 scale factor ensures
-    that a variable with multiple matches doesn't exceed 1.0 too easily.
-
-    Args:
-        var_name: The variable/key name to analyze
-        ngram_dict: Dictionary mapping N-grams to weights
-
-    Returns:
-        0.0-1.0: Weighted sum of matches (capped at 1.0)
+    Description: Calculate weighted N-gram score for a variable name. Weights are summed rather than
+        maxed, so several signals are needed for a high score and one signal cannot dominate.
+    Parameters:
+        var_name: The variable or key name to analyze.
+        ngram_dict: Dictionary mapping N-grams to weights.
+    Output: Sum of matching weights multiplied by 0.5, capped at 1.0; empty names produce zero.
     """
     if not var_name:
         return 0.0
@@ -957,14 +977,29 @@ def _calculate_ngram_score(var_name: str, ngram_dict: Dict[str, float]) -> float
     return min(total_score, 1.0)  # Cap at 1.0
 
 
+def _line_has_marker_then_word(text: str, marker: str, word: str) -> bool:
+    """
+    Description: Linear-time equivalent of re.search(re.escape(marker) + '.*' + word, text, re.I).
+    Parameters:
+        text: Text to search; lines are split on newline only, as '.' does not match it.
+        marker: Literal marker that must precede the word on the same line.
+        word: Literal word searched case-insensitively with the regex engine after the marker.
+    Output: True when some line holds the marker followed later by the word.
+    """
+    for line in text.split('\n'):
+        start = line.find(marker)
+        if start >= 0 and re.search(word, line[start + len(marker):], re.I):
+            return True
+    return False
+
+
 def _calculate_semantic_context_score(context_text: str) -> float:
     """
-    Calculate a weighted semantic context score.
-
-    Returns:
-        -1.0 = strongly suggests safe (non-secret)
-         0.0 = neutral
-        +1.0 = strongly suggests secret
+    Description: Calculate a weighted semantic context score. Negative values suggest a safe, non-secret
+        context, and positive values suggest a secret.
+    Parameters:
+        context_text: Surrounding source text.
+    Output: Weighted context score clamped to [-1, 1], with zero for empty context.
     """
     if not context_text:
         return 0.0
@@ -977,8 +1012,6 @@ def _calculate_semantic_context_score(context_text: str) -> float:
         (r'\b(commit|revision|sha|hash|checksum|digest)\b', -0.25),
         (r'\b(uuid|guid|identifier|id)\b', -0.2),
         (r'\b(placeholder|dummy|stub)\b', -0.3),
-        (r'#.*example', -0.2),  # Comments mentioning example
-        (r'//.*test', -0.2),  # Comments mentioning test
     ]
 
     # Risky indicators (positive score)
@@ -994,6 +1027,12 @@ def _calculate_semantic_context_score(context_text: str) -> float:
         if re.search(pattern, context_text, re.I):
             score += weight
 
+    # Comment patterns (#.*example, //.*test) are quadratic as regexes; matched per line instead.
+    if _line_has_marker_then_word(context_text, '#', 'example'):
+        score += -0.2  # Comments mentioning example
+    if _line_has_marker_then_word(context_text, '//', 'test'):
+        score += -0.2  # Comments mentioning test
+
     for pattern, weight in risky_patterns:
         if re.search(pattern, context_text, re.I):
             score += weight
@@ -1004,10 +1043,11 @@ def _calculate_semantic_context_score(context_text: str) -> float:
 
 def _calculate_surrounding_secret_density(context_text: str) -> float:
     """
-    Calculate the density of secret-like tokens in surrounding context.
-
-    Returns:
-        0.0-1.0: Ratio of high-entropy tokens that look like secrets
+    Description: Calculate the density of secret-like tokens in the surrounding context.
+    Parameters:
+        context_text: Surrounding source text.
+    Output: Secret-like hit count divided by the first 20 candidates, or zero without candidates.
+        Entropy and prefix hits can count the same token twice, so the result can exceed 1.0.
     """
     if not context_text:
         return 0.0
@@ -1038,10 +1078,12 @@ def _calculate_surrounding_secret_density(context_text: str) -> float:
 
 def _calculate_token_span_offset(line: str, token: str) -> float:
     """
-    Calculate the position of the token within the line.
-
-    Returns:
-        0.0-1.0: Position ratio (0=start, 1=end, 0.5=middle)
+    Description: Calculate the position of the token within the line.
+    Parameters:
+        line: Source line containing the candidate.
+        token: Candidate text to analyze.
+    Output: Clamped token-center position ratio from 0.0 (start of line) to 1.0 (end); defaults to 0.5
+        for missing text or token.
     """
     if not token or not line:
         return 0.5  # Default to middle
@@ -1065,10 +1107,12 @@ def _calculate_token_span_offset(line: str, token: str) -> float:
 
 def _detect_multiline_block(context_text: str, token: str) -> bool:
     """
-    Detect if token is part of a multi-line secret block (PEM, SSH keys).
-
-    Returns:
-        True if token appears in a PEM/SSH block
+    Description: Detect if token is part of a multi-line secret block, such as a PEM or SSH key.
+    Parameters:
+        context_text: Surrounding source text.
+        token: Candidate text to analyze.
+    Output: True when the context and token are nonempty and a PEM or SSH marker is present; otherwise
+        False. A marker alone does not prove the token is inside the block.
     """
     if not context_text or not token:
         return False
@@ -1093,10 +1137,12 @@ def _detect_multiline_block(context_text: str, token: str) -> bool:
 
 def _detect_embedded_token(line: str, token: str) -> bool:
     """
-    Detect if token was extracted from a URL/DSN/connection string.
-
-    Returns:
-        True if token appears embedded in a URL-like structure
+    Description: Detect if token was extracted from a URL, DSN, or connection string.
+    Parameters:
+        line: Source line containing the candidate.
+        token: Candidate text to analyze.
+    Output: True for a URL or DSN pattern, or a token query-parameter match, on a nonempty line;
+        otherwise False.
     """
     if not line or not token:
         return False
@@ -1118,13 +1164,12 @@ def _detect_embedded_token(line: str, token: str) -> bool:
 
 def _detect_quote_type(line: str, token: str) -> int:
     """
-    Detect the type of quotes wrapping the token.
-
-    Returns:
-        0: No quotes
-        1: Single quotes (')
-        2: Double quotes (")
-        3: Backticks (`)
+    Description: Detect the type of quotes wrapping the token.
+    Parameters:
+        line: Source line containing the candidate.
+        token: Candidate text to analyze.
+    Output: Quote code: 0 for none, 1 for single quotes ('), 2 for double quotes ("), or 3 for
+        backticks (`).
     """
     if not token or not line:
         return 0
@@ -1165,10 +1210,10 @@ def _detect_quote_type(line: str, token: str) -> int:
 
 def _count_surrounding_tokens(line: str) -> int:
     """
-    Count the number of high-entropy tokens on the same line.
-
-    Returns:
-        Count of tokens with entropy > 3.5
+    Description: Count the number of high-entropy tokens on the same line.
+    Parameters:
+        line: Source line containing the candidate.
+    Output: Count of candidates at least eight characters long with Shannon entropy greater than 3.5.
     """
     if not line:
         return 0
@@ -1187,11 +1232,13 @@ def _count_surrounding_tokens(line: str) -> int:
 
 def _calculate_key_value_distance(line: str, token: str, var_name: Optional[str]) -> int:
     """
-    Calculate the distance (in characters) between variable name and token.
-
-    Returns:
-        -1 if no variable name
-        Distance in characters otherwise
+    Description: Calculate the distance, in characters, between a variable name and the token.
+    Parameters:
+        line: Source line containing the candidate.
+        token: Candidate text to analyze.
+        var_name: Optional variable or key name.
+    Output: Absolute distance from the end of the variable name to the start of the token; -1 when
+        an input is missing or the name or the token is not in the line.
     """
     if not var_name or not token or not line:
         return -1
@@ -1208,11 +1255,11 @@ def _calculate_key_value_distance(line: str, token: str, var_name: Optional[str]
 
 def _calculate_json_path_hint(line: str) -> int:
     """
-    Estimate the depth in JSON/YAML structure.
-
-    Returns:
-        0: Root level
-        N: Nested N levels deep (based on leading whitespace or braces)
+    Description: Estimate the depth of the token in a JSON or YAML structure.
+    Parameters:
+        line: Source line containing the candidate.
+    Output: Maximum of the two-space indentation depth and the opening brace or bracket count; zero for
+        empty text. Zero means root level, and N means nested N levels deep.
     """
     if not line:
         return 0
@@ -1230,10 +1277,12 @@ def _calculate_json_path_hint(line: str) -> int:
 
 def _calculate_adjacency_ngram_score(context_text: str, token: str) -> float:
     """
-    Calculate N-gram score for variable names near the token.
-
-    Returns:
-        Sum of secret N-gram scores for neighboring variables
+    Description: Calculate N-gram score for variable names near the token.
+    Parameters:
+        context_text: Surrounding source text.
+        token: Candidate text to analyze.
+    Output: Sum of secret N-gram scores for neighboring variables, taken from context lines that do not
+        contain the token; zero if the token is absent.
     """
     if not context_text or not token:
         return 0.0
@@ -1264,7 +1313,14 @@ def _calculate_adjacency_ngram_score(context_text: str, token: str) -> float:
 
 
 def _detect_assignment_type(line: str, token: str) -> int:
-    """Detect the type of assignment operator used."""
+    """
+    Description: Detect the type of assignment operator used.
+    Parameters:
+        line: Source line containing the candidate.
+        token: Candidate text to analyze.
+    Output: Code for the operator before the token: 3 for :=, 4 for =>, 2 for colon, 1 for equals, or
+        0 for unknown.
+    """
     token_pos = line.find(token)
     if token_pos == -1:
         return 0
@@ -1285,25 +1341,13 @@ def _detect_assignment_type(line: str, token: str) -> int:
 
 def _is_token_in_string_literal(line: str, token: str) -> bool:
     """
-    Check if token is actually wrapped in quotes (string literal).
-
-    This properly detects if the token itself is inside quotes, not just
-    whether quotes exist anywhere in the line.
-
-    Args:
-        line: The line of code containing the token
-        token: The token to check
-
-    Returns:
-        True if token is wrapped in quotes (single, double, or backtick)
-
-    Examples:
-        >>> _is_token_in_string_literal('api_key = "sk_live_xxx"', 'sk_live_xxx')
-        True
-        >>> _is_token_in_string_literal('some_var = "hello"; sk_live_xxx', 'sk_live_xxx')
-        False
-        >>> _is_token_in_string_literal("token = 'ghp_xxxx'", 'ghp_xxxx')
-        True
+    Description: Check if the token itself is wrapped in quotes, as a string literal. This is stricter
+        than checking whether quotes appear anywhere in the line.
+    Parameters:
+        line: The line of code containing the token.
+        token: The token to check.
+    Output: True when matching quotes surround the token, including within a longer string; otherwise
+        False.
     """
     if not token or not line:
         return False
@@ -1354,24 +1398,16 @@ def _extract_token_features(
     line: str = "",
     context_text: str = "",
 ) -> dict:
-    """Extract token-level features (23 features).
-
-    NOTE: The following features are intentionally NOT included to prevent
-    shortcut learning:
-    - has_known_prefix: Would allow model to trivially match AKIA*, ghp_*, sk-*
-    - prefix_type: Would directly encode secret type from prefix
-    - is_hex_like: Would strongly correlate with non-secrets (git SHAs)
-
-    Instead, we use advanced entropy analysis and vendor prefix boost which
-    provide the model with useful signal without enabling trivial shortcuts.
-
-    DISCRIMINATIVE FEATURES (for precision boost):
-    - is_uuid_v4: UUIDs are identifiers, not secrets
-    - jwt_structure_valid: Invalid JWTs are not real secrets
-    - entropy_charset_mismatch: High entropy + low charset = likely hash/UUID
-    - has_hash_prefix: sha256:xxx prefixes indicate hashes
-
-    Phase 7.0 drops: normalized_entropy, cryptographic_score, is_known_hash_length
+    """
+    Description: Extract token properties and structure as model features. Prefix and hex-shape
+        features are left out on purpose to prevent shortcut learning, while UUID, JWT,
+        entropy-mismatch, and hash-prefix features are kept for precision.
+    Parameters:
+        token: Candidate text to analyze.
+        regex_match_type: 0 for entropy, or 1 or more for a regex pattern.
+        line: Source line containing the candidate.
+        context_text: Surrounding source text.
+    Output: Dictionary of 20 token features.
     """
     length = len(token)
 
@@ -1402,7 +1438,15 @@ def _extract_token_features(
 
 
 def _extract_var_features(var_name: Optional[str], line: str, token: str) -> dict:
-    """Extract variable name features (9 features — dropped var_contains_secret)."""
+    """
+    Description: Extract variable name features for the model.
+    Parameters:
+        var_name: Optional variable or key name.
+        line: Source line containing the candidate.
+        token: Candidate text to analyze.
+    Output: Dictionary of nine variable and assignment features, with defaults for a missing variable
+        name.
+    """
     if not var_name:
         return {
             "var_name_extracted": False,
@@ -1436,7 +1480,14 @@ def _extract_context_features(
     token: str = "",
     var_name: Optional[str] = None,
 ) -> dict:
-    """Extract context-level features (17 features — dropped line_position_ratio)."""
+    """
+    Description: Extract surrounding-code and file metadata as model context features.
+    Parameters:
+        context: Surrounding code and file metadata.
+        token: Candidate text to analyze.
+        var_name: Optional variable or key name.
+    Output: Dictionary of 16 context features.
+    """
     full_text = context.full_context
     line = context.line_content
 
@@ -1453,7 +1504,10 @@ def _extract_context_features(
         re.compile(r"^\s*def\s+\w+\s*\(", re.M),  # Python
         re.compile(r"^\s*function\s+\w+\s*\(", re.M),  # JavaScript
         re.compile(r"^\s*func\s+\w+\s*\(", re.M),  # Go
-        re.compile(r"^\s*(public|private|protected)?\s*(static)?\s*\w+\s+\w+\s*\(", re.M),  # Java
+        re.compile(
+            r"^[ \t]*(?:(?:public|private|protected)[ \t]+)?(?:static[ \t]+)?\w+[ \t]+\w+[ \t]*\(",
+            re.M,
+        ),  # Java
     ]
     has_func_def = any(p.search(full_text) for p in func_patterns)
 
@@ -1500,19 +1554,13 @@ def _extract_context_features(
 
 def _extract_stage_b_precision_features(token: str, file_path: Optional[str]) -> dict:
     """
-    Extract Stage B precision improvement features (6 features).
-
-    These features specifically target observed false positive patterns:
-    - 40/64-char hex tokens (git SHAs, SHA256 hashes)
-    - Test-mode tokens (sk_test_*, pk_test_*)
-    - Git-related, build, and example file paths
-
-    Args:
-        token: The token to analyze
-        file_path: The file path for context
-
-    Returns:
-        Dict with 6 Stage B precision features
+    Description: Extract the Stage B precision features that target observed false-positive patterns:
+        40- and 64-character hex tokens (git SHAs, SHA256 hashes), test-mode tokens (sk_test_*,
+        pk_test_*), and git, build, and example file paths.
+    Parameters:
+        token: The token to analyze.
+        file_path: The file path for context.
+    Output: Dictionary of six Stage B precision features.
     """
     return {
         "is_hex_len_40": _is_hex_exact_length(token, 40),
@@ -1532,20 +1580,16 @@ def _extract_hex_disambiguation_features(
     embedded_in_url: bool = False,
 ) -> dict:
     """
-    Extract Stage B generalization features for hex token disambiguation (4 features).
-
-    These features help distinguish hex secrets from git SHAs/checksums by
-    analyzing the surrounding context rather than the token format.
-
-    Args:
-        token: The token to analyze
-        context_text: Full context (before + current + after lines joined)
-        file_path: The file path for context
-        line_content: The line containing the token
-        embedded_in_url: Whether token was extracted from a URL/DSN
-
-    Returns:
-        Dict with 4 hex disambiguation features
+    Description: Extract Stage B generalization features that separate hex secrets from git SHAs and
+        checksums. The features come from the surrounding context rather than the token format.
+    Parameters:
+        token: The token to analyze.
+        context_text: Full context, with before, current, and after lines joined.
+        file_path: The file path for context.
+        line_content: The line containing the token.
+        embedded_in_url: Whether the token was extracted from a URL or DSN.
+    Output: Dictionary of four disambiguation features for 32-, 40-, or 64-character hexadecimal tokens,
+        or defaults otherwise.
     """
     # Only compute these features for hex-like tokens (40 or 64 chars)
     hex_chars = set("0123456789abcdefABCDEF")
@@ -1605,7 +1649,7 @@ def _extract_hex_disambiguation_features(
 
 
 # ---------------------------------------------------------------------------
-# Env-loading pattern awareness (v0.2.0 — features 64-65)
+# Env-loading pattern awareness (features 64-65)
 # ---------------------------------------------------------------------------
 
 _ENV_LOADER_PATTERNS = [
@@ -1638,17 +1682,28 @@ _FALLBACK_LOCATORS = [
 
 
 def _detect_env_loader_in_context(context_text: str, line: str) -> bool:
-    """True when surrounding context contains any env-loading pattern."""
+    """
+    Description: Check if the surrounding context contains any environment-loading pattern.
+    Parameters:
+        context_text: Surrounding source text.
+        line: Source line containing the candidate.
+    Output: True when the context or the current line matches an environment-loader pattern; otherwise
+        False.
+    """
     text = f"{context_text}\n{line}"
     return any(pat.search(text) for pat in _ENV_LOADER_PATTERNS)
 
 
 def _detect_env_fallback_value(line: str, token_start_index: int) -> bool:
-    """True IFF the token at `token_start_index` sits inside the fallback/default
-    argument of an env-loader call.
-
-    Uses authoritative start index from upstream extraction (TokenMatch.start),
-    NOT line.find() which grabs the wrong occurrence if the token appears twice.
+    """
+    Description: Flag default values in environment-loader calls by comparing the token's start index
+        with matched fallback starts. The start index comes from upstream extraction (TokenMatch.start),
+        not line.find(), which grabs the wrong occurrence when a token appears twice.
+    Parameters:
+        line: Source line containing the candidate.
+        token_start_index: Authoritative token start offset from upstream extraction.
+    Output: True when the index is at or beyond a matched fallback start minus one; otherwise False.
+        There is no closing-boundary check, so the token is not verified to end inside the argument.
     """
     for pattern in _FALLBACK_LOCATORS:
         match = pattern.search(line)
@@ -1665,15 +1720,12 @@ def extract_features(
     regex_match_type: int = 0,
 ) -> FeatureVector:
     """
-    Extract all 64 features from a finding and its context.
-
-    Args:
-        finding: The Finding object with token and metadata
-        context: CodeContext with surrounding code
-        regex_match_type: Encoded type of regex match (0 = entropy-only)
-
-    Returns:
-        FeatureVector with all 64 features
+    Description: Extract all 64 features from a finding and its context.
+    Parameters:
+        finding: The Finding object with token and metadata.
+        context: CodeContext with surrounding code.
+        regex_match_type: Encoded type of regex match (0 = entropy-only).
+    Output: FeatureVector containing all 64 features inferred from the finding and context.
     """
     token = finding.token or ""
 
@@ -1694,7 +1746,7 @@ def extract_features(
         regex_match_type = type_map.get(finding.type, 9)
 
     # Extract variable name first (needed by context features)
-    var_name = extract_var_name(context.line_content, token)
+    var_name = feature_var_name(context.line_content, token)
 
     # Extract features from each category
     token_features = _extract_token_features(
@@ -1725,7 +1777,7 @@ def extract_features(
     token_pos = context.line_content.find(token)
     env_fallback = _detect_env_fallback_value(context.line_content, token_pos) if token_pos >= 0 else False
 
-    # Phase 7.0 value-shape features
+    # Value-shape features
     value_shape = _value_shape_features(token)
 
     # Combine all features
@@ -1743,13 +1795,11 @@ def extract_features(
 
 def extract_features_from_record(record: dict) -> FeatureVector:
     """
-    Extract features from a training data record.
-
-    Args:
+    Description: Extract features from a training data record.
+    Parameters:
         record: Dict with token, line_content, context_before, context_after, etc.
-
-    Returns:
-        FeatureVector with all 64 features
+    Output: FeatureVector containing all 64 features, using record metadata and inferred context
+        defaults.
     """
     from Harpocrates.core.result import EvidenceType, Finding
 

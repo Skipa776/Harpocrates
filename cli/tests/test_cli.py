@@ -5,11 +5,18 @@ import json
 import re
 from pathlib import Path
 
-from typer.testing import CliRunner
+import pytest
+from cli_entry import COMMAND_NAMES, CommandNameRunner
 
 from Harpocrates.cli import app
 
-runner = CliRunner()
+runner = CommandNameRunner()
+
+
+@pytest.fixture(autouse=True, params=COMMAND_NAMES)
+def _command_name(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-NAME-02: every test in this file runs once as `harpo` and once as the deprecated `harpocrates`."""
+    runner.use(request.param, monkeypatch)
 
 
 def test_cli_scan_file_with_secrets(tmp_path: Path) -> None:
@@ -176,8 +183,7 @@ def test_cli_scan_table_shows_full_token_with_flag(tmp_path: Path) -> None:
 def test_cli_scan_json_omits_token_by_default(tmp_path: Path) -> None:
     """JSON output must not include a raw token field by default.
 
-    Note: the snippet field may still contain the raw token — snippet-level
-    redaction is handled by the reusable redaction helper (Task 4).
+    The snippet is redacted too; test_sec_01_scan_json.py covers that.
     """
     file_path = _write_github_token(tmp_path)
 

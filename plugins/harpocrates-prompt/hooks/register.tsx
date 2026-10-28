@@ -17,15 +17,19 @@ import {
   confirmQuestion,
   doneText,
   failText,
+  isAbsolute,
+  isPlainFile,
+  isPlainFolder,
   listText,
   parseAllowArgs,
   readAnswer,
-  recordPath,
+  recordIn,
   recordedInterpreter,
+  stateFolders,
   unknownText,
   verbOf,
 } from './allowlist'
-import type { Change, CliAnswer, Interpreter, Target } from './allowlist'
+import type { Change, CliAnswer, Interpreter, PathInfo, Target } from './allowlist'
 import {
   ALLOW_EDITS,
   HEADER,
@@ -85,18 +89,48 @@ type CommandApi = Parameters<Hook<'command.run'>>[0]
 type CliRun = { readonly exitCode: number; readonly answer: CliAnswer | null }
 type Outcome = CliRun | string
 
+/** What stat says about a path, or why not: 'missing' (the path is not there) or 'refused' (any other failure). */
+async function statOf($: CommandApi, path: string): Promise<PathInfo | 'missing' | 'refused'> {
+  try {
+    const stat = await $.fs.stat(path)
+    return { kind: stat.kind, isLink: stat.isLink }
+  } catch (error) {
+    return /ENOENT/.test(String(error)) ? 'missing' : 'refused'
+  }
+}
+
 /**
- * The interpreter `harpocrates install` recorded, read from the person's
- * install record; null when there is no record, no usable "python" in it, or
- * it cannot be read. There is no fallback: a `harpocrates` found on PATH (or a
- * project-local shim) is never run.
+ * The interpreter `harpo install` recorded, read from the person's install
+ * record; null when there is no record, no usable "python" in it, or it cannot
+ * be read. The state folder is tried in order, `.harpo` then `.harpocrates`,
+ * and the first one that exists decides: if it is not a plain folder (a link,
+ * a file), or its record is not a plain file, or any stat is refused, the
+ * answer is null, never the other folder (SEC-09). There is no other fallback:
+ * a `harpo` or `harpocrates` found on PATH (or a project-local shim) is never
+ * run.
+ *
+ * The home folder comes from HOME (USERPROFILE on Windows) because the plugin
+ * runtime offers no password-database lookup (SEC-08 reads it in the Python
+ * hook); it must be absolute. A project whose settings set HOME could point
+ * the plugin at a record of its own: that is the residual risk the threat
+ * model lists, and why the record must name an absolute interpreter and only
+ * the allowed flags.
  */
 async function readInterpreter($: CommandApi): Promise<Interpreter | null> {
   try {
     const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
-    if (!home) return null
-    const text = await $.fs.read(recordPath(home))
-    return typeof text === 'string' ? recordedInterpreter(text) : null
+    if (!home || !isAbsolute(home)) return null
+    for (const folder of stateFolders(home)) {
+      const dir = await statOf($, folder)
+      if (dir === 'missing') continue // this state folder is not there: look in the next
+      if (dir === 'refused' || !isPlainFolder(dir)) return null // a link, a file, an OS refusal: unusable, and no fallback
+      const path = recordIn(folder)
+      const file = await statOf($, path)
+      if (file === 'missing' || file === 'refused' || !isPlainFile(file)) return null
+      const text: unknown = await $.fs.read(path)
+      return typeof text === 'string' ? recordedInterpreter(text) : null
+    }
+    return null
   } catch {
     return null
   }
@@ -177,12 +211,59 @@ async function list($: CommandApi): Promise<string> {
   return listText(run.answer.entries)
 }
 
+/**
+ * The /harpo command, run by the person's Enter. `/harpocrates` is its old name
+ * (FR-NAME-02) and runs this same code; both are registered below.
+ *
+ * Only the person's own Enter in the chat box (origin "composer") changes the
+ * allowlist. Anything else (a plugin, the SDK, the bridge, a model-invoked
+ * run, an unclassified origin) is refused before anything is parsed further
+ * or run. Help and the listing change nothing, so any origin may run them.
+ * The answer is `text` only: nothing is put in `context` for the model.
+ */
+const runCommand: Hook<'command.run'> = async ($, e) => {
+  try {
+    const cmd = parseAllowArgs(e.args)
+    const word = verbOf(e.args)
+    const isChange = (word === 'allow' || word === 'remove' || cmd.kind === 'add' || cmd.kind === 'remove') && cmd.kind !== 'list'
+
+    if (isChange && e.origin?.kind !== 'composer') return { text: REFUSED }
+
+    switch (cmd.kind) {
+      case 'help':
+        return { text: HELP }
+      case 'unknown':
+        return { text: unknownText(cmd.word) }
+      case 'usage':
+        return { text: cmd.message }
+      case 'list':
+        return { text: await list($) }
+      default:
+        return { text: await change($, cmd.kind, cmd.target) }
+    }
+  } catch {
+    $.ui.log('harpocrates-prompt: /harpo failed', { to: 'debug' })
+    return { text: 'The /harpo command failed. Type /harpo allowlist to see the current list.' }
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     try {
       await $.command.register({
+        name: 'harpo',
+        description: 'Manage the Harpo allowlist',
+        argumentHint: ARGUMENT_HINT,
+      })
+    } catch {
+      $.ui.log('harpocrates-prompt: could not register /harpo', { to: 'debug' })
+    }
+
+    // The old name keeps working for two minor releases (FR-NAME-02).
+    try {
+      await $.command.register({
         name: 'harpocrates',
-        description: 'Manage the Harpocrates allowlist',
+        description: 'Manage the Harpo allowlist (the old name of /harpo)',
         argumentHint: ARGUMENT_HINT,
       })
     } catch {
@@ -192,36 +273,8 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Only the person's own Enter in the chat box (origin "composer") changes the
-  // allowlist. Anything else (a plugin, the SDK, the bridge, a model-invoked
-  // run, an unclassified origin) is refused before anything is parsed further
-  // or run. Help and the listing change nothing, so any origin may run them.
-  // The answer is `text` only: nothing is put in `context` for the model.
-  on('command.run', { command: 'harpocrates' }, async ($, e) => {
-    try {
-      const cmd = parseAllowArgs(e.args)
-      const word = verbOf(e.args)
-      const isChange = (word === 'allow' || word === 'remove' || cmd.kind === 'add' || cmd.kind === 'remove') && cmd.kind !== 'list'
-
-      if (isChange && e.origin?.kind !== 'composer') return { text: REFUSED }
-
-      switch (cmd.kind) {
-        case 'help':
-          return { text: HELP }
-        case 'unknown':
-          return { text: unknownText(cmd.word) }
-        case 'usage':
-          return { text: cmd.message }
-        case 'list':
-          return { text: await list($) }
-        default:
-          return { text: await change($, cmd.kind, cmd.target) }
-      }
-    } catch {
-      $.ui.log('harpocrates-prompt: /harpocrates failed', { to: 'debug' })
-      return { text: 'The /harpocrates command failed. Type /harpocrates allowlist to see the current list.' }
-    }
-  })
+  on('command.run', { command: 'harpo' }, runCommand)
+  on('command.run', { command: 'harpocrates' }, runCommand)
 
   // The person's decision comes from $.ui.ask, a `$` call: the hook's 10 s
   // budget does not run while it is in flight. Only an exact "Allow edits this

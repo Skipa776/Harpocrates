@@ -15,8 +15,8 @@ Covered modules (the "default path"):
 Forbidden imports (anywhere except Harpocrates/ml/explain.py):
   xgboost                  — XAI TreeSHAP dependency
   Harpocrates.ml.explain   — the opt-in XAI module itself
-  shap                     — banned everywhere per CLAUDE.md
-  lime                     — banned everywhere per CLAUDE.md
+  shap                     — banned everywhere
+  lime                     — banned everywhere
 """
 from __future__ import annotations
 

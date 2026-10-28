@@ -1,0 +1,143 @@
+{
+  "measured": {
+    "benchmark_llm_v5": {
+      "candidate_coverage": 0.9549,
+      "commit_ml0.0": {
+        "fn": 125,
+        "fp": 116,
+        "precision": 0.9436,
+        "recall": 0.9394,
+        "records": 4352,
+        "tn": 2172,
+        "tp": 1939
+      },
+      "commit_ml0.19": {
+        "fn": 125,
+        "fp": 116,
+        "precision": 0.9436,
+        "recall": 0.9394,
+        "records": 4352,
+        "tn": 2172,
+        "tp": 1939
+      },
+      "commit_ml0.5559": {
+        "fn": 126,
+        "fp": 113,
+        "precision": 0.9449,
+        "recall": 0.939,
+        "records": 4352,
+        "tn": 2175,
+        "tp": 1938
+      },
+      "gate_ml0.0": {
+        "fn": 104,
+        "fp": 208,
+        "precision": 0.9041,
+        "recall": 0.9496,
+        "records": 4352,
+        "tn": 2080,
+        "tp": 1960
+      },
+      "gate_ml0.19": {
+        "fn": 104,
+        "fp": 208,
+        "precision": 0.9041,
+        "recall": 0.9496,
+        "records": 4352,
+        "tn": 2080,
+        "tp": 1960
+      },
+      "gate_ml0.1904": {
+        "fn": 104,
+        "fp": 208,
+        "precision": 0.9041,
+        "recall": 0.9496,
+        "records": 4352,
+        "tn": 2080,
+        "tp": 1960
+      },
+      "records": 4352
+    },
+    "test_v5": {
+      "candidate_coverage": 0.9947,
+      "commit_ml0.0": {
+        "fn": 19,
+        "fp": 44,
+        "precision": 0.9711,
+        "recall": 0.9873,
+        "records": 3000,
+        "tn": 1456,
+        "tp": 1481
+      },
+      "commit_ml0.19": {
+        "fn": 19,
+        "fp": 44,
+        "precision": 0.9711,
+        "recall": 0.9873,
+        "records": 3000,
+        "tn": 1456,
+        "tp": 1481
+      },
+      "commit_ml0.5559": {
+        "fn": 21,
+        "fp": 44,
+        "precision": 0.9711,
+        "recall": 0.986,
+        "records": 3000,
+        "tn": 1456,
+        "tp": 1479
+      },
+      "gate_ml0.0": {
+        "fn": 10,
+        "fp": 86,
+        "precision": 0.9454,
+        "recall": 0.9933,
+        "records": 3000,
+        "tn": 1414,
+        "tp": 1490
+      },
+      "gate_ml0.19": {
+        "fn": 10,
+        "fp": 86,
+        "precision": 0.9454,
+        "recall": 0.9933,
+        "records": 3000,
+        "tn": 1414,
+        "tp": 1490
+      },
+      "gate_ml0.1904": {
+        "fn": 10,
+        "fp": 86,
+        "precision": 0.9454,
+        "recall": 0.9933,
+        "records": 3000,
+        "tn": 1414,
+        "tp": 1490
+      },
+      "records": 3000
+    }
+  },
+  "model_config_metrics": {
+    "auc_candidates": {
+      "benchmark_llm_v5": 0.9856,
+      "test_v5": 0.9996
+    },
+    "benchmark_llm_v5_commit": {
+      "precision": 0.9436,
+      "recall": 0.9394
+    },
+    "benchmark_llm_v5_gate": {
+      "precision": 0.9041,
+      "recall": 0.9496
+    },
+    "test_v5_commit": {
+      "precision": 0.9711,
+      "recall": 0.9873
+    },
+    "test_v5_gate": {
+      "precision": 0.9454,
+      "recall": 0.9933
+    },
+    "unit": "full file scan (bench/compare_scanners.py)"
+  }
+}

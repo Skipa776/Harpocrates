@@ -1,6 +1,6 @@
 """Per-session edit grants (FR-READ-06): the one path the user said Yes to for a built-in edit of a secret-bearing file.
 
-~/.harpocrates/grants/<session_id>.json:
+~/.harpo/grants/<session_id>.json (the state directory, see paths.py):
     {"pending": {"<tool_use_id>": {"path": "<realpath>", "tool": "Edit", "ts": 1760000000.0}},
      "granted": {"<realpath>": 1760000100.0}}
 The PreToolUse hook records a `pending` entry when it asks. `python -m Harpocrates.hooks --post` moves it to `granted`
@@ -11,7 +11,7 @@ one real path, never a directory, and is ignored after TTL (a stale file is prun
 Storage: the directory is 0o700 and each file 0o600, written to a temp file and renamed so a reader never sees half a
 file. A file that is missing, unreadable or corrupt means no grants (fail closed). Parallel hook processes may lose
 an update to each other (no lock); the cost is a repeated prompt, never a grant nobody gave.
-RESIDUAL: ~/.harpocrates is protected from the agent by the Edit deny rule and the Bash `touches` guard, but a script
+RESIDUAL: ~/.harpo and ~/.harpocrates are protected from the agent by the Edit deny rule and the Bash `touches` guard, but a script
 that writes the file itself could forge a grant. It is the same documented script gap as the allowlist (hooks.py
 docstring); the egress gate (M2) covers what reaches the provider either way.
 """
@@ -24,28 +24,61 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from Harpocrates import paths
+from Harpocrates.paths import state_dir
+
 TTL = 24 * 3600  # seconds a pending or granted entry stays valid
 _SESSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")  # becomes a file name: no separator, no leading dot
 
 
 def _dir() -> Path:
-    return Path.home() / ".harpocrates" / "grants"  # looked up per call so a test can move HOME
+    """
+    Description: Locate the session grant directory in the current state directory.
+    Parameters: None
+    Output: Path to the grants directory; state_dir may migrate legacy state and raise filesystem
+        errors.
+    """
+    return state_dir() / "grants"  # looked up per call so a test can move HOME
 
 
 def _file(session_id: object) -> Optional[Path]:
-    """The grant file of a session, None if the id could not be a safe file name."""
+    """
+    Description: Choose a grant file only when the session identifier is a safe file name.
+    Parameters:
+        session_id: Untrusted session identifier to validate.
+    Output: Grant file path, or None for an invalid identifier; the state directory lookup may migrate
+        legacy state.
+    """
     if isinstance(session_id, str) and _SESSION.fullmatch(session_id):
         return _dir() / f"{session_id}.json"
     return None
 
 
 def _fresh(ts: object, now: float) -> bool:
+    """
+    Description: Check that a timestamp is numeric and within the grant lifetime, rejecting booleans
+        and future times.
+    Parameters:
+        ts: Timestamp to validate.
+        now: Current time in seconds.
+    Output: True for a timestamp whose age is between zero and TTL inclusive; otherwise False.
+    """
     return isinstance(ts, (int, float)) and not isinstance(ts, bool) and 0 <= now - ts <= TTL
 
 
 def _load(path: Path, now: float) -> dict:
-    """{"pending": ..., "granted": ...} with every malformed or expired entry dropped."""
+    """
+    Description: Load grant state and discard malformed or expired entries so unusable state provides
+        no grants.
+    Parameters:
+        path: Session grant file to read.
+        now: Current time in seconds used to check expiration.
+    Output: Dictionary with pending and granted mappings, every malformed or expired entry dropped;
+        missing, unreadable, or corrupt files yield empty mappings (fail closed).
+    """
     try:
+        if paths.unusable(state_dir()):  # a symlink or a file where the folder should be: no grants (SEC-09)
+            raise OSError("the state directory is not a plain folder")
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):  # missing, unreadable or corrupt: no grants
         raw = None
@@ -60,6 +93,18 @@ def _load(path: Path, now: float) -> dict:
 
 
 def _save(path: Path, data: dict) -> None:
+    """
+    Description: Save grant state atomically with a private directory and file to prevent partial
+        reads.
+    Parameters:
+        path: Destination grant file.
+        data: Grant state to serialize as JSON.
+    Output: None; creates or chmods the parent to 0o700, writes a new 0o600 temporary file, and
+        replaces the destination. On failure removes the temporary file and re-raises; filesystem
+        and serialization errors propagate. Raises paths.StateDirUnusableError (an OSError) when the state
+        directory is a symlink or a file.
+    """
+    paths.require_usable(state_dir())  # never write through a symlink or into a file (SEC-09)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)  # also when it already existed, or the umask narrowed the mode
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -73,7 +118,14 @@ def _save(path: Path, data: dict) -> None:
 
 
 def _sweep(now: float) -> None:
-    """Delete grant files nothing has touched for TTL (a session that ended without a SessionEnd)."""
+    """
+    Description: Remove stale session files to clean up sessions without a SessionEnd event.
+    Parameters:
+        now: Current time in seconds for comparing file modification times.
+    Output: None; deletes files older than TTL and ignores directory, stat, and unlink OSError failures.
+    """
+    if paths.unusable(state_dir()):
+        return
     try:
         for f in _dir().iterdir():
             try:
@@ -86,9 +138,17 @@ def _sweep(now: float) -> None:
 
 
 def add_pending(session_id: object, tool_use_id: object, path: Path, tool: str) -> bool:
-    """Record the edit the hook is about to ask about. False when it can't be recorded (no usable ids, an
-    unwritable directory): the caller then refuses instead of asking, so no prompt can lead to a grant that was
-    never recorded as pending."""
+    """
+    Description: Record the edit awaiting user approval so only a recorded pending request can become a
+        grant.
+    Parameters:
+        session_id: Session identifier used to select the grant file.
+        tool_use_id: Nonempty identifier of the tool call awaiting approval.
+        path: Target path to record as a real path.
+        tool: Name of the tool requesting approval.
+    Output: True after saving and sweeping stale grants; False for unusable identifiers or an OSError
+        while saving. The caller must refuse instead of asking if recording fails.
+    """
     file = _file(session_id)
     if file is None or not isinstance(tool_use_id, str) or not tool_use_id:
         return False
@@ -104,8 +164,15 @@ def add_pending(session_id: object, tool_use_id: object, path: Path, tool: str) 
 
 
 def promote(session_id: object, tool_use_id: object, tool: object) -> None:
-    """The tool ran: its pending path becomes a grant. Nothing changes for an unknown or expired tool_use_id, or
-    when `tool` (the tool the Post event names) is not the one the hook asked about."""
+    """
+    Description: Promote a matching pending edit after its tool runs to record user approval.
+    Parameters:
+        session_id: Session identifier selecting the grant file.
+        tool_use_id: Identifier of the completed tool call.
+        tool: Tool name reported by the Post event.
+    Output: None; moves a fresh matching pending entry into granted and saves it. Invalid identifiers,
+        unknown or expired calls, and tool mismatches do nothing; save errors propagate.
+    """
     file = _file(session_id)
     if file is None or not isinstance(tool_use_id, str):
         return
@@ -119,13 +186,25 @@ def promote(session_id: object, tool_use_id: object, tool: object) -> None:
 
 
 def granted(session_id: object) -> frozenset[str]:
-    """Real paths the user approved in this session."""
+    """
+    Description: Read the real paths approved by the user for this session.
+    Parameters:
+        session_id: Session identifier selecting the grant file.
+    Output: Frozen set of unexpired granted paths; invalid identifiers or missing, unreadable, or corrupt
+        state yield an empty set.
+    """
     file = _file(session_id)
     return frozenset(_load(file, time.time())["granted"]) if file is not None else frozenset()
 
 
 def clear(session_id: object) -> None:
-    """SessionEnd: forget the session's grants."""
+    """
+    Description: Forget session grants when SessionEnd arrives.
+    Parameters:
+        session_id: Session identifier selecting the grant file.
+    Output: None; deletes the grant file if present, ignores invalid identifiers, and propagates unlink
+        errors other than a missing file.
+    """
     file = _file(session_id)
-    if file is not None:
+    if file is not None and not paths.unusable(state_dir()):
         file.unlink(missing_ok=True)

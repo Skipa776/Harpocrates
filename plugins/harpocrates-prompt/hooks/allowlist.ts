@@ -1,26 +1,27 @@
-// /harpocrates: parsing and wording for the allowlist command. Pure: nothing
-// here runs a process or touches a file. The Harpocrates CLI (`allow --json`)
-// is the only thing that changes the allowlist, and register.tsx is the only
-// caller, and only for the person's own Enter.
+// /harpo: parsing and wording for the allowlist command (/harpocrates, its old
+// name, does the same: FR-NAME-02). Pure: nothing here runs a process or
+// touches a file. The Harpo CLI (`allow --json`) is the only thing that
+// changes the allowlist, and register.tsx is the only caller, and only for the
+// person's own Enter.
 
 import { sanitize } from './parse'
 import { truncateRight } from './width'
 
 export const HELP = [
-  'Harpocrates allowlist (only you can change it; every use is logged)',
-  '/harpocrates allow <path>            allow one file or folder',
-  '/harpocrates allow --name <name>     allow a folder or file name in every project',
-  '/harpocrates remove <path>           remove a path',
-  '/harpocrates remove --name <name>    remove a name',
-  '/harpocrates allowlist               show the list',
+  'Harpo allowlist (only you can change it; every use is logged)',
+  '/harpo allow <path>            allow one file or folder',
+  '/harpo allow --name <name>     allow a folder or file name in every project',
+  '/harpo remove <path>           remove a path',
+  '/harpo remove --name <name>    remove a name',
+  '/harpo allowlist               show the list',
 ].join('\n')
 
 export const ARGUMENT_HINT = 'allow <path> | allow --name <name> | remove … | allowlist'
-export const REFUSED = 'Only you can change the Harpocrates allowlist: type /harpocrates in the chat box.'
-export const NOT_FOUND = 'Harpocrates CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
+export const REFUSED = 'Only you can change the Harpo allowlist: type /harpo in the chat box.'
+export const NOT_FOUND = 'Harpo CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
 export const NOT_INSTALLED =
-  'Run `harpocrates install` first: the plugin only runs the Harpocrates interpreter that install recorded.'
-export const BAD_ANSWER ='The Harpocrates CLI returned an answer this plugin cannot read.'
+  'Run `harpo install` first: the plugin only runs the Harpo interpreter that install recorded.'
+export const BAD_ANSWER ='The Harpo CLI returned an answer this plugin cannot read.'
 export const CONFIRM_LABEL = 'Allow it everywhere'
 export const CANCEL_LABEL = 'Cancel'
 export const CANCELLED = 'Cancelled.'
@@ -78,26 +79,26 @@ function parseTarget(kind: Change, rest: readonly string[]): AllowCommand {
   const usage = (message: string): AllowCommand => ({ kind: 'usage', message })
   const make = (target: Target): AllowCommand => ({ kind, target })
 
-  if (rest.length === 0) return usage(`Usage: /harpocrates ${verb} <path>  or  /harpocrates ${verb} --name <name>`)
+  if (rest.length === 0) return usage(`Usage: /harpo ${verb} <path>  or  /harpo ${verb} --name <name>`)
   if (rest.some(w => CONTROL.test(w))) return usage('A path or name cannot hold control characters.')
 
   if (rest[0] === '--name') {
     const name = rest[1]
-    if (rest.length !== 2 || name === undefined || name === '') return usage(`Usage: /harpocrates ${verb} --name <name>`)
+    if (rest.length !== 2 || name === undefined || name === '') return usage(`Usage: /harpo ${verb} --name <name>`)
     if (name.startsWith('-')) return usage(`Unknown option: ${truncateRight(sanitize(name), 40)}`)
     return make({ kind: 'name', value: name })
   }
 
   const path = rest[0]
-  if (path === undefined || path === '') return usage(`Usage: /harpocrates ${verb} <path>`)
+  if (path === undefined || path === '') return usage(`Usage: /harpo ${verb} <path>`)
   if (path.startsWith('-')) {
     return usage(`Unknown option: ${truncateRight(sanitize(path), 40)} (write ./ before a path that starts with a dash)`)
   }
-  if (rest.length > 1) return usage(`Put a path that contains spaces in quotes: /harpocrates ${verb} "my folder/file"`)
+  if (rest.length > 1) return usage(`Put a path that contains spaces in quotes: /harpo ${verb} "my folder/file"`)
   return make({ kind: 'path', value: path })
 }
 
-/** What the person typed after `/harpocrates`. */
+/** What the person typed after `/harpo` (or `/harpocrates`). */
 export function parseAllowArgs(args: string): AllowCommand {
   const words = tokenize(args)
   if (words === null) return { kind: 'usage', message: 'A quote is never closed.' }
@@ -122,7 +123,7 @@ export function parseAllowArgs(args: string): AllowCommand {
 
 export const unknownText = (word: string): string => `Unknown: ${word}\n${HELP}`
 
-const isAbsolute = (path: string): boolean => path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+export const isAbsolute = (path: string): boolean => path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
 const trimEnd = (dir: string): string => dir.replace(/[\\/]+$/, '')
 
 /**
@@ -136,25 +137,56 @@ export function absolutePath(path: string, cwd: string | undefined, home: string
   return cwd ? `${trimEnd(cwd)}/${path}` : null
 }
 
-/** Where `install` records the interpreter that runs the hooks, under the home folder. */
-export const recordPath = (home: string): string => `${trimEnd(home)}/.harpocrates/install.json`
+/**
+ * The state folders in the order they are tried: `.harpo` (FR-NAME-04), then
+ * `.harpocrates`, which is where the record sits until the move happens (or
+ * when it was refused). `.harpocrates` is looked at only when `.harpo` is not
+ * there at all (SEC-09): once `.harpo` exists in any form, it decides.
+ */
+export const stateFolders = (home: string): readonly string[] => [
+  `${trimEnd(home)}/.harpo`,
+  `${trimEnd(home)}/.harpocrates`,
+]
+
+/** The install record inside a state folder. */
+export const recordIn = (folder: string): string => `${folder}/install.json`
+
+/** Where `install` records the interpreter that runs the hooks, one path per state folder. */
+export const recordPaths = (home: string): readonly string[] => stateFolders(home).map(recordIn)
+
+/** What `$.fs.stat` says about a path: what it leads to, and whether it is itself a symbolic link. */
+export type PathInfo = { readonly kind: 'file' | 'dir' | 'other'; readonly isLink: boolean }
+
+/**
+ * Whether a state folder and its record may be read: the folder must be a
+ * plain directory and the record a plain file, neither a symbolic link
+ * (SEC-09). The record is the one thing the plugin runs a program from, so it
+ * is never read through a link an agent could have planted.
+ */
+export const isPlainFolder = (info: PathInfo): boolean => info.kind === 'dir' && !info.isLink
+export const isPlainFile = (info: PathInfo): boolean => info.kind === 'file' && !info.isLink
 
 export type Interpreter = { readonly python: string; readonly args: readonly string[] }
 
 /**
  * `python -m` puts the working directory (the agent-controlled project) first
- * on sys.path, so a planted Harpocrates package there would run instead of the
- * real one. Only these flags, which drop it, are accepted from the record:
- * -P (3.11 and later) and -I (isolated mode).
+ * on sys.path, so a planted Harpo package there would run instead of the
+ * real one, and so would one on PYTHONPATH (SEC-08). Only these flags are
+ * accepted from the record: -I (isolated mode), -P (3.11 and later: drops the
+ * working directory) and -E (ignores PYTHON* variables, written with -P for an
+ * install in the user site). -E alone leaves the working directory on sys.path,
+ * so a list must hold -I or -P.
  */
-const SAFE_FLAGS: readonly string[] = ['-I', '-P']
+const SAFE_FLAGS: readonly string[] = ['-E', '-I', '-P']
+const DROPS_CWD: readonly string[] = ['-I', '-P']
 
 /**
  * The interpreter the install record names (`"python"`) and the flags it runs
  * with (`"python_args"`, `["-I"]` when the record has none). The path must be
  * absolute with no control characters; the flags must be a non-empty list of
- * -I or -P. Null for anything else (no such key, a relative or bare name,
- * other flags, garbage). The plugin never falls back to PATH.
+ * -I, -P or -E that holds -I or -P. Null for anything else (no such key, a
+ * relative or bare name, other flags, garbage). The plugin never falls back to
+ * PATH.
  */
 export function recordedInterpreter(text: string): Interpreter | null {
   let raw: unknown
@@ -170,6 +202,7 @@ export function recordedInterpreter(text: string): Interpreter | null {
   if (flags === undefined) return { python, args: ['-I'] }
   if (!Array.isArray(flags) || flags.length === 0) return null
   if (!flags.every((f: unknown) => typeof f === 'string' && SAFE_FLAGS.includes(f))) return null
+  if (!flags.some(f => DROPS_CWD.includes(f as string))) return null
 
   return { python, args: flags as string[] }
 }

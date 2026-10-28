@@ -1,26 +1,21 @@
-"""
-This version:
-- Detects binary files (skips them)
-- Iterates lines lazily
-- Support max_bytes cutoff
-- UTF-8 with errors ignored
-- Used by detect_file() and future CI scanning tasks
-"""
+"""Text-file reading for the scanners: a binary probe, and lines read lazily in bounded pieces (FR-CORE-05)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterator
 
+MEMORY_CAP = 64 * 1024 * 1024  # bytes one file's scan may hold (Josh, Oct 21, 2026)
+PIECE_OVERLAP = 64 * 1024  # characters; longer than any token the regex and entropy tiers match
+
 
 def _looks_binary(sample: bytes) -> bool:
     """
-    Heuristic check for binary files.
-    Args:
-        sample (bytes): A sample of the file content.
-
-    Returns:
-        bool: True if the file is binary, False otherwise.
+    Description: Heuristically check a byte sample for binary content before text scanning.
+    Parameters:
+        sample: A sample of the file content.
+    Output: True for NUL bytes or over 30% nontext bytes after failed UTF-8 decoding; False for empty,
+        valid UTF-8, or a truncated final UTF-8 character.
     """
     if not sample:
         return False
@@ -47,37 +42,51 @@ def _looks_binary(sample: bytes) -> bool:
 
     return nontext / len(sample) > 0.3
 
-def iter_text_lines(
-    path: str | Path,
-    max_bytes: int | None = None,
-) -> Iterator[tuple[int, str]]:
+def piece_chars(memory_cap: int) -> int:
     """
-    Safely iterate over the lines of a text file.
+    Description: The longest piece of a line one scan holds, for a memory cap (FR-CORE-05).
+    Parameters:
+        memory_cap: the most bytes one file's scan may hold.
+    Output: A quarter of the cap, and at least twice PIECE_OVERLAP.
+    """
+    return max(memory_cap // 4, 2 * PIECE_OVERLAP)
 
-    - Skips binary files (based on initial 1024-byte probe)
-    - Uses UTF-8 encoding (errors ignored)
-    - Respects max_bytes to avoid huge scans
-    Args:
-        path (str | Path): The path to the text file.
-        max_bytes (int | None, optional): The maximum number of bytes to read. Defaults to None.
 
-    Yields:
-        (line_number, line_content)
+def iter_line_pieces(path: str | Path, memory_cap: int = MEMORY_CAP) -> Iterator[tuple[int, int, str]]:
+    """
+    Description: Read a text file's lines lazily, cutting a line longer than piece_chars(memory_cap) into pieces that
+        overlap by PIECE_OVERLAP characters, so a scan of any size holds one piece at a time (FR-CORE-05).
+    Parameters:
+        path: the text file.
+        memory_cap: the most bytes one file's scan may hold (default MEMORY_CAP).
+    Output: (line number from 1, offset of the piece in its line, text without the newline) for each piece; a short
+        line is one piece at offset 0. Nothing for a binary file (a 1024-byte probe). UTF-8, with undecodable bytes
+        dropped. Raises OSError.
     """
     path = Path(path)
-
     with path.open("rb") as f:
-        sample = f.read(1024)
-        if _looks_binary(sample):
+        if _looks_binary(f.read(1024)):
             return
-
-    total_bytes = 0
+    size = piece_chars(memory_cap)
     with path.open("r", encoding="utf-8", errors="ignore") as f:
-        for lineno, line in enumerate(f, start=1):
-            encoded_len = len(line.encode("utf-8", errors="ignore"))
-            total_bytes += encoded_len
+        lineno, read, carry = 1, 0, ""  # read: characters of this line consumed so far
+        while text := f.readline(size - len(carry)):
+            ended = text.endswith("\n")
+            piece = carry + (text[:-1] if ended else text)
+            yield lineno, read - len(carry), piece
+            if ended:
+                lineno, read, carry = lineno + 1, 0, ""
+            else:
+                read += len(text)
+                carry = piece[-PIECE_OVERLAP:]
 
-            if max_bytes is not None and total_bytes > max_bytes:
-                break
 
-            yield lineno, line.rstrip("\n")
+def count_lines(path: str | Path, memory_cap: int = MEMORY_CAP) -> int:
+    """
+    Description: Count a text file's lines without holding a whole line (FR-CORE-05).
+    Parameters:
+        path: the text file.
+        memory_cap: the most bytes the count may hold.
+    Output: The line count; 0 for a binary file. Raises OSError.
+    """
+    return sum(1 for _, offset, _ in iter_line_pieces(path, memory_cap) if offset == 0)

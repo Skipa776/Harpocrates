@@ -6,6 +6,8 @@ holding a planted package that writes a marker file; the marker must not appear.
 from __future__ import annotations
 
 import json
+import os
+import pwd
 import shlex
 import subprocess
 import sys
@@ -37,7 +39,12 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PYTHONPATH", raising=False)
 
 
-EVENT = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": "x.txt"}})
+# An Edit of a file in the state directory: the real hook refuses it (a deny on stdout) without reading or writing
+# anything, because only the path is looked at. The hook uses the home folder from the password database (SEC-08), so
+# the path is built from it too and no test ever touches that folder.
+STATE_FILE = str(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".harpo" / "allow")
+EVENT = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Edit",
+                    "tool_input": {"file_path": STATE_FILE, "old_string": "a", "new_string": "b"}})
 
 
 def run_shell(command: str, cwd: Path) -> subprocess.CompletedProcess:
@@ -51,8 +58,8 @@ def test_sec_hijack_control_a_bare_python_dash_m_runs_the_planted_hook(project: 
     assert (project / "PLANTED").exists()
 
 
-def test_sec_hijack_flag_is_p_from_311_and_i_before() -> None:
-    assert harness.python_flag() == ("-P" if sys.version_info >= (3, 11) else "-I")
+def test_sec_hijack_flag_is_isolated_mode_unless_the_package_is_in_the_user_site() -> None:
+    assert harness.python_flag() == "-I"  # this install is in a virtual environment (SEC-08 covers -E -P)
 
 
 def _commands() -> dict[str, str]:
@@ -68,24 +75,27 @@ def test_sec_hijack_generated_hook_commands_ignore_a_planted_package(event: str,
     done = run_shell(command, project)
     assert not (project / "PLANTED").exists(), done.stderr
     assert "planted" not in done.stdout.lower()
+    if "Pre" in event:  # the real hook ran: it refused the state-directory edit
+        assert json.loads(done.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny", done.stdout
 
 
 def test_sec_hijack_the_generated_mcp_command_ignores_a_planted_package(project: Path) -> None:
     command, args = harness.mcp_server()
-    assert args[0] == harness.python_flag()
+    assert args[:-2] == harness.python_flags()
     subprocess.run([command, *args], cwd=project, stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
                    check=False)
     assert not (project / "PLANTED").exists()
 
 
 def test_sec_hijack_every_generated_command_carries_the_flag() -> None:
+    flags = harness.python_flags()
     flag = harness.python_flag()
     for event, command in _commands().items():
         words = shlex.split(command)
         inner = shlex.split(words[2]) if words[:2] == ["sh", "-c"] else words
-        assert flag in inner and inner.index(flag) < inner.index("-m"), event
+        assert all(f in inner and inner.index(f) < inner.index("-m") for f in flags), event
     root, tables = harness.codex_config_parts()
-    assert json.dumps([flag, "-m", "Harpocrates.mcp.server"]) in tables
+    assert json.dumps([*flags, "-m", "Harpocrates.mcp.server"]) in tables
     text = harness.setup_instructions("claude-code")
     assert f"{flag} -m Harpocrates.mcp.server" in text
     assert f"{flag} -m Harpocrates.hooks --post" in text.replace("\\\"", '"')

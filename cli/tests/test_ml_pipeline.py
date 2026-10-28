@@ -6,14 +6,9 @@ to ensure all components work together correctly.
 """
 from __future__ import annotations
 
-import json
-import tempfile
-from pathlib import Path
-
 from Harpocrates.core.result import EvidenceType, Finding
 from Harpocrates.ml.context import CodeContext
 from Harpocrates.ml.features import FeatureVector, extract_features
-from Harpocrates.training.generators.generate_data import generate_training_data
 
 
 class TestFeatureExtraction:
@@ -95,89 +90,6 @@ class TestFeatureExtraction:
         )
 
         assert actual == expected
-
-
-class TestDataGeneration:
-    """Tests for training data generation."""
-
-    def test_generate_training_data_count(self):
-        """Test that data generation produces correct count."""
-        data = generate_training_data(count=100, seed=42)
-        assert len(data) == 100
-
-    def test_generate_training_data_balance(self):
-        """Test that data generation respects balance parameter."""
-        data = generate_training_data(count=1000, balance=0.5, seed=42)
-
-        positive_count = sum(1 for d in data if d["label"] == 1)
-
-        # Allow 10% tolerance
-        assert 0.4 <= positive_count / len(data) <= 0.6
-
-    def test_training_data_has_required_fields(self):
-        """Test that generated data has all required fields."""
-        data = generate_training_data(count=10, seed=42)
-
-        required_fields = ["token", "line_content", "context_before", "context_after", "label"]
-
-        for record in data:
-            for field in required_fields:
-                assert field in record, f"Missing required field: {field}"
-
-    def test_training_data_reproducible(self):
-        """Test that data generation is reproducible with seed."""
-        data1 = generate_training_data(count=50, seed=123)
-        data2 = generate_training_data(count=50, seed=123)
-
-        for r1, r2 in zip(data1, data2):
-            assert r1["token"] == r2["token"]
-            assert r1["label"] == r2["label"]
-
-
-class TestDataset:
-    """Tests for Dataset class."""
-
-    def test_dataset_from_jsonl(self):
-        """Test loading dataset from JSONL file."""
-        from Harpocrates.training.dataset import Dataset
-
-        # Generate some data
-        data = generate_training_data(count=50, seed=42)
-
-        # Write to temp file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-            for record in data:
-                f.write(json.dumps(record) + "\n")
-            temp_path = Path(f.name)
-
-        try:
-            dataset = Dataset.from_jsonl(temp_path)
-            assert len(dataset) == 50
-            assert len(dataset.features) == 50
-            assert len(dataset.labels) == 50
-        finally:
-            temp_path.unlink()
-
-    def test_dataset_split(self):
-        """Test dataset splitting."""
-        from Harpocrates.training.dataset import Dataset
-
-        data = generate_training_data(count=100, seed=42)
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-            for record in data:
-                f.write(json.dumps(record) + "\n")
-            temp_path = Path(f.name)
-
-        try:
-            dataset = Dataset.from_jsonl(temp_path)
-            train, val, test = dataset.split(train_ratio=0.8, val_ratio=0.1, seed=42)
-
-            assert len(train) == 80
-            assert len(val) == 10
-            assert len(test) == 10
-        finally:
-            temp_path.unlink()
 
 
 class TestVerifierNoCrash:

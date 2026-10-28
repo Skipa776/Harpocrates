@@ -1,0 +1,407 @@
+"""FR-GATE-01, SEC-03, FR-INSTALL-04, FR-INSTALL-05, FR-GATE-03, FR-GATE-06: the gate end to end, in front of
+bench/mock_provider.py on 127.0.0.1. These are the thirteen tests of the G3 spec "Test plan", plus a few that pin
+what the plan implies. Every credential and canary in them is a made-up string."""
+from __future__ import annotations
+
+import dataclasses
+import gzip
+import inspect
+import json
+import socket
+import time
+
+import pytest
+import zstandard
+from gate_canaries import PLACEHOLDER, known_format
+from gate_rig import (
+    JSON,
+    MESSAGES,
+    RECOVERY_PHRASES,
+    RESPONSES,
+    STREAM_MESSAGES,
+    STREAM_RESPONSES,
+    passthrough_scan,
+    running_rig,
+)
+
+import Harpocrates.gate.server as gate_server
+from Harpocrates.gate.config import GateConfig
+from Harpocrates.gate.request_scan import RequestScanner
+from Harpocrates.gate.scan import Block, Forward
+from Harpocrates.gate.server import start_gate
+from Harpocrates.gate.session_token import TOKEN_HEADER, new_token
+
+
+def test_fr_gate_01_binds_loopback_only() -> None:
+    with running_rig() as rig:
+        assert rig.gate.host == "127.0.0.1" and rig.gate.server.server_address[0] == "127.0.0.1"
+        assert rig.gate.port > 0 and rig.gate.url == f"http://127.0.0.1:{rig.gate.port}"
+        # Not reachable on this machine's other addresses.
+        try:
+            other = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            other = "127.0.0.1"
+        if other != "127.0.0.1" and not other.startswith("127."):
+            with pytest.raises(OSError):
+                socket.create_connection((other, rig.gate.port), timeout=2).close()
+    # The settings refuse any other address, and start_gate re-checks the settings it is given.
+    for host in ("0.0.0.0", "::", "::1", "localhost", "192.0.2.1", ""):
+        with pytest.raises(ValueError, match="127.0.0.1"):
+            GateConfig(host=host)
+    forged = GateConfig()
+    object.__setattr__(forged, "host", "0.0.0.0")
+    with pytest.raises(ValueError, match="127.0.0.1"):
+        start_gate(forged, new_token())
+    assert dataclasses.is_dataclass(forged)
+
+
+# --- SEC-03: the gate token --------------------------------------------------------------------------------------
+
+ROUTES = [  # (method, target, body, extra headers)
+    ("POST", "/v1/messages", MESSAGES, {"anthropic-version": "2023-06-01"}),
+    ("POST", "/v1/messages/count_tokens", MESSAGES, {"anthropic-version": "2023-06-01"}),
+    ("POST", "/v1/responses", RESPONSES, {}),
+    ("GET", "/v1/models", None, {}),
+    ("POST", "/v1/chat/completions", RESPONSES, {}),
+    ("GET", "/v1/responses", None, {"Upgrade": "websocket", "Connection": "Upgrade"}),
+]
+
+
+@pytest.mark.parametrize("method,target,body,extra", ROUTES)
+@pytest.mark.parametrize("token", [False, "wrong-token", "", "x" * 400])
+def test_sec_03_missing_or_wrong_token_rejected(method, target, body, extra, token) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        reply = rig.call(method, target, body, {**JSON, **extra}, token=token)
+        assert reply.status == 401
+        error = json.loads(reply.body)
+        assert "HARPO-BLOCK-TOKEN" in json.dumps(error)
+        assert ("type" in error and error["type"] == "error") if "anthropic-version" in extra else "error" in error
+        assert rig.token not in reply.body.decode() and rig.mock.records() == []  # nothing was forwarded
+
+
+def test_sec_03_the_right_token_is_not_a_401_and_the_header_name_is_case_blind() -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        for name in (TOKEN_HEADER, "X-Harpo-Gate-Token", "X-HARPO-GATE-TOKEN"):
+            assert rig.call("POST", "/v1/messages", MESSAGES, {**JSON, name: rig.token}, token=False).status != 401
+
+
+def test_sec_03_two_token_headers_a_token_in_the_url_or_in_another_header_are_not_accepted() -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        both = rig.raw(
+            b"POST /v1/messages HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n"
+            + f"{TOKEN_HEADER}: {rig.token}\r\n{TOKEN_HEADER}: {rig.token}\r\n\r\n{{}}".encode())
+        assert both.startswith(b"HTTP/1.1 401")
+        assert rig.call("POST", f"/v1/messages?{TOKEN_HEADER}={rig.token}", MESSAGES, JSON, token=False).status == 401
+        for name in ("Authorization", "x-api-key", "X-Harpo-Token"):
+            assert rig.call("POST", "/v1/messages", MESSAGES, {**JSON, name: rig.token}, token=False).status == 401
+        assert rig.mock.records() == []
+
+
+def test_sec_03_a_rejected_request_with_a_large_body_still_gets_its_answer() -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        big = b'{"pad":"' + b"a" * 600_000 + b'"}'
+        reply = rig.call("POST", "/v1/messages", big, JSON, token=False)
+        assert reply.status == 401 and rig.mock.records() == []
+
+
+# --- routes ------------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("method,target", [
+    ("POST", "/v1/chat/completions"), ("POST", "/v1/images/generations"), ("POST", "/v1/realtime/calls"),
+    ("POST", "/v1/memories/trace_summarize"), ("GET", "/v1/messages"), ("DELETE", "/v1/messages"),
+    ("PUT", "/v1/responses"), ("PATCH", "/v1/responses"), ("OPTIONS", "/v1/messages"), ("HEAD", "/api/hello"),
+    ("POST", "/v1/messages/"), ("POST", "/"), ("GET", "/v1/models/gpt-5"), ("POST", "/thinking/signature?key=FAKE-Q-1"),
+])
+def test_fr_gate_01_each_unknown_route_is_blocked_without_echoing_the_path(method: str, target: str) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        for headers in ({}, {"anthropic-version": "2023-06-01"}):
+            reply = rig.call(method, target, MESSAGES if method in ("POST", "PUT", "PATCH") else None, headers)
+            assert reply.status == 400
+            if method != "HEAD":
+                text = reply.body.decode()
+                assert "HARPO-BLOCK-ROUTE" in text
+                assert not [p for p in RECOVERY_PHRASES if p in text.lower()]
+                assert "FAKE-Q-1" not in text and "/v1/" not in text and "/api/" not in text  # no path is echoed
+                assert ("type" in json.loads(text)) == bool(headers)  # Anthropic shape only for an Anthropic caller
+        assert rig.mock.records() == []
+
+
+def test_fr_gate_01_unknown_route_blocked_and_websocket_426() -> None:
+    """The plan's test: a route the gate does not know is a 400 and nothing is forwarded; a WebSocket upgrade is a 426."""
+    with running_rig(scan_step=passthrough_scan) as rig:
+        blocked = rig.call("POST", "/v1/chat/completions", RESPONSES, JSON)
+        assert blocked.status == 400 and "HARPO-BLOCK-ROUTE" in blocked.body.decode()
+        upgrade = rig.call("GET", "/v1/responses", None, {"Upgrade": "websocket", "Connection": "Upgrade"})
+        assert upgrade.status == 426 and "HARPO-BLOCK-UPGRADE" in upgrade.body.decode()
+        assert rig.mock.records() == []
+
+
+@pytest.mark.parametrize("target", ["/v1/responses", "/v1/messages", "/v1/models", "/anything"])
+def test_fr_gate_01_a_websocket_upgrade_is_a_426_on_any_path_and_a_401_without_the_token(target: str) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        upgrade = {"Upgrade": "websocket", "Connection": "Upgrade", "Sec-WebSocket-Version": "13",
+                   "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ=="}
+        reply = rig.call("GET", target, None, upgrade)
+        assert reply.status == 426
+        body = json.loads(reply.body)
+        assert "HARPO-BLOCK-UPGRADE" in body["error"]["message"]
+        assert not [p for p in RECOVERY_PHRASES if p in reply.body.decode().lower()]
+        assert rig.mock.records() == []
+        # Without the right token an upgrade is a 401 first (token check, then route).
+        assert rig.call("GET", target, None, upgrade, token=False).status == 401
+
+
+# --- bodies ------------------------------------------------------------------------------------------------------
+
+def post_head(rig, *extra: str, target: str = "/v1/messages") -> bytes:
+    """A request head for the raw tests: the right token, JSON, and the extra header lines."""
+    lines = [f"POST {target} HTTP/1.1", "Host: gate.test", f"{TOKEN_HEADER}: {rig.token}",
+             "anthropic-version: 2023-06-01", "Content-Type: application/json", *extra]
+    return ("\r\n".join(lines) + "\r\n\r\n").encode()
+
+
+def status_and_text(raw: bytes) -> tuple[bytes, str]:
+    return raw.split(b"\r\n", 1)[0], raw.partition(b"\r\n\r\n")[2].decode("latin-1")
+
+
+def test_fr_gate_01_oversized_and_truncated_bodies_blocked() -> None:
+    with running_rig(scan_step=passthrough_scan, max_body=2048, client_timeout=1) as rig:
+        # Over the cap by Content-Length: refused from the header; the agent still gets its answer.
+        status, text = status_and_text(rig.raw(post_head(rig, "Content-Length: 3000") + b"a" * 3000))
+        assert status == b"HTTP/1.1 400 Bad Request" and "HARPO-BLOCK-BODY-TOO-LARGE" in text
+        # Over the cap in chunks.
+        chunks = b"".join(f"{len(p):x}\r\n".encode() + p + b"\r\n" for p in (b"a" * 1500, b"b" * 1500)) + b"0\r\n\r\n"
+        status, text = status_and_text(rig.raw(post_head(rig, "Transfer-Encoding: chunked") + chunks))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TOO-LARGE" in text
+        # Truncated: the agent promises 3000 bytes, sends 100 and stops.
+        status, text = status_and_text(rig.raw(post_head(rig, "Content-Length: 1000") + b"a" * 100))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TRUNCATED" in text
+        status, text = status_and_text(rig.raw(post_head(rig, "Transfer-Encoding: chunked") + b"5\r\nhel"))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TRUNCATED" in text
+        status, text = status_and_text(rig.raw(post_head(rig, "Transfer-Encoding: chunked") + b"5\r\nhello\r\n"))
+        assert "HARPO-BLOCK-BODY-TRUNCATED" in text
+        # Stalled: the agent sends part of the body and then nothing, without hanging up.
+        status, text = status_and_text(rig.raw(post_head(rig, "Content-Length: 1000") + b"a" * 100, half_close=False))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TRUNCATED" in text
+        assert rig.mock.records() == []
+
+
+@pytest.mark.parametrize("extra,body", [
+    (["Content-Length: abc"], b"{}"), (["Content-Length: -1"], b"{}"), (["Content-Length: 2", "Content-Length: 2"], b"{}"),
+    (["Content-Length: 2", "Transfer-Encoding: chunked"], b"2\r\n{}\r\n0\r\n\r\n"),
+    (["Transfer-Encoding: gzip, chunked"], b"2\r\n{}\r\n0\r\n\r\n"), (["Transfer-Encoding: chunked"], b"zz\r\n{}\r\n0\r\n\r\n"),
+    (["Transfer-Encoding: chunked"], b"2\r\n{}XX0\r\n\r\n"),
+])
+def test_fr_gate_01_a_body_with_bad_framing_is_blocked(extra: list[str], body: bytes) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        status, text = status_and_text(rig.raw(post_head(rig, *extra) + body))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-FRAMING" in text
+        assert rig.mock.records() == []
+
+
+def test_fr_gate_01_a_body_on_a_route_that_has_none_is_blocked() -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        head = (f"GET /v1/models HTTP/1.1\r\nHost: g\r\n{TOKEN_HEADER}: {rig.token}\r\nContent-Length: 5\r\n\r\nhello").encode()
+        status, text = status_and_text(rig.raw(head))
+        assert status.startswith(b"HTTP/1.1 400") and "HARPO-BLOCK-BODY-TOO-LARGE" in text
+        assert rig.mock.records() == []
+
+
+# --- content encodings -------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("encoding", ["br", "deflate", "x-gzip", "compress", "gzip, br", "identity, gzip", "unknown",
+                                      "zstd, gzip", ""])
+def test_fr_install_04_unknown_encoding_blocked(encoding: str) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        reply = rig.call("POST", "/v1/messages", gzip.compress(MESSAGES), {**JSON, "Content-Encoding": encoding,
+                                                                       "anthropic-version": "2023-06-01"})
+        assert reply.status == 400 and "HARPO-BLOCK-ENCODING" in reply.body.decode()
+        assert "HARPO-BLOCK-ENCODING-CORRUPT" not in reply.body.decode()
+        assert rig.mock.records() == []
+
+
+def test_fr_install_04_two_encoding_headers_are_blocked() -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        raw = rig.raw(post_head(rig, "Content-Encoding: gzip", "Content-Encoding: gzip", "Content-Length: 2") + b"{}")
+        assert "HARPO-BLOCK-ENCODING" in status_and_text(raw)[1] and rig.mock.records() == []
+
+
+def test_fr_install_04_zstd_is_blocked_when_no_zstd_module_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gate_server, "load_zstd", lambda: None)
+    with running_rig(scan_step=passthrough_scan) as rig:
+        reply = rig.call("POST", "/v1/messages", b"\x28\xb5\x2f\xfd" + b"\0" * 8, {**JSON, "Content-Encoding": "zstd"})
+        assert reply.status == 400 and "HARPO-BLOCK-ENCODING" in reply.body.decode()
+        assert rig.mock.records() == []
+
+
+@pytest.mark.parametrize("encoding,body", [
+    ("gzip", b"not gzip at all"), ("gzip", gzip.compress(MESSAGES)[:-6]), ("gzip", gzip.compress(MESSAGES) + b"extra"),
+    ("gzip", b""), ("zstd", b"not zstd at all"),
+])
+def test_fr_install_04_a_corrupt_or_padded_body_is_blocked(encoding: str, body: bytes) -> None:
+    with running_rig(scan_step=passthrough_scan) as rig:
+        reply = rig.call("POST", "/v1/messages", body, {**JSON, "Content-Encoding": encoding})
+        assert reply.status == 400 and "HARPO-BLOCK-ENCODING-CORRUPT" in reply.body.decode()
+        assert rig.mock.records() == []
+
+
+def test_fr_install_04_a_compression_bomb_is_blocked_at_the_cap() -> None:
+    with running_rig(scan_step=passthrough_scan, max_body=1 << 20) as rig:
+        bomb = gzip.compress(b"\0" * (100 << 20), compresslevel=9)
+        assert len(bomb) < (1 << 20)  # small on the wire, so only the cap after decoding can stop it
+        reply = rig.call("POST", "/v1/messages", bomb, {**JSON, "Content-Encoding": "gzip"})
+        assert reply.status == 400 and "HARPO-BLOCK-BODY-TOO-LARGE" in reply.body.decode()
+        assert rig.mock.records() == []
+
+
+# --- FR-GATE-03: the scan step -----------------------------------------------------------------------------------
+
+EVERY_KIND = [  # (method, target, body, headers): each way a request can reach the gate
+    ("POST", "/v1/messages?beta=true", MESSAGES, {"anthropic-version": "2023-06-01"}),
+    ("POST", "/v1/messages", STREAM_MESSAGES, {"anthropic-version": "2023-06-01"}),
+    ("POST", "/v1/messages/count_tokens", MESSAGES, {"anthropic-version": "2023-06-01"}),
+    ("POST", "/v1/responses", RESPONSES, {}),
+    ("POST", "/v1/responses", STREAM_RESPONSES, {}),
+    ("POST", "/v1/messages", gzip.compress(MESSAGES), {"Content-Encoding": "gzip", "anthropic-version": "x"}),
+    ("POST", "/v1/responses", zstandard.ZstdCompressor().compress(RESPONSES), {"Content-Encoding": "zstd"}),
+    ("POST", "/v1/messages", b"", {"anthropic-version": "2023-06-01"}),
+    ("GET", "/v1/models", None, {}),
+    ("GET", "/v1/models?limit=1000", None, {"anthropic-version": "2023-06-01"}),
+]
+
+
+def test_fr_gate_03_default_scan_step_is_the_real_scanner_with_its_own_key_per_gate() -> None:
+    """The stub of G3 is gone: with no scan step given, the gate scans (G4) and each gate has its own session key."""
+    assert inspect.signature(start_gate).parameters["scan_step"].default is None
+    secret = known_format()["github_token"]
+    body = json.dumps({"model": "m", "max_tokens": 1, "messages": [{"role": "user", "content": f"my key {secret}"}]}).encode()
+    seen = []
+    for _ in range(2):
+        with running_rig() as rig:
+            assert isinstance(rig.gate.server.scan_step, RequestScanner)
+            reply = rig.call("POST", "/v1/messages", body, {**JSON, "anthropic-version": "2023-06-01"})
+            assert reply.status == 200
+            (record,) = rig.mock.records()
+            assert secret not in record["body"] and PLACEHOLDER.search(record["body"])
+            seen.append(rig.gate.server.scan_step.finder.redactor)
+    assert seen[0] is not seen[1]
+
+
+def test_fr_gate_03_the_gate_has_no_override_and_a_failing_scanner_forwards_nothing() -> None:
+    """FR-GATE-03, Oct 20 2026: no flag forwards a request that was not scanned."""
+    assert "override" not in " ".join(inspect.signature(start_gate).parameters) and not hasattr(GateConfig(), "override")
+
+    def broken(body: bytes, route: object, head: object) -> Forward:
+        raise RuntimeError("scanner failed")
+
+    with running_rig(scan_step=broken) as rig:
+        for method, target, body, headers in EVERY_KIND:
+            reply = rig.call(method, target, body, {**JSON, **headers})
+            assert reply.status == 400 and "HARPO-BLOCK-SCAN-ERROR" in reply.body.decode(), (method, target)
+        assert rig.mock.records() == []  # not one request reached the provider
+
+
+def test_fr_gate_03_scan_error_and_timeout_block() -> None:
+    def explode(body: bytes, route: object, head: object) -> Forward:
+        raise RuntimeError("scanner crashed with FAKE-SECRET-IN-MESSAGE")
+
+    def hang(body: bytes, route: object, head: object) -> Forward:
+        time.sleep(30)
+        return Forward(body)
+
+    with running_rig(scan_step=explode) as rig:
+        for method, target, body, headers in EVERY_KIND[:5]:
+            reply = rig.call(method, target, body, {**JSON, **headers})
+            assert reply.status == 400 and "HARPO-BLOCK-SCAN-ERROR" in reply.body.decode()
+            assert "FAKE-SECRET" not in reply.body.decode()  # the exception text never reaches the agent
+        assert rig.mock.records() == []
+    with running_rig(scan_step=hang, scan_timeout=0.3) as rig:
+        started = time.monotonic()
+        reply = rig.call("POST", "/v1/messages", MESSAGES, {**JSON, "anthropic-version": "2023-06-01"})
+        assert reply.status == 400 and "HARPO-BLOCK-SCAN-TIMEOUT" in reply.body.decode()
+        assert time.monotonic() - started < 5
+        assert rig.mock.records() == []
+
+
+def test_fr_gate_03_a_step_that_answers_with_garbage_or_blocks_is_obeyed_as_a_block() -> None:
+    with running_rig(scan_step=lambda body, route, head: "yes") as rig:
+        reply = rig.call("POST", "/v1/messages", MESSAGES, JSON)
+        assert reply.status == 400 and "HARPO-BLOCK-SCAN-ERROR" in reply.body.decode()
+    with running_rig(scan_step=lambda body, route, head: Block("HARPO-BLOCK-UNKNOWN-TYPE")) as rig:
+        reply = rig.call("POST", "/v1/messages", MESSAGES, {**JSON, "anthropic-version": "2023-06-01"})
+        assert reply.status == 400 and "HARPO-BLOCK-UNKNOWN-TYPE" in reply.body.decode()
+        assert rig.mock.records() == []
+
+
+def test_fr_install_04_gzip_decoded() -> None:
+    """The scan step sees the decoded JSON, whatever encoding the body arrived in."""
+    seen: list[tuple[bytes, str]] = []
+
+    def capture(body: bytes, route, head) -> Block:
+        seen.append((body, route.name))
+        return Block("HARPO-BLOCK-CAPTURED")
+
+    with running_rig(scan_step=capture) as rig:
+        rig.call("POST", "/v1/messages", gzip.compress(MESSAGES), {**JSON, "Content-Encoding": "gzip"})
+        rig.call("POST", "/v1/messages", gzip.compress(MESSAGES), {**JSON, "Content-Encoding": "GZIP"})
+        rig.call("POST", "/v1/messages", MESSAGES, JSON)
+        rig.call("POST", "/v1/responses", zstandard.ZstdCompressor().compress(RESPONSES),
+                 {**JSON, "Content-Encoding": "zstd"})
+    assert seen == [(MESSAGES, "anthropic.messages")] * 3 + [(RESPONSES, "openai.responses")]
+
+
+# --- the server object -------------------------------------------------------------------------------------------
+
+def test_fr_gate_01_a_gate_is_a_context_manager_and_closes_its_port() -> None:
+    with start_gate(GateConfig(), new_token()) as gate:
+        port = gate.port
+        socket.create_connection(("127.0.0.1", port), timeout=2).close()
+    with pytest.raises(OSError):
+        socket.create_connection(("127.0.0.1", port), timeout=2).close()
+    gate.close()  # closing twice is harmless
+
+
+def test_fr_gate_01_start_gate_refuses_a_socket_that_ends_up_bound_elsewhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Lying(gate_server.GateServer):
+        def __init__(self, *args: object) -> None:
+            super().__init__(*args)
+            self.server_address = ("0.0.0.0", self.server_address[1])
+
+    monkeypatch.setattr(gate_server, "GateServer", Lying)
+    with pytest.raises(ValueError, match="127.0.0.1"):
+        start_gate(GateConfig(), new_token())
+
+
+def test_fr_gate_01_a_socket_error_while_answering_closes_the_connection_without_a_second_answer(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    def gone(*args: object) -> bool:
+        raise BrokenPipeError("agent went away")
+
+    monkeypatch.setattr(gate_server, "check_token", gone)
+    with running_rig(scan_step=passthrough_scan) as rig:
+        assert rig.raw(post_head(rig, "Content-Length: 2") + b"{}") == b""  # hung up on, nothing written
+        assert rig.mock.records() == []
+        lines = rig.wait_log(1)
+        assert len(lines) == 1 and "decision" not in json.loads(lines[0])
+
+
+def test_fr_gate_04_the_scan_step_gets_the_headers_path_and_query_without_the_gate_token() -> None:
+    """Decision 12: header values, the path and the query go to the scan step. The gate token is the gate's own and
+    never reaches it."""
+    seen: list = []
+
+    def capture(body: bytes, route, head) -> Forward:
+        seen.append(head)
+        return Forward(body)
+
+    with running_rig(scan_step=capture) as rig:
+        rig.call("POST", "/v1/messages?beta=true&x=a%20b", MESSAGES, {**JSON, "anthropic-version": "2023-06-01",
+                                                                       "X-Custom": "one"})
+        rig.call("GET", "/v1/models", None, {"anthropic-version": "2023-06-01"})
+    first, second = seen
+    names = [name.lower() for name, _ in first.headers]
+    assert "x-harpo-gate-token" not in names and "x-custom" in names and "anthropic-version" in names
+    assert dict(first.headers)["X-Custom"] == "one"
+    assert (first.path, first.query) == ("/v1/messages", "beta=true&x=a%20b")
+    assert (second.path, second.query) == ("/v1/models", "")

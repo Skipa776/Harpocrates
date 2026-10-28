@@ -1,0 +1,907 @@
+{
+  "isolation": {
+    "method": "throwaway HOME and CODEX_HOME, from-scratch environment, fake keys, loopback mock; fake ChatGPT login also has its refresh URL and chatgpt_base_url on loopback",
+    "real_home_changed": []
+  },
+  "kind": "g2-probes",
+  "probes": [
+    {
+      "agent": "claude",
+      "agent_version": "2.1.303 (Claude Code)",
+      "exit_code": 0,
+      "observations": {
+        "attribution": {
+          "example": "x-anthropic-billing-header: cc_version=2.1.303.850; cc_entrypoint=sdk-cli;",
+          "found": true,
+          "has_cache_control": false,
+          "leading_text": "x-anthropic-billing-header: cc_version=",
+          "own_block": true,
+          "position": 0,
+          "requests_checked": 5,
+          "stable_across_requests": true,
+          "template": "x-anthropic-billing-header: cc_version=<version>.<hex3>; cc_entrypoint=<entrypoint>;"
+        },
+        "block_types": {
+          "anthropic": {
+            "content_block_types": [
+              "redacted_thinking",
+              "text",
+              "thinking",
+              "tool_result",
+              "tool_use"
+            ],
+            "message_roles": [
+              "assistant",
+              "system",
+              "user"
+            ],
+            "message_string_content_roles": [
+              "system"
+            ],
+            "system_blocks": 3,
+            "system_form": "blocks",
+            "system_role_message_forms": [
+              "blocks",
+              "string"
+            ],
+            "thinking_param": {
+              "display": "str",
+              "type": "str"
+            },
+            "tool_kinds": [
+              "tools[].custom"
+            ],
+            "tool_names": [
+              "Agent",
+              "Bash",
+              "CronCreate",
+              "CronDelete",
+              "CronList",
+              "Edit",
+              "EnterWorktree",
+              "ExitWorktree",
+              "ListAgents",
+              "ListMcpResourcesTool",
+              "NotebookEdit",
+              "Read",
+              "ReadMcpResourceDirTool",
+              "ReadMcpResourceTool",
+              "ReportFindings",
+              "ScheduleWakeup",
+              "SendMessage",
+              "Skill",
+              "TaskStop",
+              "WebFetch",
+              "WebSearch",
+              "Workflow",
+              "Write",
+              "mcp__harpo__safe_grep",
+              "mcp__harpo__safe_read",
+              "mcp__harpo__scan_file",
+              "mcp__harpo__scan_text"
+            ],
+            "tool_result_block_types": [
+              "image"
+            ],
+            "tool_result_content_forms": [
+              "blocks",
+              "string"
+            ],
+            "top_level_keys": [
+              "context_management",
+              "max_tokens",
+              "messages",
+              "metadata",
+              "model",
+              "output_config",
+              "stream",
+              "system",
+              "thinking",
+              "tools"
+            ]
+          },
+          "responses": {}
+        },
+        "install": "ok",
+        "results_seen": 4,
+        "session_header_present": true,
+        "session_id_in_body_names_transcript": true,
+        "thinking": {
+          "first_request_with_it": 1,
+          "reasoning_items_resent": null,
+          "redacted_thinking_resent": true,
+          "thinking_resent": true
+        },
+        "transcript_path_pattern": "~/.claude/projects/<project-slug>/<session-id>.jsonl",
+        "transport": {
+          "by_route": {
+            "anthropic.messages": 5
+          },
+          "content_encodings": {
+            "none": 5
+          },
+          "endpoints": [
+            "POST /v1/messages"
+          ],
+          "framing": {
+            "chunked": 0,
+            "content_length": 5,
+            "none": 0
+          },
+          "header_names": [
+            "accept",
+            "accept-encoding",
+            "anthropic-beta",
+            "anthropic-dangerous-direct-browser-access",
+            "anthropic-version",
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent",
+            "x-api-key",
+            "x-app",
+            "x-claude-code-session-id",
+            "x-stainless-arch",
+            "x-stainless-lang",
+            "x-stainless-os",
+            "x-stainless-package-version",
+            "x-stainless-retry-count",
+            "x-stainless-runtime",
+            "x-stainless-runtime-version",
+            "x-stainless-timeout"
+          ],
+          "requests": 5,
+          "response_statuses": {
+            "200": 5
+          },
+          "upgrade_requests": 0,
+          "websocket_extensions_offered": []
+        }
+      },
+      "probe": "claude-corpus",
+      "requests": 5,
+      "seconds": 1.5,
+      "status": "ok",
+      "verifies": [
+        "V1",
+        "V3",
+        "V4",
+        "V6",
+        "V7",
+        "T1",
+        "T10"
+      ]
+    },
+    {
+      "agent": "claude",
+      "agent_version": "2.1.303 (Claude Code)",
+      "exit_code": 0,
+      "observations": {
+        "largest_model_request_bytes": 764520,
+        "prompt_bytes_sent": 700000,
+        "transport": {
+          "by_route": {
+            "anthropic.messages": 1
+          },
+          "content_encodings": {
+            "none": 1
+          },
+          "endpoints": [
+            "POST /v1/messages"
+          ],
+          "framing": {
+            "chunked": 0,
+            "content_length": 1,
+            "none": 0
+          },
+          "header_names": [
+            "accept",
+            "accept-encoding",
+            "anthropic-beta",
+            "anthropic-dangerous-direct-browser-access",
+            "anthropic-version",
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent",
+            "x-api-key",
+            "x-app",
+            "x-claude-code-session-id",
+            "x-stainless-arch",
+            "x-stainless-lang",
+            "x-stainless-os",
+            "x-stainless-package-version",
+            "x-stainless-retry-count",
+            "x-stainless-runtime",
+            "x-stainless-runtime-version",
+            "x-stainless-timeout"
+          ],
+          "requests": 1,
+          "response_statuses": {
+            "200": 1
+          },
+          "upgrade_requests": 0,
+          "websocket_extensions_offered": []
+        }
+      },
+      "probe": "claude-long",
+      "requests": 1,
+      "seconds": 0.3,
+      "status": "ok",
+      "verifies": [
+        "V3",
+        "V7",
+        "T1",
+        "T10"
+      ]
+    },
+    {
+      "agent": "claude",
+      "agent_version": "2.1.303 (Claude Code)",
+      "exit_code": 0,
+      "observations": {
+        "cases": {
+          "user_and_project_settings": {
+            "exit_code": 0,
+            "requests_received": {
+              "project_settings_url": 1,
+              "shell_url": 0,
+              "user_settings_url": 0
+            },
+            "timed_out": false,
+            "winner": "project_settings_url"
+          },
+          "user_and_project_settings_and_shell": {
+            "exit_code": 0,
+            "requests_received": {
+              "project_settings_url": 1,
+              "shell_url": 0,
+              "user_settings_url": 0
+            },
+            "timed_out": false,
+            "winner": "project_settings_url"
+          }
+        },
+        "install": "none (control run)"
+      },
+      "probe": "claude-settings",
+      "requests": 0,
+      "seconds": 0.0,
+      "status": "ok",
+      "verifies": [
+        "T2"
+      ]
+    },
+    {
+      "agent": "claude",
+      "agent_version": "2.1.303 (Claude Code)",
+      "observations": {
+        "cases": {
+          "after_a_tool_result": {
+            "count_tokens_requests": 0,
+            "event_types": [
+              "assistant",
+              "result",
+              "system",
+              "user"
+            ],
+            "exit_code": 1,
+            "message_shown": true,
+            "model_requests": 3,
+            "result_event": {
+              "api_error_status": 400,
+              "is_error": true,
+              "subtype": "success",
+              "terminal_reason": "api_error"
+            },
+            "statuses": {
+              "200": 1,
+              "400": 2
+            },
+            "stderr_mentions_message": false,
+            "timed_out": false
+          },
+          "first_request": {
+            "count_tokens_requests": 0,
+            "event_types": [
+              "assistant",
+              "result",
+              "system"
+            ],
+            "exit_code": 1,
+            "message_shown": true,
+            "model_requests": 2,
+            "result_event": {
+              "api_error_status": 400,
+              "is_error": true,
+              "subtype": "success",
+              "terminal_reason": "api_error"
+            },
+            "statuses": {
+              "400": 2
+            },
+            "stderr_mentions_message": false,
+            "timed_out": false
+          }
+        }
+      },
+      "probe": "claude-block-400",
+      "status": "ok",
+      "verifies": [
+        "T3"
+      ]
+    },
+    {
+      "agent": "codex",
+      "agent_version": "codex-cli 0.163.0",
+      "exit_code": 0,
+      "observations": {
+        "block_types": {
+          "anthropic": {},
+          "responses": {
+            "content_part_types": [
+              "input_text",
+              "output_text"
+            ],
+            "has_conversation": false,
+            "has_previous_response_id": false,
+            "include": [
+              [
+                "reasoning.encrypted_content"
+              ]
+            ],
+            "input_form": "items",
+            "input_item_types": [
+              "function_call",
+              "function_call_output",
+              "message",
+              "reasoning"
+            ],
+            "message_roles": [
+              "assistant",
+              "developer",
+              "user"
+            ],
+            "store": [
+              false
+            ],
+            "tool_names": [
+              "create_goal",
+              "exec_command",
+              "get_goal",
+              "list_mcp_resource_templates",
+              "list_mcp_resources",
+              "mcp__harpo",
+              "multi_agent_v1",
+              "read_mcp_resource",
+              "request_user_input",
+              "update_goal",
+              "view_image",
+              "write_stdin"
+            ],
+            "tool_types": [
+              "function",
+              "namespace",
+              "web_search"
+            ],
+            "top_level_keys": [
+              "client_metadata",
+              "include",
+              "input",
+              "model",
+              "parallel_tool_calls",
+              "prompt_cache_key",
+              "reasoning",
+              "store",
+              "stream",
+              "tool_choice",
+              "tools"
+            ]
+          }
+        },
+        "error_items": [
+          "Model metadata for `gpt-5` not found. Defaulting to fallback metadata; this can degrade pe",
+          "`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for thi"
+        ],
+        "event_types": [
+          "item.completed",
+          "item.started",
+          "thread.started",
+          "turn.completed",
+          "turn.started"
+        ],
+        "git_remote_credential_found_in": [],
+        "install": "ok",
+        "model_requests": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "results_seen": 3,
+        "rollout_files": 1,
+        "rollout_name_contains_thread_id": true,
+        "rollout_path_pattern": "$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<timestamp>-<thread-id>.jsonl",
+        "thinking": {
+          "first_request_with_it": 1,
+          "reasoning_items_resent": true,
+          "redacted_thinking_resent": null,
+          "thinking_resent": null
+        },
+        "thread_id_header_values": 1,
+        "transport": {
+          "by_route": {
+            "openai.responses": 4
+          },
+          "content_encodings": {
+            "none": 4
+          },
+          "endpoints": [
+            "POST /v1/responses"
+          ],
+          "framing": {
+            "chunked": 0,
+            "content_length": 4,
+            "none": 0
+          },
+          "header_names": [
+            "accept",
+            "authorization",
+            "content-length",
+            "content-type",
+            "host",
+            "originator",
+            "session-id",
+            "thread-id",
+            "user-agent",
+            "x-client-request-id",
+            "x-codex-beta-features",
+            "x-codex-turn-metadata",
+            "x-codex-turn-state",
+            "x-codex-window-id"
+          ],
+          "requests": 4,
+          "response_statuses": {
+            "200": 4
+          },
+          "upgrade_requests": 0,
+          "websocket_extensions_offered": []
+        },
+        "turn_metadata_facts": {
+          "commit_hash_hex_length": 40,
+          "remote_url_has_userinfo": false,
+          "remote_url_scheme_host_path_only": true,
+          "request_kinds": {
+            "turn": 4
+          },
+          "same_json_in_body_client_metadata": true,
+          "workspace_keys_are_absolute_paths": true
+        },
+        "turn_metadata_shape": {
+          "agent_name": "str",
+          "analytics_enabled": "bool",
+          "auto_review_enabled": "bool",
+          "context_window_id": "str",
+          "history_initialization": "str",
+          "installation_id": "str",
+          "model": "str",
+          "node_repl_auto_review_required": "bool",
+          "node_repl_disabled": "bool",
+          "request_kind": "str",
+          "root_turn_id": "str",
+          "sandbox": "str",
+          "sandbox_mode": "str",
+          "session_id": "str",
+          "thread_id": "str",
+          "thread_source": "str",
+          "turn_id": "str",
+          "turn_started_at_unix_ms": "int",
+          "turn_trigger": "str",
+          "window_id": "str",
+          "window_number": "int",
+          "workspaces": {
+            "<key>": {
+              "associated_remote_urls": {
+                "origin": "str"
+              },
+              "has_changes": "bool",
+              "latest_git_commit_hash": "str"
+            }
+          }
+        },
+        "turn_state_echoed_in_requests": [
+          1,
+          2,
+          3
+        ],
+        "turn_state_sent_by_mock": "mock-turn-state-0001"
+      },
+      "probe": "codex-corpus",
+      "requests": 4,
+      "seconds": 3.2,
+      "status": "ok",
+      "verifies": [
+        "V3",
+        "V4",
+        "V5",
+        "V6",
+        "V7",
+        "T4",
+        "T8",
+        "T9",
+        "T10"
+      ]
+    },
+    {
+      "agent": "codex",
+      "agent_version": "codex-cli 0.163.0",
+      "exit_code": 0,
+      "observations": {
+        "largest_model_request_bytes": 1039744,
+        "prompt_bytes_sent": 1000000,
+        "transport": {
+          "by_route": {
+            "openai.responses": 1
+          },
+          "content_encodings": {
+            "none": 1
+          },
+          "endpoints": [
+            "POST /v1/responses"
+          ],
+          "framing": {
+            "chunked": 0,
+            "content_length": 1,
+            "none": 0
+          },
+          "header_names": [
+            "accept",
+            "authorization",
+            "content-length",
+            "content-type",
+            "host",
+            "originator",
+            "session-id",
+            "thread-id",
+            "user-agent",
+            "x-client-request-id",
+            "x-codex-beta-features",
+            "x-codex-turn-metadata",
+            "x-codex-window-id"
+          ],
+          "requests": 1,
+          "response_statuses": {
+            "200": 1
+          },
+          "upgrade_requests": 0,
+          "websocket_extensions_offered": []
+        }
+      },
+      "probe": "codex-long",
+      "requests": 1,
+      "seconds": 0.2,
+      "status": "ok",
+      "verifies": [
+        "V3",
+        "V7",
+        "T10"
+      ]
+    },
+    {
+      "agent": "codex",
+      "agent_version": "codex-cli 0.163.0",
+      "exit_code": 1,
+      "observations": {
+        "event_types": [
+          "error",
+          "item.completed",
+          "thread.started",
+          "turn.failed",
+          "turn.started"
+        ],
+        "message_shown_in_events": true,
+        "message_shown_on_stderr": false,
+        "model_requests": 1,
+        "statuses": {
+          "400": 1
+        },
+        "timed_out": false
+      },
+      "probe": "codex-block-400",
+      "requests": 1,
+      "seconds": 0.1,
+      "status": "exit 1",
+      "verifies": [
+        "T3"
+      ]
+    },
+    {
+      "agent": "codex",
+      "agent_version": "codex-cli 0.163.0",
+      "exit_code": 0,
+      "observations": {
+        "model_request": {
+          "body_statuses": [
+            "ok"
+          ],
+          "content_encodings": [
+            "none"
+          ],
+          "count": 1,
+          "credential_header_names": [
+            "authorization",
+            "chatgpt-account-id",
+            "session-id"
+          ]
+        },
+        "transport": {
+          "by_route": {
+            "models": 2,
+            "openai.responses": 1,
+            "unknown": 3
+          },
+          "content_encodings": {
+            "none": 6
+          },
+          "endpoints": [
+            "GET /backend-api/wham/accounts/check",
+            "GET /backend-api/wham/settings/user",
+            "GET /v1/models",
+            "POST /v1/responses"
+          ],
+          "framing": {
+            "chunked": 0,
+            "content_length": 1,
+            "none": 5
+          },
+          "header_names": [
+            "accept",
+            "authorization",
+            "cache-control",
+            "chatgpt-account-id",
+            "content-length",
+            "content-type",
+            "host",
+            "originator",
+            "session-id",
+            "thread-id",
+            "user-agent",
+            "x-client-request-id",
+            "x-codex-beta-features",
+            "x-codex-turn-metadata",
+            "x-codex-window-id"
+          ],
+          "requests": 6,
+          "response_statuses": {
+            "200": 3,
+            "404": 3
+          },
+          "upgrade_requests": 0,
+          "websocket_extensions_offered": []
+        }
+      },
+      "probe": "codex-chatgpt-route-a",
+      "requests": 6,
+      "seconds": 0.1,
+      "status": "ok",
+      "verifies": [
+        "T5"
+      ]
+    },
+    {
+      "agent": "codex",
+      "agent_version": "codex-cli 0.163.0",
+      "exit_code": 0,
+      "observations": {
+        "model_request": {
+          "body_statuses": [
+            "ok"
+          ],
+          "content_encodings": [
+            "none"
+          ],
+          "count": 1,
+          "credential_header_names": [
+            "authorization",
+            "session-id"
+          ]
+        },
+        "model_request_sequence": [
+          "GET /v1/responses -> 426",
+          "POST /v1/responses -> 200"
+        ],
+        "stderr_mentions_426": true,
+        "stderr_mentions_websocket": true,
+        "transport": {
+          "by_route": {
+            "openai.responses": 1,
+            "websocket-upgrade": 1
+          },
+          "content_encodings": {
+            "none": 2
+          },
+          "endpoints": [
+            "GET /v1/responses",
+            "POST /v1/responses"
+          ],
+          "framing": {
+            "chunked": 0,
+            "content_length": 1,
+            "none": 1
+          },
+          "header_names": [
+            "accept",
+            "authorization",
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "openai-beta",
+            "originator",
+            "sec-websocket-extensions",
+            "sec-websocket-key",
+            "sec-websocket-version",
+            "session-id",
+            "thread-id",
+            "upgrade",
+            "user-agent",
+            "version",
+            "x-client-request-id",
+            "x-codex-beta-features",
+            "x-codex-turn-metadata",
+            "x-codex-window-id"
+          ],
+          "requests": 2,
+          "response_statuses": {
+            "200": 1,
+            "426": 1
+          },
+          "upgrade_requests": 1,
+          "websocket_extensions_offered": [
+            "permessage-deflate; client_max_window_bits"
+          ]
+        },
+        "turn_completed": true
+      },
+      "probe": "codex-route-b-apikey",
+      "requests": 2,
+      "seconds": 0.2,
+      "status": "ok",
+      "verifies": [
+        "T6"
+      ]
+    },
+    {
+      "agent": "codex",
+      "agent_version": "codex-cli 0.163.0",
+      "exit_code": 0,
+      "observations": {
+        "model_request": {
+          "body_statuses": [
+            "ok"
+          ],
+          "content_encodings": [
+            "zstd"
+          ],
+          "count": 1,
+          "credential_header_names": [
+            "authorization",
+            "chatgpt-account-id",
+            "session-id"
+          ]
+        },
+        "model_request_sequence": [
+          "GET /v1/responses -> 426",
+          "POST /v1/responses -> 200"
+        ],
+        "stderr_mentions_426": true,
+        "stderr_mentions_websocket": true,
+        "transport": {
+          "by_route": {
+            "models": 3,
+            "openai.responses": 1,
+            "unknown": 3,
+            "websocket-upgrade": 1
+          },
+          "content_encodings": {
+            "none": 7,
+            "zstd": 1
+          },
+          "endpoints": [
+            "GET /backend-api/wham/accounts/check",
+            "GET /backend-api/wham/settings/user",
+            "GET /v1/models",
+            "GET /v1/responses",
+            "POST /v1/responses"
+          ],
+          "framing": {
+            "chunked": 0,
+            "content_length": 1,
+            "none": 7
+          },
+          "header_names": [
+            "accept",
+            "authorization",
+            "cache-control",
+            "chatgpt-account-id",
+            "connection",
+            "content-encoding",
+            "content-length",
+            "content-type",
+            "host",
+            "openai-beta",
+            "originator",
+            "sec-websocket-extensions",
+            "sec-websocket-key",
+            "sec-websocket-version",
+            "session-id",
+            "thread-id",
+            "upgrade",
+            "user-agent",
+            "version",
+            "x-client-request-id",
+            "x-codex-beta-features",
+            "x-codex-routing-hint",
+            "x-codex-turn-metadata",
+            "x-codex-window-id"
+          ],
+          "requests": 8,
+          "response_statuses": {
+            "200": 4,
+            "404": 3,
+            "426": 1
+          },
+          "upgrade_requests": 1,
+          "websocket_extensions_offered": [
+            "permessage-deflate; client_max_window_bits"
+          ]
+        },
+        "turn_completed": true
+      },
+      "probe": "codex-route-b-chatgpt",
+      "requests": 8,
+      "seconds": 0.2,
+      "status": "ok",
+      "verifies": [
+        "T6",
+        "T7"
+      ]
+    },
+    {
+      "agent": "codex",
+      "agent_version": "codex-cli 0.163.0",
+      "exit_code": null,
+      "observations": {
+        "compaction_endpoint": [
+          "POST /v1/responses"
+        ],
+        "compaction_request_tools": [
+          0
+        ],
+        "compaction_requests": 288,
+        "non_responses_paths": [],
+        "note": "the mock's usage numbers never shrink, so Codex compacts in a loop until the probe kills it",
+        "request_kinds": {
+          "compaction": 288,
+          "turn": 289
+        },
+        "requests_before_the_kill": 577,
+        "results_seen": 1,
+        "turn_completed": false
+      },
+      "probe": "codex-compaction",
+      "requests": 577,
+      "seconds": 15.0,
+      "status": "timeout",
+      "verifies": [
+        "T9"
+      ]
+    }
+  ],
+  "python": "3.12.12",
+  "run_id": "20261019T175710Z-g2",
+  "seed": 0,
+  "started_utc": "2026-10-19T17:57:35+00:00"
+}

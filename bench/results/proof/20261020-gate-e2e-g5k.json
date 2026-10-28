@@ -1,0 +1,839 @@
+{
+  "e2e_version": "1",
+  "isolation": {
+    "method": "throwaway HOME and CODEX_HOME, from-scratch environment, fake API keys, loopback gate and mock, paths.home pinned by bootstrap",
+    "real_home_changed": [],
+    "real_home_paths_snapshotted": 9
+  },
+  "run_id": "20261020-gate-e2e-g5k",
+  "scenarios": [
+    {
+      "agent": "claude",
+      "block_message_shown": false,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 3
+        },
+        "by_reason": {},
+        "by_route": {
+          "anthropic.messages": 3
+        },
+        "lines": 3,
+        "media": {
+          "image/png": 2
+        },
+        "upstream_reused": 2
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 3,
+      "mock_requests": 3,
+      "model_paths": {},
+      "placeholders": {
+        "by_type": {
+          "generic": 1
+        },
+        "total": 1
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 2,
+        "payloads": 2
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "received_in_base64": {
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "default",
+      "scenario": "claude-media-gate",
+      "sec10_refusals": 0,
+      "seconds": 0.7,
+      "status": "ok",
+      "tool_results_seen": 2,
+      "tool_results_with_placeholder": 1,
+      "version": "2.1.304 (Claude Code)"
+    },
+    {
+      "agent": "claude",
+      "block_message_shown": null,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 3
+        },
+        "by_reason": {},
+        "by_route": {
+          "anthropic.messages": 3
+        },
+        "lines": 3,
+        "media": {},
+        "upstream_reused": 2
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 3,
+      "mock_requests": 3,
+      "model_paths": {},
+      "placeholders": {
+        "by_type": {},
+        "total": 0
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 2,
+        "payloads": 2
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "received_in_base64": {
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "passthrough",
+      "scenario": "claude-media-gate-off-control",
+      "sec10_refusals": 0,
+      "seconds": 0.3,
+      "status": "ok",
+      "tool_results_seen": 2,
+      "tool_results_with_placeholder": 0,
+      "version": "2.1.304 (Claude Code)"
+    },
+    {
+      "agent": "codex",
+      "block_message_shown": false,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 3
+        },
+        "by_reason": {},
+        "by_route": {
+          "openai.responses": 3
+        },
+        "lines": 3,
+        "media": {
+          "image/png": 2
+        },
+        "upstream_reused": 2
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 3,
+      "mock_requests": 3,
+      "model_paths": {
+        "/v1/responses": 3
+      },
+      "placeholders": {
+        "by_type": {
+          "generic": 1
+        },
+        "total": 1
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 2,
+        "payloads": 2
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "received_in_base64": {
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "default",
+      "scenario": "codex-media-gate",
+      "sec10_refusals": 0,
+      "seconds": 0.4,
+      "status": "ok",
+      "tool_results_seen": 2,
+      "tool_results_with_placeholder": 0,
+      "version": "codex-cli 0.163.0"
+    },
+    {
+      "agent": "codex",
+      "block_message_shown": null,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 3
+        },
+        "by_reason": {},
+        "by_route": {
+          "openai.responses": 3
+        },
+        "lines": 3,
+        "media": {},
+        "upstream_reused": 2
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 3,
+      "mock_requests": 3,
+      "model_paths": {
+        "/v1/responses": 3
+      },
+      "placeholders": {
+        "by_type": {},
+        "total": 0
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 2,
+        "payloads": 2
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "received_in_base64": {
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "passthrough",
+      "scenario": "codex-media-gate-off-control",
+      "sec10_refusals": 0,
+      "seconds": 0.1,
+      "status": "ok",
+      "tool_results_seen": 2,
+      "tool_results_with_placeholder": 0,
+      "version": "codex-cli 0.163.0"
+    },
+    {
+      "agent": "claude",
+      "block_message_shown": false,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 4
+        },
+        "by_reason": {},
+        "by_route": {
+          "anthropic.messages": 4
+        },
+        "lines": 4,
+        "media": {
+          "image/png": 3
+        },
+        "upstream_reused": 3
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 4,
+      "mock_requests": 4,
+      "model_paths": {},
+      "placeholders": {
+        "by_type": {
+          "generic": 1
+        },
+        "total": 1
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 3,
+        "payloads": 3
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "received_in_base64": {
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "default",
+      "scenario": "claude-mcp-gate",
+      "sec10_refusals": 0,
+      "seconds": 0.4,
+      "status": "ok",
+      "tool_results_seen": 3,
+      "tool_results_with_placeholder": 0,
+      "version": "2.1.304 (Claude Code)"
+    },
+    {
+      "agent": "claude",
+      "block_message_shown": null,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 4
+        },
+        "by_reason": {},
+        "by_route": {
+          "anthropic.messages": 4
+        },
+        "lines": 4,
+        "media": {},
+        "upstream_reused": 3
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 4,
+      "mock_requests": 4,
+      "model_paths": {},
+      "placeholders": {
+        "by_type": {},
+        "total": 0
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 3,
+        "payloads": 3
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "received_in_base64": {
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "passthrough",
+      "scenario": "claude-mcp-gate-off-control",
+      "sec10_refusals": 0,
+      "seconds": 0.3,
+      "status": "ok",
+      "tool_results_seen": 3,
+      "tool_results_with_placeholder": 0,
+      "version": "2.1.304 (Claude Code)"
+    },
+    {
+      "agent": "codex",
+      "block_message_shown": true,
+      "block_reason_shown": "HARPO-BLOCK-ENCODED-SECRET",
+      "exit_code": 1,
+      "gate_log": {
+        "by_decision": {
+          "blocked": 1,
+          "forwarded": 3
+        },
+        "by_reason": {
+          "HARPO-BLOCK-ENCODED-SECRET": 1
+        },
+        "by_route": {
+          "openai.responses": 4
+        },
+        "lines": 4,
+        "media": {
+          "image/png": 2
+        },
+        "upstream_reused": 2
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 3,
+      "mock_requests": 3,
+      "model_paths": {
+        "/v1/responses": 3
+      },
+      "placeholders": {
+        "by_type": {
+          "generic": 1
+        },
+        "total": 1
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 2,
+        "payloads": 2
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "received_in_base64": {
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "default",
+      "scenario": "codex-mcp-gate",
+      "sec10_refusals": 0,
+      "seconds": 0.2,
+      "status": "ok",
+      "tool_results_seen": 2,
+      "tool_results_with_placeholder": 0,
+      "version": "codex-cli 0.163.0"
+    },
+    {
+      "agent": "codex",
+      "block_message_shown": null,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 4
+        },
+        "by_reason": {},
+        "by_route": {
+          "openai.responses": 4
+        },
+        "lines": 4,
+        "media": {},
+        "upstream_reused": 3
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 4,
+      "mock_requests": 4,
+      "model_paths": {
+        "/v1/responses": 4
+      },
+      "placeholders": {
+        "by_type": {},
+        "total": 0
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 3,
+        "payloads": 3
+      },
+      "received": {
+        "by_class": {
+          "known-format": 1,
+          "ml-only": 0
+        },
+        "by_kind": {
+          "openai_key": 1
+        },
+        "known_format": 1,
+        "total": 1
+      },
+      "received_in_base64": {
+        "known_format": 3,
+        "total": 5
+      },
+      "record": "none",
+      "scan": "passthrough",
+      "scenario": "codex-mcp-gate-off-control",
+      "sec10_refusals": 0,
+      "seconds": 0.1,
+      "status": "ok",
+      "tool_results_seen": 3,
+      "tool_results_with_placeholder": 0,
+      "version": "codex-cli 0.163.0"
+    },
+    {
+      "agent": "codex",
+      "block_message_shown": null,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 6
+        },
+        "by_reason": {},
+        "by_route": {
+          "openai.models": 2,
+          "openai.responses": 4
+        },
+        "lines": 6,
+        "media": {},
+        "upstream_reused": 5
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 4,
+      "mock_requests": 9,
+      "model_paths": {
+        "/backend-api/codex/responses": 4
+      },
+      "placeholders": {
+        "by_type": {
+          "api_token": 6,
+          "cloud_key": 1,
+          "db_credential": 1,
+          "generic": 2
+        },
+        "total": 10
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 0,
+        "payloads": 0
+      },
+      "received": {
+        "by_class": {
+          "known-format": 0,
+          "ml-only": 0
+        },
+        "by_kind": {},
+        "known_format": 0,
+        "total": 0
+      },
+      "received_in_base64": {
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "default",
+      "scenario": "codex-chatgpt-gate",
+      "sec10_refusals": 0,
+      "seconds": 0.3,
+      "status": "ok",
+      "tool_results_seen": 3,
+      "tool_results_with_placeholder": 3,
+      "version": "codex-cli 0.163.0"
+    },
+    {
+      "agent": "codex",
+      "block_message_shown": null,
+      "block_reason_shown": null,
+      "exit_code": 0,
+      "gate_log": {
+        "by_decision": {
+          "forwarded": 6
+        },
+        "by_reason": {},
+        "by_route": {
+          "openai.models": 2,
+          "openai.responses": 4
+        },
+        "lines": 6,
+        "media": {},
+        "upstream_reused": 4
+      },
+      "hook_installed": false,
+      "install": "none (control run)",
+      "mock_model_requests": 4,
+      "mock_requests": 9,
+      "model_paths": {
+        "/backend-api/codex/responses": 4
+      },
+      "placeholders": {
+        "by_type": {},
+        "total": 0
+      },
+      "planted": {
+        "by_class": {
+          "known-format": 11,
+          "ml-only": 4
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "gcp_api_key": 1,
+          "github_token": 1,
+          "jwt": 1,
+          "npm_token": 1,
+          "openai_key": 1,
+          "postgres_password": 1,
+          "private_key": 1,
+          "sendgrid_key": 1,
+          "slack_token": 1,
+          "stripe_key": 1,
+          "twilio_auth_token": 1
+        },
+        "total": 15
+      },
+      "png": {
+        "identical": 0,
+        "payloads": 0
+      },
+      "received": {
+        "by_class": {
+          "known-format": 5,
+          "ml-only": 3
+        },
+        "by_kind": {
+          "aws_access_key_id": 1,
+          "aws_secret_access_key": 1,
+          "db_password": 1,
+          "db_url": 1,
+          "github_token": 1,
+          "openai_key": 1,
+          "slack_token": 1,
+          "twilio_auth_token": 1
+        },
+        "known_format": 5,
+        "total": 8
+      },
+      "received_in_base64": {
+        "known_format": 0,
+        "total": 0
+      },
+      "record": "none",
+      "scan": "passthrough",
+      "scenario": "codex-chatgpt-gate-off-control",
+      "sec10_refusals": 0,
+      "seconds": 0.3,
+      "status": "ok",
+      "tool_results_seen": 3,
+      "tool_results_with_placeholder": 0,
+      "version": "codex-cli 0.163.0"
+    }
+  ],
+  "seed": 0,
+  "started_utc": "2026-10-21T06:25:14+00:00",
+  "suite": "g5",
+  "target": "gate -> mock",
+  "versions": {
+    "claude": "2.1.304 (Claude Code)",
+    "codex": "codex-cli 0.163.0",
+    "python": "3.12.12"
+  }
+}

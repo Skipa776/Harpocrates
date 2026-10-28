@@ -1,5 +1,5 @@
 """
-Harpocrates detectors package.
+Harpo detectors package.
 
 Provides regex pattern matching and entropy-based secret detection.
 """  # noqa: N999

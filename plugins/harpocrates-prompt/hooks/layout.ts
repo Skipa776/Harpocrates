@@ -13,7 +13,7 @@ import { cellWidth, truncateLeft, truncateRight, widthOf } from './width'
 export const MAX_ROWS = 13
 export const ROW_COLUMNS = 40
 
-export const TITLE = '🔒 Harpocrates'
+export const TITLE = '🔒 Harpo'
 export const SUBTITLE = ' — edit without secret protection'
 export const SUBAGENT = ' · from a subagent'
 export const NOTE =

@@ -1,0 +1,64 @@
+{
+  "requirement": "FR-GATE-11",
+  "min_run": 24,
+  "counts": {
+    "requests": 1038,
+    "runs": 26024,
+    "text_decodings": 13,
+    "not_walkable": 7,
+    "duplicates": 53
+  },
+  "would_block": [
+    {
+      "recording": "20261020-gate-e2e-g5f/codex-mcp-gate-off-control",
+      "index": 3,
+      "route": "openai.responses",
+      "path": [
+        "input",
+        "9",
+        "output",
+        "1"
+      ],
+      "types": [
+        "api_token",
+        "cloud_key",
+        "db_credential"
+      ],
+      "decoded_chars": 258
+    },
+    {
+      "recording": "20261020-gate-e2e-g5g/codex-mcp-gate-off-control",
+      "index": 3,
+      "route": "openai.responses",
+      "path": [
+        "input",
+        "9",
+        "output",
+        "1"
+      ],
+      "types": [
+        "api_token",
+        "cloud_key",
+        "db_credential"
+      ],
+      "decoded_chars": 258
+    },
+    {
+      "recording": "20261020-gate-e2e-g5h/codex-mcp-gate-off-control",
+      "index": 3,
+      "route": "openai.responses",
+      "path": [
+        "input",
+        "9",
+        "output",
+        "1"
+      ],
+      "types": [
+        "api_token",
+        "cloud_key",
+        "db_credential"
+      ],
+      "decoded_chars": 258
+    }
+  ]
+}

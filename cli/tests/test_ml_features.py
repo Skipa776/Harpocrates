@@ -6,7 +6,7 @@ from Harpocrates.core.result import EvidenceType, Finding
 from Harpocrates.ml.context import (
     CodeContext,
     extract_context,
-    extract_var_name,
+    feature_var_name,
     is_comment_line,
     is_test_file,
 )
@@ -26,25 +26,25 @@ class TestVarNameExtraction:
     def test_python_assignment(self):
         """Test extracting variable name from Python assignment."""
         line = 'api_key = "sk-abc123"'
-        result = extract_var_name(line, "sk-abc123")
+        result = feature_var_name(line, "sk-abc123")
         assert result == "api_key"
 
     def test_js_const_assignment(self):
         """Test extracting variable name from JavaScript const."""
         line = 'const secretKey = "ghp_abc123";'
-        result = extract_var_name(line, "ghp_abc123")
+        result = feature_var_name(line, "ghp_abc123")
         assert result == "secretKey"
 
     def test_json_key(self):
         """Test extracting key from JSON-style assignment."""
         line = '"api_key": "AKIAIOSFODNN7EXAMPLE"'
-        result = extract_var_name(line, "AKIAIOSFODNN7EXAMPLE")
+        result = feature_var_name(line, "AKIAIOSFODNN7EXAMPLE")
         assert result == "api_key"
 
     def test_env_file(self):
         """Test extracting variable from .env file."""
         line = "AWS_SECRET_KEY=wJalrXUtnFEMI/K7MDENG"
-        result = extract_var_name(line, "wJalrXUtnFEMI/K7MDENG")
+        result = feature_var_name(line, "wJalrXUtnFEMI/K7MDENG")
         assert result == "AWS_SECRET_KEY"
 
     def test_no_variable_name(self):
@@ -52,7 +52,7 @@ class TestVarNameExtraction:
         line = 'print("ghp_abc123")'
         # May or may not find a variable name depending on patterns
         # The token is in the line but not in assignment form
-        _ = extract_var_name(line, "ghp_abc123")
+        _ = feature_var_name(line, "ghp_abc123")
 
 
 class TestContextExtraction:

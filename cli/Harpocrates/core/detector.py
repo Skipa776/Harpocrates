@@ -1,5 +1,5 @@
 """
-Core detection engine for Harpocrates.
+Core detection engine for Harpo.
 
 Three-phase pipeline per line:
   1. CRITICAL regex  → Finding(CRITICAL, confidence=0.99) — skips ML
@@ -8,23 +8,30 @@ Three-phase pipeline per line:
 
 Regex hits bypass XGBoost entirely; only entropy candidates are forwarded
 to the ML verifier. This keeps the fast path deterministic and CPU-free.
+
+The rules run in Rust when the optional `harpo_native` extension is installed and has the same rules
+(`rule_patterns()`); otherwise in Python, in `_python_scan_line`. HARPO_NATIVE=0 forces Python.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import functools
+import json
 import re
+from collections.abc import Sequence as SequenceABC
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
+from Harpocrates import envvars
+from Harpocrates.core import classification
 from Harpocrates.core.classification import extract_var_name, infer_category
 from Harpocrates.core.result import EvidenceType, Finding, Severity
 from Harpocrates.detectors.entropy_detector import looks_like_secret, shannon_entropy
 from Harpocrates.detectors.path_tokens import benign_path_token
 from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNATURES
 from Harpocrates.ml.context import HIGH_RISK_EXTENSIONS, LOW_NOISE_EXTENSIONS
-from Harpocrates.utils.file_utils import iter_text_lines
+from Harpocrates.utils.file_utils import MEMORY_CAP, PIECE_OVERLAP, iter_line_pieces
 
 if TYPE_CHECKING:
     from Harpocrates.core.classification import CategoryInference
@@ -33,7 +40,11 @@ if TYPE_CHECKING:
 
 
 class MLVerificationError(RuntimeError):
-    """Raised when an explicitly requested ML verification cannot complete."""
+    """
+    Description: Represent failure to complete explicitly requested ML verification.
+    Parameters: None
+    Output: A RuntimeError subtype raised for verifier failures or result-count mismatches.
+    """
 
 
 _ML_VERIFICATION_BATCH_SIZE = 1024
@@ -60,8 +71,8 @@ _PEM_BODY_RE = re.compile(r"^[A-Za-z0-9+/]{64}$")
 # Single `*` catches continuation lines inside /* */ blocks.
 _COMMENT_PREFIXES = ("#", "//", "/*", "*", "<!--", "--")
 _COMMENT_STRIP_RE = re.compile(r"^(?:#+|//+|/\*+|\*+|<!--|--)\s*")
-# Arch override 2026-05-06: compiled regex replaces any() generator for the
-# prose-comment fast-path. ~10x faster on heavily-commented files.
+# The prose-comment fast path: one compiled regex, about 10x faster than any() over the characters on heavily
+# commented files.
 _PROSE_FILTER_RE = re.compile(r"[=:'\"]")
 
 # Phase 2b: sensitive-variable assignment bypass — forwards low-entropy literals
@@ -123,19 +134,38 @@ _LETTER_RUN_RE = re.compile(r"[A-Za-z]{5,}")
 
 
 def _random_url_piece(value: str) -> bool:
+    """
+    Description: Identify random-looking URL pieces for ML candidate extraction.
+    Parameters:
+        value: Candidate value to inspect.
+    Output: True for password-shaped pieces at least 16 characters long that are neither joined
+        words nor UUIDs.
+    """
     return (len(value) >= 16 and _password_shaped(value) and not _WORDS_JOINED_RE.fullmatch(value)
             and not _UUID_RE.fullmatch(value))
 
 
 def _symbol_soup(value: str) -> bool:
-    """Random punctuation-heavy secret: >= 3 distinct unusual symbols, letters and digits, and no
-    word-like letter run (code and prose have long letter runs; random strings don't)."""
+    """
+    Description: Identify punctuation-heavy random values while rejecting word-like text and URLs. Code and prose have
+        long letter runs that random strings lack.
+    Parameters:
+        value: Candidate value to inspect.
+    Output: True for at least three distinct unusual symbols, three letters, a digit, no five-letter
+        run, and no URL scheme; otherwise False.
+    """
     return (len(_SOUP_SYMBOLS & set(value)) >= 3 and sum(c.isalpha() for c in value) >= 3
             and any(c.isdigit() for c in value) and not _LETTER_RUN_RE.search(value)
             and "://" not in value)
 
 
 def _url_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
+    """
+    Description: Extract userinfo keys and random-looking URL path/query pieces with source offsets.
+    Parameters:
+        scan_target: Source text whose character coordinates identify candidates.
+    Output: List of candidate text and inclusive-start/exclusive-end offsets in scan_target.
+    """
     out = []
     for url in _URL_IN_LINE_RE.finditer(scan_target):
         rest = url.start() + url.group().index("://") + 3
@@ -158,6 +188,14 @@ def _url_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
 
 
 def _password_shaped(value: str) -> bool:
+    """
+    Description: Check letter/digit combinations for password-like structure to admit low-entropy
+        candidates.
+    Parameters:
+        value: Candidate value to inspect.
+    Output: True when letters and digits accompany uppercase, a password symbol, or at least three
+        letters and two digits; otherwise False.
+    """
     letters = sum(c.isalpha() for c in value)
     digits = sum(c.isdigit() for c in value)
     if not letters or not digits:
@@ -168,7 +206,13 @@ def _password_shaped(value: str) -> bool:
 
 
 def _structured_candidates(scan_target: str) -> List[Tuple[str, int, int]]:
-    """(value, start, end) for Phase 2d shapes, in scan_target coordinates."""
+    """
+    Description: Collect Phase 2d credential shapes that ordinary entropy tokenization can miss.
+    Parameters:
+        scan_target: Source text whose character coordinates identify candidates.
+    Output: List of value/start/end tuples in scan_target coordinates; may include overlapping or
+        repeated candidates.
+    """
     out = [(m.group(), m.start(), m.end()) for m in _CONN_URI_RE.finditer(scan_target)] if "://" in scan_target else []
     for pattern in (_KV_PASSWORD_RE, _URL_TOKEN_RE, _HEX_SECRET_RE):
         for m in pattern.finditer(scan_target):
@@ -192,7 +236,14 @@ _CONTEXT_WINDOW = 256
 
 @functools.lru_cache(maxsize=512)
 def _file_ext(file: str) -> str:
-    """File extension used for risk routing, computed once per file instead of once per line."""
+    """
+    Description: Derive and cache a lowercase file extension for risk routing, recognizing dotted
+        .env variants. It is computed once per file instead of once per line.
+    Parameters:
+        file: Optional source file path.
+    Output: Extension string, including .env for supported dotenv names; updates the bounded LRU
+        cache.
+    """
     ext = Path(file).suffix.lower()
     if not ext or ext not in HIGH_RISK_EXTENSIONS:
         basename = Path(file).name.lower()
@@ -202,7 +253,13 @@ def _file_ext(file: str) -> str:
 
 
 def _calculate_entropy_confidence(entropy_val: Optional[float]) -> float:
-    """Map entropy 4.0–5.5 linearly to confidence 0.6–0.8."""
+    """
+    Description: Map entropy 4.0–5.5 linearly to confidence 0.6–0.8.
+    Parameters:
+        entropy_val: Optional Shannon entropy value.
+    Output: Confidence from 0.6 to 0.8; missing or sub-4.0 entropy gives 0.6, and entropy at least
+        5.5 gives 0.8.
+    """
     if entropy_val is None:
         return 0.6
     if entropy_val >= 5.5:
@@ -213,12 +270,13 @@ def _calculate_entropy_confidence(entropy_val: Optional[float]) -> float:
 
 
 def _severity_from_entropy(inference: "CategoryInference") -> Severity:
-    """Severity for entropy-stage findings (before ML verification, if any).
-
-    Delegates to _severity_from_classification without ml_confidence so strong
-    heuristic signals (e.g., PASSWORD 0.90, JWT 0.85) reach HIGH without
-    requiring ML confirmation.  ML verification can still upgrade MEDIUM→HIGH
-    via ml_confidence when the verifier runs.
+    """
+    Description: Assign pre-ML severity for entropy-stage findings, so strong heuristics such as
+        PASSWORD 0.90 or JWT 0.85 can reach HIGH without ML confirmation.
+    Parameters:
+        inference: Category inference and classification confidence.
+    Output: Severity.INFO, MEDIUM, or HIGH; delegates to _severity_from_classification without an ML
+        confidence. ML verification can still upgrade MEDIUM to HIGH when it runs.
     """
     return _severity_from_classification(inference)
 
@@ -228,18 +286,14 @@ def _severity_from_classification(
     ml_confidence: Optional[float] = None,
 ) -> Severity:
     """
-    Map (category, classification confidence, optional ML confidence) → Severity.
-
-    Banding:
-      INFO   — no/weak signal (cat_conf < 0.5, or GENERIC_SECRET with cat_conf < 0.7)
-      MEDIUM — moderate signal (specific category cat_conf in [0.70, 0.85), or
-               GENERIC_SECRET with cat_conf >= 0.70)
-      HIGH   — strong signal (specific category cat_conf >= 0.85, or ml_confidence
-               >= 0.85 with any non-generic category)
-
-    CRITICAL is intentionally NOT reachable here. Regex tier owns CRITICAL
-    (deterministic format + 0.99 confidence). Heuristic+ML cannot make that
-    claim; HIGH is the ceiling for entropy/ML paths.
+    Description: Map category and optional ML confidence into severity bands with HIGH as the heuristic
+        ceiling. The regex tier owns CRITICAL (deterministic format, 0.99 confidence), so heuristic and
+        ML paths cannot claim it.
+    Parameters:
+        inference: Category inference and classification confidence.
+        ml_confidence: Optional model confidence for severity promotion.
+    Output: Severity.INFO, MEDIUM, or HIGH, never CRITICAL; weak category confidence below 0.5 is
+        INFO before any ML promotion.
     """
     from Harpocrates.core.classification import ViolationCategory
 
@@ -268,82 +322,237 @@ def _severity_from_classification(
     return Severity.INFO
 
 
-def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
+def _scan_target(line: str) -> Tuple[str, str, bool]:
     """
-    Scan one line through all three detection phases.
+    Description: What the line scan matches against: the stripped line, without a comment prefix.
+    Parameters:
+        line: the source line.
+    Output: (stripped line, scan target, whether the line is a comment). The target is a suffix of the stripped line,
+        so token offsets count from where it starts. A PEM header's five hyphens are not an SQL comment.
+    """
+    stripped = line.strip()
+    is_comment = not stripped.startswith("-----BEGIN ") and stripped.startswith(_COMMENT_PREFIXES)
+    return stripped, _COMMENT_STRIP_RE.sub("", stripped) if is_comment else stripped, is_comment
 
-    Returns findings ordered: CRITICAL regex → HIGH regex → entropy.
-    Entropy phase is skipped if any regex hit is found on the line.
+
+def _line_base(line: str) -> Tuple[int, bool]:
+    """
+    Description: Where token offsets of a line count from, for the later pieces of a long line (FR-CORE-05).
+    Parameters:
+        line: the line, or its first piece.
+    Output: (characters dropped before the scan target, whether the line is a comment).
+    """
+    stripped, target, is_comment = _scan_target(line)
+    return len(line) - len(line.lstrip()) + len(stripped) - len(target), is_comment
+
+
+def _assigned_name(text: str, value_start: int) -> Optional[str]:
+    """
+    Description: Name the variable an assignment match assigns to.
+    Parameters:
+        text: the scanned text.
+        value_start: where the assigned value starts in text.
+    Output: Everything left of the value, cut at the first = or :, stripped; None when that is empty.
+    """
+    return text[:value_start].split("=")[0].split(":")[0].strip() or None
+
+
+# The names, in order, of the patterns and constants the line scan uses besides the signatures (rule_patterns).
+_RULE_NAMES = (
+    "_TOKEN_RE", "_URL_RE", "_PEM_BODY_RE", "_COMMENT_STRIP_RE", "_PROSE_FILTER_RE", "_SENSITIVE_ASSIGNMENT_RE",
+    "_ENV_ASSIGNMENT_RE", "_CONN_URI_RE", "_KV_PASSWORD_RE", "_COLON_CREDENTIAL_RE", "_URL_TOKEN_RE", "_HEX_SECRET_RE",
+    "_QUOTED_LITERAL_RE", "_BEARER_RE", "_HEADER_SECRET_RE", "_URL_IN_LINE_RE", "_URL_PIECE_RE", "_USERINFO_KEY_RE",
+    "_WORDS_JOINED_RE", "_UUID_RE", "_ASSIGNED_VALUE_RE", "_LETTER_RUN_RE",
+)
+_SYMBOL_SETS = ("_PASSWORD_SYMBOLS", "_SOUP_SYMBOLS")
+
+
+def rule_patterns() -> List[Tuple[str, str]]:
+    """
+    Description: List every pattern and constant the line scan uses, the way the Rust core lists its own
+        (`harpocrates-rust-scanner patterns`, `harpo_native.patterns()`), so the two can be compared.
+    Parameters: None
+    Output: (name, text) pairs: the signatures in tier order, then the other patterns, then the symbol sets (their
+        characters sorted), the URL trailing characters, and the two classifier windows.
+    """
+    out = [(name, pattern.pattern) for name, pattern in {**CRITICAL_SIGNATURES, **HIGH_SIGNATURES}.items()]
+    out += [(name, globals()[name].pattern) for name in _RULE_NAMES]
+    out += [(name, "".join(sorted(globals()[name]))) for name in _SYMBOL_SETS]
+    out += [("_URL_TRAILING", _URL_TRAILING), ("_VAR_NAME_WINDOW", str(classification._VAR_NAME_WINDOW)),
+            ("_SEGMENT_CAP", str(classification._SEGMENT_CAP))]
+    return out
+
+
+_UNSET = object()
+_native: object = _UNSET  # the harpo_native module, None for the Python rules, or _UNSET before the first line
+
+
+def _native_module():
+    """
+    Description: Find the Rust rules for this process, once.
+    Parameters: None
+    Output: The harpo_native module when it is installed, HARPO_NATIVE is not "0", it speaks the scanner protocol
+        and its rules are these (rule_patterns); otherwise None, and the Python rules run. Those are the same rules,
+        so a stale or missing build changes speed, not findings. The answer is kept in _native.
+    """
+    global _native
+    if _native is _UNSET:
+        _native = None
+        if envvars.getenv("NATIVE") != "0":
+            try:
+                import harpo_native
+            except ImportError:
+                harpo_native = None
+            from Harpocrates.core.rust_backend import PROTOCOL_VERSION
+            if harpo_native is not None and harpo_native.PROTOCOL_VERSION == PROTOCOL_VERSION:
+                native = [(name, "".join(sorted(text)) if name in _SYMBOL_SETS else text)
+                          for name, text in harpo_native.patterns()]
+                if native == rule_patterns():
+                    _native = harpo_native
+    return _native
+
+
+def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[bool] = None) -> List[Finding]:
+    """
+    Description: Scan one line through all three detection phases, in Rust when harpo_native is in use, else in
+        Python. Both give the same findings.
+    Parameters:
+        line: Source line to scan.
+        lineno: One-based source line number.
+        file: Optional source file path.
+        continued: For a later piece of a long line (FR-CORE-05), whether the line is a comment.
+    Output: The line's findings, as _python_scan_line describes them.
+    """
+    native = _native_module()
+    if native is None:
+        return _python_scan_line(line, lineno, file, continued)
+    raw = native.scan_line(line, lineno, _file_ext(file) if file is not None else "", continued)
+    return findings_from_raw(json.loads(raw), file=file) if raw else []
+
+
+def findings_from_raw(payload: List[dict], *, file: Optional[str]) -> List[Finding]:
+    """
+    Description: Turn the Rust core's raw findings into Findings, with the category and severity the Python line
+        scan gives: a signature alone, or the variable name and the context window around the token.
+    Parameters:
+        payload: Raw findings in the scanner protocol's finding format.
+        file: The file label for every finding.
+    Output: Findings in payload order. Raises ValueError naming the index of a malformed item.
+    """
+    findings = []
+    for index, raw in enumerate(payload):
+        try:
+            evidence = EvidenceType(str(raw["evidence"]))
+            kind = str(raw["type"])
+            token = str(raw["token"])
+            var_name = raw.get("var_name")
+            context = raw.get("context")
+            signature = kind if evidence == EvidenceType.REGEX and kind != "ENV_ASSIGNMENT" else None
+            inference = infer_category(
+                signature_name=signature,
+                var_name=str(var_name) if var_name else None,
+                token=token,
+                line=str(context) if signature is None and context else None,
+            )
+            if signature is not None:
+                severity, confidence = Severity(str(raw["severity"])), float(raw["confidence"])
+            elif kind == "ENV_ASSIGNMENT":
+                severity, confidence = _severity_from_classification(inference), inference.confidence
+            else:
+                severity, confidence = _severity_from_entropy(inference), float(raw["confidence"])
+            findings.append(Finding(
+                type=kind, file=file, line=int(raw["line"]), snippet=str(raw["snippet"]),
+                entropy=float(raw["entropy"]), evidence=evidence, severity=severity, confidence=confidence,
+                token=token, token_start=_optional_offset(raw.get("token_start")),
+                token_end=_optional_offset(raw.get("token_end")), in_comment=raw.get("in_comment"),
+                category=inference.category.value, category_reason=inference.reason,
+            ))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid Rust finding payload at index {index}") from exc
+    return findings
+
+
+def _optional_offset(value: object) -> Optional[int]:
+    """
+    Description: Read an optional character offset, refusing booleans.
+    Parameters:
+        value: An integer, an integer string, or None.
+    Output: The integer, or None. Raises TypeError for a boolean or another type, ValueError for a bad string.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise TypeError("expected an integer, string, or null")
+    return int(value)
+
+
+def _python_scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[bool] = None) -> List[Finding]:
+    """
+    Description: Scan one line through all three detection phases.
+    Parameters:
+        line: Source line to scan.
+        lineno: One-based source line number.
+        file: Optional source file path.
+        continued: For a later piece of a long line (FR-CORE-05), whether the line is a comment; the
+            piece is then scanned as it is, without stripping or comment detection, and offsets count
+            from the piece's start.
+    Output: Ordered regex findings or fallback entropy/structured candidates; empty list for blank or
+        excluded lines. Order is CRITICAL regex, then HIGH regex, then entropy; the entropy phase is
+        skipped when the line (or split piece) has any regex hit. Findings keep raw tokens and snippets
+        and may populate the file-extension cache.
     """
     findings: List[Finding] = []
-    stripped = line.strip()
+    if continued is None:
+        stripped, scan_target, is_comment = _scan_target(line)
+    else:
+        stripped = scan_target = line
+        is_comment = continued
 
     # Determine whether this file belongs to a credential-bearing extension set
     # (.env, .pem, .key, etc.) where URL bodies are credentials, not noise.
     # Also handles dotted-variant names like .env.local and .env.production.
     file_ext = _file_ext(file) if file is not None else ""
 
-    if not stripped:
+    if not stripped.strip():
         return findings
-
-    # Detect comment lines and strip the prefix so the payload can be scanned.
-    # PEM headers start with five hyphens and must not be treated as SQL comments.
-    is_comment = not stripped.startswith("-----BEGIN ") and stripped.startswith(_COMMENT_PREFIXES)
-    scan_target = _COMMENT_STRIP_RE.sub("", stripped) if is_comment else stripped
 
     in_comment = True if is_comment else None
 
-    # ------------------------------------------------------------------
-    # Phase 1a: CRITICAL regex — deterministic, no ML needed.
-    # ------------------------------------------------------------------
-    for sig_name, pattern in CRITICAL_SIGNATURES.items():
-        for match in pattern.finditer(scan_target):
-            token = match.group()
-            _inf = infer_category(signature_name=sig_name, var_name=None, token=token)
-            findings.append(
-                Finding(
-                    type=sig_name,
-                    file=file,
-                    line=lineno,
-                    snippet=stripped[:200],
-                    entropy=shannon_entropy(token) if token else 0.0,
-                    evidence=EvidenceType.REGEX,
-                    severity=Severity.CRITICAL,
-                    confidence=0.99,
-                    token=token,
-                    token_start=match.start(),
-                    token_end=match.end(),
-                    in_comment=in_comment,
-                    category=_inf.category.value,
-                    category_reason=_inf.reason,
-                )
-            )
+    def found(kind: str, token: str, evidence: EvidenceType, severity: Severity, confidence: float, inf,
+              start: Optional[int] = None, end: Optional[int] = None, entropy: Optional[float] = None) -> None:
+        """
+        Description: Add one finding on this line.
+        Parameters:
+            kind: the finding type, such as a signature name or ENTROPY_CANDIDATE.
+            token: the candidate value.
+            evidence: which phase found it.
+            severity: its severity.
+            confidence: its confidence before ML verification.
+            inf: the category inference for the token.
+            start, end: the token's offsets in the scanned text, when known.
+            entropy: the token's Shannon entropy, computed here when not given.
+        Output: None; appends to findings.
+        """
+        findings.append(Finding(
+            type=kind, file=file, line=lineno, snippet=stripped[:200],
+            entropy=shannon_entropy(token) if entropy is None else entropy,
+            evidence=evidence, severity=severity, confidence=confidence, token=token,
+            token_start=start, token_end=end, in_comment=in_comment,
+            category=inf.category.value, category_reason=inf.reason,
+        ))
 
     # ------------------------------------------------------------------
-    # Phase 1b: HIGH regex — also deterministic, also bypasses ML.
+    # Phase 1: CRITICAL, then HIGH regex: deterministic, no ML needed.
     # ------------------------------------------------------------------
-    for sig_name, pattern in HIGH_SIGNATURES.items():
-        for match in pattern.finditer(scan_target):
-            token = match.group()
-            _inf = infer_category(signature_name=sig_name, var_name=None, token=token)
-            findings.append(
-                Finding(
-                    type=sig_name,
-                    file=file,
-                    line=lineno,
-                    snippet=stripped[:200],
-                    entropy=shannon_entropy(token) if token else 0.0,
-                    evidence=EvidenceType.REGEX,
-                    severity=Severity.HIGH,
-                    confidence=0.95,
-                    token=token,
-                    token_start=match.start(),
-                    token_end=match.end(),
-                    in_comment=in_comment,
-                    category=_inf.category.value,
-                    category_reason=_inf.reason,
-                )
-            )
+    for signatures, severity, confidence in ((CRITICAL_SIGNATURES, Severity.CRITICAL, 0.99),
+                                             (HIGH_SIGNATURES, Severity.HIGH, 0.95)):
+        for sig_name, pattern in signatures.items():
+            for match in pattern.finditer(scan_target):
+                token = match.group()
+                _inf = infer_category(signature_name=sig_name, var_name=None, token=token)
+                found(sig_name, token, EvidenceType.REGEX, severity, confidence, _inf,
+                      start=match.start(), end=match.end(),
+                      entropy=shannon_entropy(token) if token else 0.0)
 
     # ------------------------------------------------------------------
     # Phase 2: Entropy fallback — only when regex found nothing.
@@ -376,65 +585,27 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
         else:
             scan_text = _URL_RE.sub(" ", scan_target)
 
-        # TODO(v0.3): switch to finditer to capture offsets → TokenMatch for entropy candidates.
-        # URL stripping does not preserve length so offsets would be scan_text-relative;
-        # re-derive against stripped once the ONNX is retrained on correct features.
+        # Entropy candidates carry no offsets: URL stripping changes lengths, so offsets would count from
+        # scan_text. The context step finds the token in the line instead.
         for token in _TOKEN_RE.findall(scan_text):
             if looks_like_secret(token):
                 ent = shannon_entropy(token)
                 _vn = extract_var_name(scan_target, token)
                 _inf = infer_category(signature_name=None, var_name=_vn, token=token, line=scan_target)
-                findings.append(
-                    Finding(
-                        type="ENTROPY_CANDIDATE",
-                        file=file,
-                        line=lineno,
-                        snippet=stripped[:200],
-                        entropy=ent,
-                        evidence=EvidenceType.ENTROPY,
-                        severity=_severity_from_entropy(_inf),
-                        confidence=_calculate_entropy_confidence(ent),
-                        token=token,
-                        in_comment=in_comment,
-                        category=_inf.category.value,
-                        category_reason=_inf.reason,
-                    )
-                )
+                found("ENTROPY_CANDIDATE", token, EvidenceType.ENTROPY, _severity_from_entropy(_inf),
+                      _calculate_entropy_confidence(ent), _inf, entropy=ent)
 
         found_tokens = {f.token for f in findings}
-        # NOTE(v0.3): token_start/token_end here are relative to scan_text
-        # (post-URL-strip, and for comment lines also post-prefix-strip). They
-        # are NOT relative to the original line. On comment lines the offset
-        # drift is: actual_start = token_start + len(comment_prefix_stripped).
-        # This is acceptable for v0.2.x — TokenMatch consumers in features.py
-        # still call line.find(token) and are not yet consuming these offsets.
-        # Fix alongside the v0.3 finditer migration.
+        # These offsets count from scan_text (after URL stripping and, on a comment line, after the prefix), not
+        # from the line. The context step checks them against the line and falls back to finding the token.
         for match in _SENSITIVE_ASSIGNMENT_RE.finditer(scan_text):
             value = match.group(1)
             if value not in found_tokens:
                 ent = shannon_entropy(value)
-                # var name: everything left of the value in the match, stripped
-                _vn = scan_text[: match.start(1)].split("=")[0].split(":")[0].strip()
-                _vn = _vn or None
+                _vn = _assigned_name(scan_text, match.start(1))
                 _inf = infer_category(signature_name=None, var_name=_vn, token=value, line=scan_target)
-                findings.append(
-                    Finding(
-                        type="ML_CANDIDATE",
-                        file=file,
-                        line=lineno,
-                        snippet=stripped[:200],
-                        entropy=ent,
-                        evidence=EvidenceType.ML,
-                        severity=_severity_from_entropy(_inf),
-                        confidence=0.5,
-                        token=value,
-                        token_start=match.start(1),
-                        token_end=match.end(1),
-                        in_comment=in_comment,
-                        category=_inf.category.value,
-                        category_reason=_inf.reason,
-                    )
-                )
+                found("ML_CANDIDATE", value, EvidenceType.ML, _severity_from_entropy(_inf), 0.5, _inf,
+                      start=match.start(1), end=match.end(1), entropy=ent)
                 found_tokens.add(value)
 
         # Phase 2d: structured credential shapes (see _structured_candidates).
@@ -443,24 +614,8 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                 continue
             _vn = extract_var_name(scan_target, value)
             _inf = infer_category(signature_name=None, var_name=_vn, token=value, line=scan_target)
-            findings.append(
-                Finding(
-                    type="ML_CANDIDATE",
-                    file=file,
-                    line=lineno,
-                    snippet=stripped[:200],
-                    entropy=shannon_entropy(value),
-                    evidence=EvidenceType.ML,
-                    severity=_severity_from_entropy(_inf),
-                    confidence=0.5,
-                    token=value,
-                    token_start=start,
-                    token_end=end,
-                    in_comment=in_comment,
-                    category=_inf.category.value,
-                    category_reason=_inf.reason,
-                )
-            )
+            found("ML_CANDIDATE", value, EvidenceType.ML, _severity_from_entropy(_inf), 0.5, _inf,
+                  start=start, end=end)
             found_tokens.add(value)
 
         # Phase 2c: unquoted KEY=VALUE for .env-style files. Runs on scan_text
@@ -473,38 +628,25 @@ def _scan_line(line: str, lineno: int, file: Optional[str]) -> List[Finding]:
                 value = match.group(1)
                 if value in found_tokens:
                     continue
-                _vn = scan_text[: match.start(1)].split("=")[0].split(":")[0].strip()
-                _vn = _vn or None
+                _vn = _assigned_name(scan_text, match.start(1))
                 _inf = infer_category(signature_name=None, var_name=_vn, token=value, line=scan_target)
-                findings.append(
-                    Finding(
-                        type="ENV_ASSIGNMENT",
-                        file=file,
-                        line=lineno,
-                        snippet=stripped[:200],
-                        entropy=shannon_entropy(value),
-                        evidence=EvidenceType.REGEX,
-                        severity=_severity_from_classification(_inf),
-                        confidence=_inf.confidence,
-                        token=value,
-                        token_start=match.start(1),
-                        token_end=match.end(1),
-                        in_comment=in_comment,
-                        category=_inf.category.value,
-                        category_reason=_inf.reason,
-                    )
-                )
+                found("ENV_ASSIGNMENT", value, EvidenceType.REGEX, _severity_from_classification(_inf),
+                      _inf.confidence, _inf, start=match.start(1), end=match.end(1))
                 found_tokens.add(value)
 
     return findings
 
 
 def _apply_block_comment_flag(line_findings: List[Finding], in_block: bool) -> List[Finding]:
-    """Set in_comment=True on findings from inside an open /* */ block.
-
-    _scan_line only sets in_comment when the line STARTS with a comment prefix.
-    Interior lines of /* */ blocks don't start with a prefix, so this patch
-    propagates the open-block state tracked by the collector.
+    """
+    Description: Carry collector block-comment state into findings whose line lacks a comment prefix.
+        _scan_line sets in_comment only when the line starts with a prefix, so interior lines of /* */
+        blocks need this.
+    Parameters:
+        line_findings: Findings collected from the current line.
+        in_block: Whether the line is inside an already open block comment.
+    Output: Original list when no update is needed; otherwise a list replacing only findings with
+        in_comment=None, with in_comment set to True. Original finding objects are not mutated.
     """
     if not in_block or not line_findings:
         return line_findings
@@ -517,7 +659,13 @@ def _apply_block_comment_flag(line_findings: List[Finding], in_block: bool) -> L
 
 
 def _collect_text_findings(text: str) -> List[Finding]:
-    """Raw scan of text — returns all findings including evidence=ML."""
+    """
+    Description: Scan text line by line while tracking block comments to retain all raw candidates.
+    Parameters:
+        text: Source text to scan.
+    Output: List of findings including evidence=ML; may update the file-extension cache through
+        scanning.
+    """
     findings: List[Finding] = []
     in_block_comment = False
     for lineno, line in enumerate(text.splitlines(), start=1):
@@ -533,18 +681,44 @@ def _collect_text_findings(text: str) -> List[Finding]:
     return findings
 
 
-def _collect_file_findings(path_obj: Path, max_bytes: Optional[int]) -> List[Finding]:
-    """Raw scan of a file — returns all findings including evidence=ML."""
+def _collect_file_findings(path_obj: Path, memory_cap: Optional[int] = None) -> List[Finding]:
+    """
+    Description: Scan a whole file line by line, in bounded pieces, keeping every raw candidate (FR-CORE-05).
+    Parameters:
+        path_obj: Source file path.
+        memory_cap: The most bytes the scan may hold (default MEMORY_CAP). It bounds the piece size,
+            never how much of the file is scanned.
+    Output: Findings including evidence=ML, with line numbers and token offsets of the file. A finding
+        in the overlap of two pieces of a long line is kept once. Skips binary content, ignores decoding
+        errors, propagates OSError.
+    """
     file_name = str(path_obj)
     findings: List[Finding] = []
-    in_block_comment = False
-    for lineno, line in iter_text_lines(path_obj, max_bytes=max_bytes):
-        stripped = line.strip()
-        opens = stripped.count("/*")
-        closes = stripped.count("*/")
-        was_in_block = in_block_comment and not stripped.startswith("/*")
-        line_findings = _scan_line(line, lineno, file=file_name)
-        findings.extend(_apply_block_comment_flag(line_findings, was_in_block))
+    in_block_comment = was_in_block = is_comment = False
+    base = 0
+    earlier: set = set()  # findings of the current line's earlier pieces
+    for lineno, offset, piece in iter_line_pieces(path_obj, memory_cap or MEMORY_CAP):
+        stripped = piece.strip()
+        if offset == 0:
+            earlier = set()
+            was_in_block = in_block_comment and not stripped.startswith("/*")
+            base, is_comment = _line_base(piece)
+        fresh = piece[PIECE_OVERLAP:] if offset else stripped  # comment marks are counted once per character
+        found: set = set()
+        line_findings = _scan_line(piece, lineno, file=file_name, continued=is_comment if offset else None)
+        for finding in _apply_block_comment_flag(line_findings, was_in_block):
+            if offset and finding.token_start is not None:  # offsets count from the line's scan target
+                shift = offset - base
+                finding = dataclasses.replace(finding, token_start=finding.token_start + shift,
+                                              token_end=(finding.token_end or finding.token_start) + shift)
+            # A regex finding has file offsets; a candidate's count from URL-stripped text, so it is keyed by token
+            # alone, as a whole-line scan keeps one candidate per token and line.
+            key = (finding.type, finding.token, finding.token_start if finding.evidence == EvidenceType.REGEX else None)
+            found.add(key)
+            if key not in earlier:
+                findings.append(finding)
+        earlier |= found
+        opens, closes = fresh.count("/*"), fresh.count("*/")
         in_block_comment = (in_block_comment and closes == 0) or (opens > closes)
     return findings
 
@@ -554,19 +728,12 @@ def detect_text(
     threshold: float = 4.0,
 ) -> List[Finding]:
     """
-    Detect secrets in a text blob (regex + entropy, no ML).
-
-    Args:
-        text: Text content to scan
-        threshold: Entropy threshold (reserved for future use)
-
-    Returns:
-        List of findings
-
-    Example:
-        >>> findings = detect_text("aws_key = AKIAIOSFODNN7EXAMPLE1234")
-        >>> findings[0].type
-        'AWS_ACCESS_KEY_ID'
+    Description: Detect secrets in a text blob (regex + entropy, no ML).
+    Parameters:
+        text: Text content to scan.
+        threshold: Entropy threshold (reserved for future use).
+    Output: List of regex and entropy findings, excluding unverified evidence=ML candidates; threshold
+        is currently unused.
     """
     _ = threshold
     return [f for f in _collect_text_findings(text) if f.evidence != EvidenceType.ML]
@@ -575,27 +742,23 @@ def detect_text(
 def detect_file(
     path: str | Path,
     threshold: float = 4.0,
-    max_bytes: Optional[int] = None,
+    memory_cap: Optional[int] = None,
 ) -> List[Finding]:
     """
-    Detect secrets in a file on disk (regex + entropy, no ML).
-
-    Skips binary files, handles encoding errors gracefully, and
-    returns an empty list for nonexistent files.
-
-    Args:
-        path: Path to the file to scan
-        threshold: Entropy threshold (reserved)
-        max_bytes: Maximum bytes to read
-
-    Returns:
-        List of findings
+    Description: Detect secrets in a whole file on disk (regex + entropy, no ML), in bounded pieces (FR-CORE-05).
+    Parameters:
+        path: Path to the file to scan.
+        threshold: Entropy threshold (reserved).
+        memory_cap: The most bytes the scan may hold (default MEMORY_CAP).
+    Output: List excluding unverified evidence=ML candidates, or empty for missing or binary files;
+        decoding errors are ignored and other OSError failures propagate. The reserved threshold is
+        unused.
     """
     _ = threshold
     path_obj = Path(path)
     if not path_obj.exists():
         return []
-    return [f for f in _collect_file_findings(path_obj, max_bytes) if f.evidence != EvidenceType.ML]
+    return [f for f in _collect_file_findings(path_obj, memory_cap) if f.evidence != EvidenceType.ML]
 
 
 # ---------------------------------------------------------------------------
@@ -607,12 +770,14 @@ _REASON_CONF_RE = re.compile(r"confidence=(\d+\.\d+)")
 
 
 def _inference_from_finding(finding: Finding) -> "CategoryInference":
-    """Reconstruct a CategoryInference from an existing finding's category fields.
-
-    Used in _apply_ml_verification to recompute severity with ml_confidence.
-    Recovers the original cat_conf from the structured reason string so that
-    strong-signal findings (PASSWORD 0.90, JWT 0.85) are promoted to HIGH by
-    cat_conf alone without requiring ml_confidence >= 0.85.
+    """
+    Description: Rebuild category inference from a finding so _apply_ml_verification can recompute
+        severity with ml_confidence. The original cat_conf is recovered from the reason string, so
+        strong signals such as PASSWORD 0.90 or JWT 0.85 reach HIGH without requiring ml_confidence >= 0.85.
+    Parameters:
+        finding: Finding whose metadata and token are used.
+    Output: CategoryInference using parsed reason confidence or category-dependent defaults; invalid
+        categories fall back to generic.
     """
     from Harpocrates.core.classification import CategoryInference, ViolationCategory
 
@@ -642,7 +807,16 @@ def _apply_ml_verification(
     verifier: "Verifier",
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
-    """Filter entropy candidates through the ML verifier."""
+    """
+    Description: Build bounded candidate contexts and verify batches to filter ML-stage findings.
+    Parameters:
+        findings: Candidates to verify.
+        full_content: Full source content for contextual verification.
+        verifier: Verifier used to classify candidate batches.
+        ml_threshold: Minimum combined confidence for retaining a secret finding.
+    Output: Verified findings; calls the supplied verifier and propagates MLVerificationError for
+        verifier failures or misaligned results.
+    """
     lines = full_content.splitlines()
     verified: List[Finding] = []
     for start in range(0, len(findings), _ML_VERIFICATION_BATCH_SIZE):
@@ -662,7 +836,15 @@ def _apply_ml_verification(
 
 
 def _prepare_ml_context_from_lines(finding: Finding, lines: Sequence[str]) -> "CodeContext":
-    """Build verifier context from a file split once for a candidate batch."""
+    """
+    Description: Build bounded ML context from shared lines, split once per candidate batch, to limit
+        feature extraction cost under NFR-01.
+    Parameters:
+        finding: Finding whose metadata and token are used.
+        lines: Previously split source lines.
+    Output: CodeContext with cropped lines and available token-span metadata; lazily imports context
+        and token helpers.
+    """
     from Harpocrates.ml.context import extract_context_from_lines
     from Harpocrates.ml.tokens import TokenMatch
 
@@ -702,12 +884,155 @@ def _prepare_ml_context_from_lines(finding: Finding, lines: Sequence[str]) -> "C
     return context
 
 
+_CONTEXT_LINES = 3  # neighbours on each side that extract_context_from_lines reads
+
+
+class _KeptLines(SequenceABC):
+    """
+    Description: The few lines of a file the verifier reads around one candidate, standing in for the whole list of
+        lines (FR-CORE-05); every other line reads as "".
+    Parameters:
+        total: the file's line count.
+        kept: {line number from 1: text}.
+    Output: A read-only sequence of `total` strings.
+    """
+
+    def __init__(self, total: int, kept: Dict[int, str]) -> None:
+        """
+        Description: Keep the line count and the kept lines.
+        Parameters:
+            total: the line count.
+            kept: the kept lines.
+        Output: None.
+        """
+        self.total, self.kept = total, kept
+
+    def __len__(self) -> int:
+        """
+        Description: The file's line count.
+        Parameters: None
+        Output: total.
+        """
+        return self.total
+
+    def __getitem__(self, index):  # type: ignore[override]
+        """
+        Description: One line by 0-based index, or a list for a slice.
+        Parameters:
+            index: an int or a slice.
+        Output: The kept text, or "" for a line not kept. Raises IndexError past the end.
+        """
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(self.total))]
+        if index < 0:
+            index += self.total
+        if not 0 <= index < self.total:
+            raise IndexError(index)
+        return self.kept.get(index + 1, "")
+
+
+def _streamed_contexts(path_obj: Path, candidates: Sequence[Finding],
+                       memory_cap: Optional[int]) -> List[Tuple[Finding, "CodeContext"]]:
+    """
+    Description: Build each candidate's verifier context from one more streaming pass over the file, keeping only what
+        the context reads (FR-CORE-05): the start of each line around the candidate, and on a long line the window
+        around its token (FR-CORE-07).
+    Parameters:
+        path_obj: the file.
+        candidates: findings with line numbers; at most _ML_VERIFICATION_BATCH_SIZE, so the pass stays bounded.
+        memory_cap: the scan's memory cap, or None for MEMORY_CAP.
+    Output: (finding, context) pairs in order, with the contexts _prepare_ml_context_from_lines builds from the
+        whole list of lines. Raises OSError.
+    """
+    from Harpocrates.ml.context import is_comment_line
+
+    width = 2 * _CONTEXT_WINDOW
+    wanted = {n for f in candidates for n in range((f.line or 1) - _CONTEXT_LINES, (f.line or 1) + _CONTEXT_LINES + 1)}
+    starts: Dict[int, str] = {}
+    long_lines: set = set()
+    windows: Dict[int, list] = {}  # candidate index -> [start of token, start of window, end of window, text]
+    total = 0
+    for lineno, offset, piece in iter_line_pieces(path_obj, memory_cap or MEMORY_CAP):
+        total = lineno
+        if lineno not in wanted:
+            continue
+        if offset == 0:
+            starts[lineno] = piece[:width]
+        if offset or len(piece) > width:
+            long_lines.add(lineno)
+        for i, finding in enumerate(candidates):
+            if (finding.line or 1) != lineno or not finding.token:
+                continue
+            if i not in windows:
+                at = finding.token_start
+                if at is None:
+                    found = piece.find(finding.token)
+                    if found < 0:
+                        continue
+                    at = offset + found
+                lo = max(at - _CONTEXT_WINDOW, offset)
+                windows[i] = [at, lo, at + len(finding.token) + _CONTEXT_WINDOW, ""]
+            at, lo, hi, text = windows[i]
+            filled = lo + len(text)
+            if filled < hi:
+                windows[i][3] = text + piece[max(filled, offset) - offset:min(hi, offset + len(piece)) - offset]
+    pairs: List[Tuple[Finding, "CodeContext"]] = []
+    for i, finding in enumerate(candidates):
+        line = finding.line or 1
+        kept = {n: starts[n] for n in range(line - _CONTEXT_LINES, line + _CONTEXT_LINES + 1) if n in starts}
+        local = finding
+        if line in long_lines:
+            if i in windows:
+                at, lo, _hi, text = windows[i]
+                kept[line] = text
+                local = dataclasses.replace(finding, token_start=at - lo, token_end=at - lo + len(finding.token or ""))
+            else:
+                kept[line] = starts.get(line, "")[:_CONTEXT_WINDOW]
+        context = _prepare_ml_context_from_lines(local, _KeptLines(total, kept))
+        if line in long_lines:
+            context = dataclasses.replace(context, in_comment=is_comment_line(starts.get(line, "")))
+        pairs.append((finding, context))
+    return pairs
+
+
+def verify_file_candidates(path_obj: Path, candidates: List[Finding], verifier: "Verifier",
+                           ml_threshold: float = 0.5, memory_cap: Optional[int] = None) -> List[Finding]:
+    """
+    Description: Verify a file's non-regex candidates with the model, reading the file again in bounded pieces for
+        their contexts (FR-CORE-05); both engines use it.
+    Parameters:
+        path_obj: the file.
+        candidates: the candidates.
+        verifier: the model.
+        ml_threshold: the least confidence kept.
+        memory_cap: the scan's memory cap, or None for MEMORY_CAP.
+    Output: The candidates the model keeps. Raises OSError when the file cannot be read again, MLVerificationError
+        when the verifier fails.
+    """
+    verified: List[Finding] = []
+    for start in range(0, len(candidates), _ML_VERIFICATION_BATCH_SIZE):
+        batch = candidates[start : start + _ML_VERIFICATION_BATCH_SIZE]
+        verified.extend(_apply_ml_verification_with_contexts(_streamed_contexts(path_obj, batch, memory_cap),
+                                                             verifier=verifier, ml_threshold=ml_threshold))
+    return verified
+
+
 def _apply_ml_verification_with_contexts(
     findings_with_context: List[Tuple[Finding, "CodeContext"]],
     verifier: "Verifier",
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
-    """Verify pre-built contexts in bounded batches and preserve alignment."""
+    """
+    Description: Filter benign path candidates and verify pre-built contexts in bounded batches,
+        preserving alignment, before retained findings are constructed.
+    Parameters:
+        findings_with_context: Aligned finding/context pairs to verify.
+        verifier: Verifier used to classify candidate batches.
+        ml_threshold: Minimum combined confidence for retaining a secret finding.
+    Output: New HYBRID findings meeting the secret and combined-confidence criteria, with calibrated
+        confidence when available (FR-CORE-03). Calls the verifier; raises MLVerificationError for
+        verification failures or result-count mismatches.
+    """
     # Filesystem paths are dropped before the model (detectors/path_tokens.py has the rule and
     # its recall trade-off). Applied here, after candidate generation, so the Python and Rust
     # engines keep identical raw candidates (FR-CORE-01) and both get the same filtering.
@@ -772,19 +1097,15 @@ def detect_text_with_ml(
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
     """
-    Detect secrets in text with ML verification for entropy candidates.
-
-    Regex hits (CRITICAL/HIGH) are returned immediately — no ML call.
-    Entropy candidates are forwarded to XGBoost for false-positive filtering.
-
-    Args:
-        text: Text content to scan
-        verifier: ML verifier instance
-        threshold: Entropy threshold (reserved)
-        ml_threshold: Minimum ML confidence to keep an entropy finding
-
-    Returns:
-        List of findings
+    Description: Detect secrets in text with ML verification for entropy candidates.
+    Parameters:
+        text: Text content to scan.
+        verifier: ML verifier instance.
+        threshold: Entropy threshold (reserved).
+        ml_threshold: Minimum ML confidence to keep an entropy finding.
+    Output: Regex findings (CRITICAL and HIGH) returned immediately with no ML call, followed by
+        verified non-regex findings. The verifier is called only for non-regex (entropy) candidates, to
+        filter false positives. MLVerificationError propagates. Any Verifier implementation is accepted.
     """
     _ = threshold
     findings = _collect_text_findings(text)
@@ -811,57 +1132,38 @@ def detect_file_with_ml(
     path: str | Path,
     verifier: "Verifier",
     threshold: float = 4.0,
-    max_bytes: Optional[int] = None,
+    memory_cap: Optional[int] = None,
     ml_threshold: float = 0.5,
 ) -> List[Finding]:
     """
-    Detect secrets in a file with ML verification for entropy candidates.
-
-    Regex hits (CRITICAL/HIGH) are returned immediately — no ML call.
-    Entropy candidates are forwarded to XGBoost for false-positive filtering.
-
-    Args:
-        path: Path to the file
-        verifier: ML verifier instance
-        threshold: Entropy threshold (reserved)
-        max_bytes: Maximum bytes to read
-        ml_threshold: Minimum ML confidence to keep an entropy finding
-
-    Returns:
-        List of findings
+    Description: Detect secrets in a whole file with ML verification for entropy candidates, in bounded
+        pieces (FR-CORE-05).
+    Parameters:
+        path: Path to the file.
+        verifier: ML verifier instance.
+        threshold: Entropy threshold (reserved).
+        memory_cap: The most bytes the scan may hold (default MEMORY_CAP).
+        ml_threshold: Minimum ML confidence to keep an entropy finding.
+    Output: Regex findings (CRITICAL and HIGH) returned immediately with no ML call, followed by
+        verified non-regex findings. The verifier is called only for non-regex (entropy) candidates.
+        Missing or binary files return no findings, and initial read errors propagate. If rereading the
+        file for context raises OSError, the non-ML raw findings are returned. Verification failures
+        raise MLVerificationError. Any Verifier implementation is accepted.
     """
     _ = threshold
     path_obj = Path(path)
     if not path_obj.exists():
         return []
 
-    findings = _collect_file_findings(path_obj, max_bytes)
-    if not findings:
-        return findings
-
+    findings = _collect_file_findings(path_obj, memory_cap)
     regex_findings = [f for f in findings if f.evidence == EvidenceType.REGEX]
     entropy_findings = [f for f in findings if f.evidence != EvidenceType.REGEX]
-
     if not entropy_findings:
         return regex_findings
-
     try:
-        if max_bytes:
-            with open(path_obj, "r", encoding="utf-8", errors="ignore") as f:
-                full_content = f.read(max_bytes)
-        else:
-            full_content = path_obj.read_text(encoding="utf-8", errors="ignore")
-    except (OSError, IOError):
+        return regex_findings + verify_file_candidates(path_obj, entropy_findings, verifier, ml_threshold, memory_cap)
+    except OSError:
         return [f for f in findings if f.evidence != EvidenceType.ML]
-
-    verified_entropy = _apply_ml_verification(
-        findings=entropy_findings,
-        full_content=full_content,
-        verifier=verifier,
-        ml_threshold=ml_threshold,
-    )
-
-    return regex_findings + verified_entropy
 
 
 __all__ = [

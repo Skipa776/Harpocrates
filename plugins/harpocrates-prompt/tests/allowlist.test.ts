@@ -13,15 +13,15 @@ import {
 
 tier('user')
 
-const NOT_FOUND = 'Harpocrates CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
-const REFUSED = 'Only you can change the Harpocrates allowlist: type /harpocrates in the chat box.'
+const NOT_FOUND = 'Harpo CLI not found. Install it: pip install git+https://github.com/Skipa776/harpocrates'
+const REFUSED = 'Only you can change the Harpo allowlist: type /harpo in the chat box.'
 const EVERYWHERE = 'Allow it everywhere'
 const PRESENTATION = { isFullscreen: false, columns: 80 }
 const PY = '/venv/bin/python'
 const CLI = [PY, '-P', '-m', 'Harpocrates.cli']
 const RECORD = JSON.stringify({ version: 1, python: PY, python_args: ['-P'], 'claude-code': { mcp: true } })
 const NOT_INSTALLED =
-  'Run `harpocrates install` first: the plugin only runs the Harpocrates interpreter that install recorded.'
+  'Run `harpo install` first: the plugin only runs the Harpo interpreter that install recorded.'
 
 type Reply = { exitCode: number; stdout: string } | 'missing'
 
@@ -37,11 +37,31 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
   let reply = first
   let answer = firstAnswer
   let record: string | null = RECORD
+  let recordAt: Record<string, string> | null = null
+  let home: string | undefined = '/home/me'
+  const statted: string[] = []
+  const links = new Set<string>() // paths that are themselves symbolic links
+  const kinds: Record<string, 'file' | 'dir' | 'other'> = {} // what a path leads to, where it is not the usual
+  const folders = new Set<string>() // folders that exist although no record is in them
+  const failing: Record<string, string> = {} // paths whose stat fails with this error instead of answering
 
   // The install record: a missing file rejects the read, as the engine's does.
   on('fs.read', (_$, e) => {
     read.push(e.path)
-    return record === null ? { deny: 'ENOENT' } : { value: record }
+    const text = recordAt === null ? record : (recordAt[e.path] ?? null)
+    return text === null ? { deny: 'ENOENT' } : { value: text }
+  })
+  // The engine's fs.stat of the folder and of the record: what each leads to, and whether it is itself a link.
+  const recordHolds = (path: string): boolean => (recordAt === null ? record !== null : path in recordAt)
+  const exists = (path: string): boolean =>
+    path.endsWith('/install.json') ? recordHolds(path) : folders.has(path) || recordHolds(`${path}/install.json`)
+  on('fs.stat', (_$, e) => {
+    statted.push(e.path)
+    const error = failing[e.path]
+    if (error !== undefined) return { deny: error }
+    if (!exists(e.path) && !links.has(e.path)) return { deny: 'ENOENT' }
+    const kind = kinds[e.path] ?? (e.path.endsWith('/install.json') ? 'file' : 'dir')
+    return { value: { kind, size: 1, mtimeMs: 0, isLink: links.has(e.path) } }
   })
   on('process.run', (_$, e) => {
     ran.push(e.argv)
@@ -53,7 +73,7 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
     }
   })
   on('session.cwd', () => ({ value: '/proj/app' }))
-  on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
+  on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? home : undefined }))
   on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => {
     const q = e.questions[0]
     if (!q) return { deny: 'no question' }
@@ -66,9 +86,36 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
     ran,
     asked,
     read,
+    statted,
+    /** What HOME holds from now on (undefined: unset). */
+    setHome(value: string | undefined) {
+      home = value
+    },
+    /** Makes `path` a symbolic link (what it leads to is `kind`, a directory unless set). */
+    link(path: string, kind?: 'file' | 'dir' | 'other') {
+      links.add(path)
+      if (kind !== undefined) kinds[path] = kind
+    },
+    /** Makes `path` lead to this kind of thing instead of the usual. */
+    leadsTo(path: string, kind: 'file' | 'dir' | 'other') {
+      kinds[path] = kind
+    },
+    /** A folder that exists with no record in it. */
+    folder(path: string) {
+      folders.add(path)
+    },
+    /** Makes stat of `path` fail with this error (an OS refusal other than a missing path). */
+    failStat(path: string, error: string) {
+      failing[path] = error
+    },
     /** What the install record holds (null: no file) from now on. */
     setRecord(text: string | null) {
       record = text
+      recordAt = null
+    },
+    /** What each folder's install record holds, by path (a path left out has no file) from now on. */
+    setRecordAt(files: Record<string, string>) {
+      recordAt = files
     },
     /** Changes what the CLI answers (and, optionally, what the person picks) from now on; clears the record. */
     use(next: (argv: readonly string[]) => Reply, nextAnswer: string | null = null) {
@@ -80,8 +127,11 @@ function world(on: On, first: (argv: readonly string[]) => Reply, firstAnswer: s
   }
 }
 
-const say = async ($: Engine, args: string, origin: PromptOrigin = { kind: 'composer' }) =>
-  (await $.command.run({ command: 'harpocrates', args, origin, presentation: PRESENTATION })).text
+// The slash command has two names (FR-NAME-02): /harpo, and /harpocrates for two more minor releases.
+const NAMES = ['harpo', 'harpocrates'] as const
+
+const say = async ($: Engine, args: string, origin: PromptOrigin = { kind: 'composer' }, command: string = NAMES[0]) =>
+  (await $.command.run({ command, args, origin, presentation: PRESENTATION })).text
 
 const ADDED = json({ ok: true, action: 'added', kind: 'path', value: '/proj/app/.env' })
 
@@ -159,7 +209,7 @@ test('allow <path>: the CLI is called by argv, a relative path made absolute aga
   const w = world(on, () => ADDED)
   expect(await say($, 'allow .env')).toBe('Allowed /proj/app/.env.')
   expect(w.ran).toEqual([[...CLI, 'allow', '--json', '/proj/app/.env']])
-  expect(w.read).toEqual(['/home/me/.harpocrates/install.json'])
+  expect(w.read).toEqual(['/home/me/.harpo/install.json'])
 })
 
 test('allow <path>: absolute, ~ and quoted paths with spaces reach the CLI as one argument', async ($, on) => {
@@ -292,7 +342,7 @@ test('the CLI is missing: the install message, for a change and for the list', a
 })
 
 test('an unreadable answer is a safe message, never a throw', async ($, on) => {
-  const bad = 'The Harpocrates CLI returned an answer this plugin cannot read.'
+  const bad = 'The Harpo CLI returned an answer this plugin cannot read.'
   const w = world(on, () => 'missing')
   for (const stdout of ['', 'not json', '[1,2]', 'null', '{"ok":']) {
     w.use(() => ({ exitCode: 0, stdout }))
@@ -326,6 +376,9 @@ const RECORDS: [string, string | null][] = [
   ['python_args with another flag', JSON.stringify({ python: PY, python_args: ['-P', '-c'] })],
   ['python_args that import', JSON.stringify({ python: PY, python_args: ['-m', 'evil'] })],
   ['python_args with a non-string', JSON.stringify({ python: PY, python_args: [1] })],
+  ['python_args -E alone, which keeps the cwd on sys.path', JSON.stringify({ python: PY, python_args: ['-E'] })],
+  ['python_args -E twice', JSON.stringify({ python: PY, python_args: ['-E', '-E'] })],
+  ['python_args -E with another flag', JSON.stringify({ python: PY, python_args: ['-E', '-P', '-c'] })],
   ['python_args null', JSON.stringify({ python: PY, python_args: null })],
   ['a control character', JSON.stringify({ python: '/usr/bin/py\nthon' })],
 ]
@@ -350,10 +403,13 @@ test('a recorded absolute python runs with its recorded flags, -I when the recor
   await say($, 'allow /y')
   w.setRecord(JSON.stringify({ python: '/p/python', python_args: ['-P'] }))
   await say($, 'allow /z')
+  w.setRecord(JSON.stringify({ python: '/u/python', python_args: ['-E', '-P'] })) // an install in the user site (SEC-08)
+  await say($, 'allow /w')
   expect(w.ran).toEqual([
     ['/opt/py 3/bin/python', '-I', '-m', 'Harpocrates.cli', 'allow', '--json', '/x'],
     ['C:\\Python\\python.exe', '-I', '-m', 'Harpocrates.cli', 'allow', '--json', '/y'],
     ['/p/python', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/z'],
+    ['/u/python', '-E', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/w'],
   ])
 })
 
@@ -366,6 +422,114 @@ test('no bare harpocrates is ever run, whatever the record says', async ($, on) 
   }
   expect(w.ran.every(argv => argv[0] === '/venv/bin/python' || argv[0]?.startsWith('/'))).toBe(true)
   expect(w.ran.some(argv => argv[0] === 'harpocrates')).toBe(false)
+})
+
+test('the record is read from ~/.harpo first and from ~/.harpocrates when the new folder has none', async ($, on) => {
+  const w = world(on, () => ADDED)
+  const NEW = '/home/me/.harpo/install.json'
+  const OLD = '/home/me/.harpocrates/install.json'
+  const newer = JSON.stringify({ python: '/new/python', python_args: ['-P'] })
+  const older = JSON.stringify({ python: '/old/python', python_args: ['-P'] })
+
+  w.setRecordAt({ [NEW]: newer, [OLD]: older })
+  await say($, 'allow /a')
+  expect(w.read).toEqual([NEW])
+
+  w.read.length = 0
+  w.setRecordAt({ [OLD]: older })
+  await say($, 'allow /b')
+  expect(w.read).toEqual([OLD]) // ~/.harpo is not there at all, so only the old record is looked for
+
+  w.read.length = 0
+  w.setRecordAt({ [NEW]: 'not json {', [OLD]: older }) // the new record decides, even when it is unusable
+  expect(await say($, 'allow /c')).toBe(NOT_INSTALLED)
+  expect(w.read).toEqual([NEW])
+
+  w.setRecordAt({})
+  expect(await say($, 'allow /d')).toBe(NOT_INSTALLED)
+  expect(w.ran).toEqual([
+    ['/new/python', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/a'],
+    ['/old/python', '-P', '-m', 'Harpocrates.cli', 'allow', '--json', '/b'],
+  ])
+})
+
+// -- SEC-09: the record is read only from a plain folder holding a plain file --------------
+
+const NEWDIR = '/home/me/.harpo'
+const OLDDIR = '/home/me/.harpocrates'
+const NEWREC = `${NEWDIR}/install.json`
+const OLDREC = `${OLDDIR}/install.json`
+const VALID = JSON.stringify({ python: '/new/python', python_args: ['-I'] })
+const OLDER = JSON.stringify({ python: '/old/python', python_args: ['-I'] })
+
+test('a plain folder and a plain file: both are stat-ed before the record is read', async ($, on) => {
+  const w = world(on, () => ADDED)
+  w.setRecordAt({ [NEWREC]: VALID })
+  await say($, 'allow /a')
+  expect(w.statted).toEqual([NEWDIR, NEWREC])
+  expect(w.read).toEqual([NEWREC])
+  expect(w.ran).toEqual([['/new/python', '-I', '-m', 'Harpocrates.cli', 'allow', '--json', '/a']])
+})
+
+const UNUSABLE: [string, (w: ReturnType<typeof world>) => void][] = [
+  ['~/.harpo is a symlink to a folder', w => w.link(NEWDIR, 'dir')],
+  ['~/.harpo is a dangling symlink', w => w.link(NEWDIR, 'other')],
+  ['~/.harpo is a symlink to a file', w => w.link(NEWDIR, 'file')],
+  ['~/.harpo is a file', w => w.leadsTo(NEWDIR, 'file')],
+  ['~/.harpo is something else', w => w.leadsTo(NEWDIR, 'other')],
+  ['the record is a symlink', w => w.link(NEWREC, 'file')],
+  ['the record is a dangling symlink', w => w.link(NEWREC, 'other')],
+  ['the record is a folder', w => w.leadsTo(NEWREC, 'dir')],
+  ['the record is something else', w => w.leadsTo(NEWREC, 'other')],
+  ['stat of ~/.harpo is refused', w => w.failStat(NEWDIR, 'EACCES')],
+  ['stat of the record is refused', w => w.failStat(NEWREC, 'EACCES')],
+]
+
+for (const [name, arrange] of UNUSABLE) {
+  test(`${name}: nothing is read or run, and ~/.harpocrates is not used instead`, async ($, on) => {
+    const w = world(on, () => ADDED)
+    w.setRecordAt({ [NEWREC]: VALID, [OLDREC]: OLDER }) // a valid old record is there to be fallen back on
+    arrange(w)
+    for (const args of ['allow /a', 'remove /a', 'allowlist']) {
+      expect(await say($, args)).toBe(NOT_INSTALLED)
+    }
+    expect(w.read).toEqual([])
+    expect(w.ran).toEqual([])
+    expect(w.statted.includes(OLDDIR) || w.statted.includes(OLDREC)).toBe(false)
+  })
+}
+
+test('~/.harpo exists but holds no record: ~/.harpocrates is not consulted', async ($, on) => {
+  const w = world(on, () => ADDED)
+  w.setRecordAt({ [OLDREC]: OLDER })
+  w.folder(NEWDIR)
+  expect(await say($, 'allow /a')).toBe(NOT_INSTALLED)
+  expect(w.read).toEqual([])
+  expect(w.ran).toEqual([])
+})
+
+test('a linked ~/.harpocrates is not read either', async ($, on) => {
+  const w = world(on, () => ADDED)
+  w.setRecordAt({ [OLDREC]: OLDER })
+  w.link(OLDDIR, 'dir')
+  expect(await say($, 'allow /a')).toBe(NOT_INSTALLED)
+  w.setRecordAt({ [OLDREC]: OLDER })
+  w.link(OLDREC, 'file')
+  expect(await say($, 'allow /a')).toBe(NOT_INSTALLED)
+  expect(w.read).toEqual([])
+  expect(w.ran).toEqual([])
+})
+
+test('a HOME that is unset, empty or relative runs nothing and looks at nothing', async ($, on) => {
+  const w = world(on, () => ADDED)
+  w.setRecordAt({ [NEWREC]: VALID })
+  for (const value of [undefined, '', 'home/me', '~', './x']) {
+    w.setHome(value)
+    expect(await say($, 'allow /a')).toBe(NOT_INSTALLED)
+  }
+  expect(w.statted).toEqual([])
+  expect(w.read).toEqual([])
+  expect(w.ran).toEqual([])
 })
 
 test('help and usage do not read the record', async ($, on) => {
@@ -411,7 +575,7 @@ test('every origin but composer is refused for allow and remove, and no process 
 
 test('a run with no origin is refused too', async ($, on) => {
   const w = world(on, () => ADDED)
-  const ran = await $.command.run({ command: 'harpocrates', args: 'allow x', presentation: PRESENTATION } as never)
+  const ran = await $.command.run({ command: 'harpo', args: 'allow x', presentation: PRESENTATION } as never)
   expect(ran.text).toBe(REFUSED)
   expect(w.ran).toEqual([])
 })
@@ -430,7 +594,7 @@ test('help, unknown and the list run for any origin', async ($, on) => {
 test('nothing is put in context for the model', async ($, on) => {
   world(on, () => ADDED)
   const ran = await $.command.run({
-    command: 'harpocrates',
+    command: 'harpo',
     args: 'allow x',
     origin: { kind: 'composer' },
     presentation: PRESENTATION,
@@ -448,4 +612,82 @@ test('changeArgv: the argument vectors', () => {
   expect(changeArgv('add', { kind: 'path', value: '/a' })).toEqual(['allow', '--json', '/a'])
   expect(changeArgv('add', { kind: 'name', value: 'n' }, true)).toEqual(['allow', '--json', '--yes', '--name', 'n'])
   expect(changeArgv('remove', { kind: 'name', value: 'n' })).toEqual(['allow', '--remove', '--json', '--name', 'n'])
+})
+
+// -- the old name: /harpocrates is /harpo (FR-NAME-02) ----------------------------
+
+test('session start registers /harpo and, for two more minor releases, /harpocrates', async ($, on) => {
+  const registered: string[] = []
+  on('command.register', (_$, e) => {
+    registered.push(e.name)
+    return { value: undefined }
+  })
+  on('session.start', (_$, e) => e) // the engine beneath the plugin: it just starts
+  await $.session.start({ cwd: '/proj/app' } as never)
+  expect(registered).toEqual(['harpo', 'harpocrates'])
+})
+
+for (const command of NAMES) {
+  test(`/${command}: allow, remove, list and help run the same CLI calls and print the same text`, async ($, on) => {
+    const w = world(on, argv =>
+      argv.includes('--list') ? json({ entries: [{ kind: 'name', value: 'out' }] }) : ADDED,
+    )
+    expect(await say($, 'allow .env', { kind: 'composer' }, command)).toBe('Allowed /proj/app/.env.')
+    expect(await say($, 'remove .env', { kind: 'composer' }, command)).toBe('Removed /proj/app/.env.')
+    expect(await say($, 'allowlist', { kind: 'composer' }, command)).toBe('Names (every project):\n  out')
+    expect(await say($, 'help', { kind: 'composer' }, command)).toBe(HELP)
+    expect(await say($, 'frobnicate', { kind: 'composer' }, command)).toBe(`Unknown: frobnicate\n${HELP}`)
+    expect(w.ran).toEqual([
+      [...CLI, 'allow', '--json', '/proj/app/.env'],
+      [...CLI, 'allow', '--remove', '--json', '/proj/app/.env'],
+      [...CLI, 'allow', '--list', '--json'],
+    ])
+  })
+
+  test(`/${command}: a broad name asks, and only the exact Allow it everywhere re-runs with --yes`, async ($, on) => {
+    const w = world(
+      on,
+      argv =>
+        argv.includes('--yes')
+          ? json({ ok: true, action: 'added', kind: 'name', value: 'src' })
+          : json({ ok: false, error: 'src is broad', needs_confirmation: true }, 3),
+      EVERYWHERE,
+    )
+    expect(await say($, 'allow --name src', { kind: 'composer' }, command)).toBe('Allowed the name src in every project.')
+    expect(w.asked.length).toBe(1)
+    expect(w.ran.length).toBe(2)
+    expect(w.ran[1]).toEqual([...CLI, 'allow', '--json', '--yes', '--name', 'src'])
+  })
+
+  test(`/${command}: every origin but composer is refused for a change, and no process runs`, async ($, on) => {
+    const w = world(on, () => ADDED, EVERYWHERE)
+    for (const origin of OTHERS) {
+      for (const args of ['allow x', 'allow --name src', 'remove x', 'ALLOW x', '"allow" x', 'allow', 'allow a b']) {
+        expect(await say($, args, origin, command)).toBe(REFUSED)
+      }
+    }
+    const noOrigin = await $.command.run({ command, args: 'allow x', presentation: PRESENTATION } as never)
+    expect(noOrigin.text).toBe(REFUSED)
+    expect(w.ran).toEqual([])
+    expect(w.asked).toEqual([])
+    expect(w.read).toEqual([])
+  })
+
+  test(`/${command}: help, unknown and the list run for any origin; nothing goes into context`, async ($, on) => {
+    const w = world(on, () => json({ entries: [{ kind: 'name', value: 'out' }] }))
+    for (const origin of OTHERS) {
+      expect(await say($, 'help', origin, command)).toBe(HELP)
+      expect(await say($, 'allowlist', origin, command)).toBe('Names (every project):\n  out')
+    }
+    expect(w.ran.length).toBe(OTHERS.length)
+    const ran = await $.command.run({ command, args: 'help', origin: { kind: 'composer' }, presentation: PRESENTATION })
+    expect(ran.context).toBeUndefined()
+  })
+}
+
+test('the help and the refusal name /harpo, the command to type', () => {
+  expect(HELP).toContain('/harpo allow <path>')
+  expect(HELP).not.toContain('/harpocrates')
+  expect(REFUSED).toContain('type /harpo in')
+  expect(NOT_INSTALLED).toContain('`harpo install`')
 })

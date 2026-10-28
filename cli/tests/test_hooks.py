@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 import pytest
+from cli_entry import with_each_name
 
 from bench.canary_repo import build
 from Harpocrates import hooks
@@ -128,7 +129,7 @@ def test_fr_read_03_hook_bash_review_cases(repo, capsys) -> None:
     root, _ = repo
     blocked = ["sudo bash -c 'cat .env'", "env bash -c 'cat .env'", "timeout 5 bash -c 'cat .env'",
                'echo "$(cat .env)"', "cat `echo .env`", "cd config && cat settings.py", "cat config/*",
-               "cat ~/../../" + str(root).lstrip("/") + "/.env", "git show HEAD:config/settings.py",
+               "cat ~/" + "../" * (len(Path.home().parts) - 1) + str(root).lstrip("/") + "/.env", "git show HEAD:config/settings.py",
                "dd if=.env", "cp .env /dev/stdout", "xargs -a .env echo", "rg -m 7 TOKEN .",
                "rg -t py TOKEN .", "rg -g '*.py' TOKEN"]
     for cmd in blocked:
@@ -145,6 +146,9 @@ def test_fr_read_03_hook_environment(repo, capsys, monkeypatch: pytest.MonkeyPat
     for cmd in ("env", "printenv", "echo $GITHUB_TOKEN", "echo ${GITHUB_TOKEN}", "cat /proc/self/environ"):
         code, out = _run(_bash(root, cmd), capsys)
         assert code == 0 and _denied(out) and token not in out, cmd
+    # An ordinary home path is not a secret. The fixture home sits under a random-looking temp folder on macOS,
+    # which the entropy detector rightly flags, so pin an ordinary value for this one check.
+    monkeypatch.setenv("HOME", "/home/dev")
     assert _run(_bash(root, "echo $HOME"), capsys) == (0, "")
 
 
@@ -218,6 +222,13 @@ def test_fr_read_03_hook_git_show_shell_variables(repo, capsys, tmp_path: Path) 
 
 def _canary_token(canaries: list[dict]) -> str:
     return next(c["value"] for c in canaries if c["kind"] == "github_token")
+
+
+def _canary(kind: str) -> str:
+    """A generated fake value of one canary kind (never a real credential)."""
+    from gate_canaries import known_format
+
+    return known_format(7)[kind]
 
 
 def test_fr_read_03_hook_placeholder_text_is_not_a_secret(repo, capsys, tmp_path: Path) -> None:
@@ -395,27 +406,40 @@ def test_fr_read_03_hook_grep_oversize_context_lines_are_scanned(repo, capsys, t
         assert code == 0 and _denied(out), extra
 
 
-def test_fr_read_03_hook_oversize_stays_refused_elsewhere(repo, capsys, tmp_path: Path,
-                                                          monkeypatch: pytest.MonkeyPatch) -> None:
-    """Read, Edit and shell commands can print the whole file, and an output over the limit, a missing ripgrep
-    or a pattern matching every line can't be vouched for: all keep the 'unscanned' refusal."""
+def test_fr_core_05_hook_oversize_file_is_checked_in_chunks(repo, capsys, tmp_path: Path,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read, Edit and shell commands can print the whole file, so an oversize file is checked whole, in chunks
+    (FR-CORE-05): a clean one passes, and one with a secret on its far side is refused naming the secret's type."""
+    token = _canary("github_token")
+    events = lambda: ({"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},  # noqa: E731
+                      {"tool_name": "Edit", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},
+                      _bash(tmp_path, "grep needle big.jsonl"), _bash(tmp_path, "cat big.jsonl"))
+    _oversize(monkeypatch, tmp_path, "needle ok=1")
+    for event in events():
+        assert _run(event, capsys) == (0, ""), event
+    _oversize(monkeypatch, tmp_path, f"GITHUB_TOKEN={token}")
+    for event in events():
+        code, out = _run(event, capsys)
+        assert code == 0 and _denied(out) and "api_token" in out and token not in out, event
+
+
+def test_fr_read_03_hook_grep_tool_oversize_output_stays_refused(repo, capsys, tmp_path: Path,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Grep tool's oversize path judges the lines it would print: an output over the limit, a missing ripgrep
+    or a pattern matching every line can't be vouched for, and keep the 'unscanned' refusal."""
     import shutil
 
     _oversize(monkeypatch, tmp_path, "needle ok=1")
-    for event in ({"tool_name": "Read", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},
-                  {"tool_name": "Edit", "cwd": str(tmp_path), "tool_input": {"file_path": "big.jsonl"}},
-                  _bash(tmp_path, "grep needle big.jsonl"), _bash(tmp_path, "cat big.jsonl"),
-                  _grep_event(tmp_path, "filler")):  # prints more than the limit
-        code, out = _run(event, capsys)
-        assert code == 0 and _denied(out) and "over the size limit" in out, event
+    code, out = _run(_grep_event(tmp_path, "filler"), capsys)  # prints more than the limit
+    assert code == 0 and _denied(out) and "too large to check" in out
     monkeypatch.setattr(shutil, "which", lambda _name: None)
     code, out = _run(_grep_event(tmp_path, "needle"), capsys)
-    assert code == 0 and _denied(out) and "over the size limit" in out
+    assert code == 0 and _denied(out) and "too large to check" in out
 
 
 def test_fr_read_03_hook_oversize_binary_passes_oversize_text_refused(repo, capsys, tmp_path: Path) -> None:
     """A big executable named in a command (`.venv/bin/tool --version | cat`) is binary: it passes like images and
-    PDFs, whatever its size. An oversize TEXT file is still refused."""
+    PDFs, whatever its size. An oversize TEXT file is checked in chunks (FR-CORE-05): refused when it holds a secret."""
     from Harpocrates.read import MAX_BYTES
 
     binary = tmp_path / "tool"
@@ -423,12 +447,13 @@ def test_fr_read_03_hook_oversize_binary_passes_oversize_text_refused(repo, caps
     with binary.open("ab") as f:
         f.truncate(MAX_BYTES + 1024 * 1024)  # ~11 MB, NUL-filled
     text = tmp_path / "big.txt"
-    text.write_bytes(b"filler line\n" * ((MAX_BYTES + 1024 * 1024) // 12))
+    text.write_bytes(b"filler line\n" * ((MAX_BYTES + 1024 * 1024) // 12)
+                     + f"GITHUB_TOKEN={_canary('github_token')}\n".encode())
     assert binary.stat().st_size > MAX_BYTES and text.stat().st_size > MAX_BYTES
     assert _run(_bash(tmp_path, "./tool --version | cat"), capsys) == (0, "")
     assert _run(_bash(tmp_path, "cat tool"), capsys) == (0, "")
     code, out = _run(_bash(tmp_path, "cat big.txt"), capsys)
-    assert code == 0 and _denied(out) and "over the size limit" in out
+    assert code == 0 and _denied(out) and "api_token" in out
 
 
 @pytest.mark.parametrize("ripgrep", [True, False])
@@ -887,14 +912,18 @@ def test_fr_read_03_hook_scans_utf16_files_instead_of_passing_them_as_binary(rep
     assert _run(_bash(tmp_path, "cat clean16.txt"), capsys) == (0, "")  # UTF-16 without a secret still passes
 
 
-def test_fr_read_03_hook_utf16_oversize_is_refused_not_passed(repo, capsys, tmp_path: Path,
+def test_fr_read_03_hook_utf16_oversize_is_checked_not_passed(repo, capsys, tmp_path: Path,
                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """An oversize UTF-16 file is decoded and checked in chunks like a small one (FR-CORE-05), not passed as binary."""
     import Harpocrates.read as read
 
     monkeypatch.setattr(read, "MAX_BYTES", 4096)
     (tmp_path / "big16.txt").write_bytes(_utf16_variants("filler line\n" * 600)["le-bom"])
+    assert _run(_bash(tmp_path, "cat big16.txt"), capsys) == (0, "")
+    token = _canary("github_token")
+    (tmp_path / "big16.txt").write_bytes(_utf16_variants("filler line\n" * 600 + f"GITHUB_TOKEN={token}\n")["le-bom"])
     code, out = _run(_bash(tmp_path, "cat big16.txt"), capsys)
-    assert code == 0 and _denied(out) and "over the size limit" in out
+    assert code == 0 and _denied(out) and "api_token" in out
 
 
 def test_fr_read_03_hook_binary_secret_store_name_is_refused(repo, capsys, tmp_path: Path) -> None:
@@ -966,6 +995,9 @@ def test_fr_read_03_hook_env_assignment_in_code_is_not_an_environment_dump(repo,
                 "ps eww", "ps auxe", "ps e", "echo env", "grep -n env README.md"):
         code, out = _run(_bash(root, cmd), capsys)
         assert code == 0 and _denied(out) and token not in out, cmd
+    # An ordinary home path is not a secret. The fixture home sits under a random-looking temp folder on macOS,
+    # which the entropy detector rightly flags, so pin an ordinary value for this one check.
+    monkeypatch.setenv("HOME", "/home/dev")
     assert _run(_bash(root, "echo $HOME"), capsys) == (0, "")
 
 
@@ -996,23 +1028,26 @@ def test_fr_read_03_hook_agent_run_scan_prints_values_and_is_refused(repo, capsy
     dirty = _git_repo(tmp_path / "dirty", "", {"src/app.py": "print('foo')\n", "cfg.py": f'GITHUB_TOKEN = "{token}"\n'},
                       tracked=("src/app.py", "cfg.py"))
     clean = _git_repo(tmp_path / "clean", "", {"src/app.py": "print('foo')\n"}, tracked=("src/app.py",))
-    scans = ("harpocrates scan", "harpocrates scan .", "harpocrates scan --json", "harpocrates scan --json .",
-             "harpocrates scan . --json --fail-on none", "harpocrates scan cfg.py", f"harpocrates scan {dirty}",
-             ".venv/bin/harpocrates scan .", "python -m Harpocrates.cli scan .", "python3 -m Harpocrates scan",
-             "python -m Harpocrates.cli --help scan x; python -m Harpocrates.cli scan", "sudo harpocrates scan .",
-             "cd src && harpocrates scan ..", "uv run harpocrates scan .", "harpocrates scan . | head",
-             "bash -c 'harpocrates scan .'", "harpocrates scan --engine python .")
+    # FR-NAME-02: <bin> is `harpocrates` and `harpo`; the agent can run either, and both print the values
+    scans = with_each_name(["<bin> scan", "<bin> scan .", "<bin> scan --json", "<bin> scan --json .",
+                            "<bin> scan . --json --fail-on none", "<bin> scan cfg.py", f"<bin> scan {dirty}",
+                            ".venv/bin/<bin> scan .", "python -m Harpocrates.cli scan .", "python3 -m Harpocrates scan",
+                            "python -m Harpocrates.cli --help scan x; python -m Harpocrates.cli scan",
+                            "sudo <bin> scan .", "cd src && <bin> scan ..", "uv run <bin> scan .",
+                            "<bin> scan . | head", "bash -c '<bin> scan .'", "<bin> scan --engine python ."])
+    # the default macOS file system folds case, so these run the same program
+    scans += ["HARPO scan .", "Harpo scan --json", "HARPOCRATES scan .", "./Harpocrates scan cfg.py"]
     for cmd in scans:
         code, out = _run(_bash(dirty, cmd), capsys)
         message = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out else ""
         assert code == 0 and _denied(out) and token[:12] not in out, cmd
-        assert message == ("harpocrates scan prints secret values. Use mcp__harpocrates__scan_file or scan_text, "
-                           "which return findings without values."), cmd
-    for cmd in ("harpocrates scan", "harpocrates scan .", "harpocrates scan src", "python -m Harpocrates.cli scan src",
-                "harpocrates scan --help", "harpocrates scan -h", "harpocrates --version", "harpocrates --help",
-                "harpocrates install --dry-run", "python -m Harpocrates.cli --version", "echo harpocrates scan"):
+        assert message == ("harpo scan prints secret values. Use mcp__harpo__scan_file (mcp__harpocrates__scan_file until "
+                           "you re-run `harpo install`) or scan_text, which return findings without values."), cmd
+    for cmd in with_each_name(["<bin> scan", "<bin> scan .", "<bin> scan src", "python -m Harpocrates.cli scan src",
+                               "<bin> scan --help", "<bin> scan -h", "<bin> --version", "<bin> --help",
+                               "<bin> install --dry-run", "python -m Harpocrates.cli --version", "echo <bin> scan"]):
         assert _run(_bash(clean, cmd), capsys) == (0, ""), cmd
-    for cmd in ("harpocrates --version", "harpocrates --help", "harpocrates scan --help", "harpocrates scan src"):
+    for cmd in with_each_name(["<bin> --version", "<bin> --help", "<bin> scan --help", "<bin> scan src"]):
         assert _run(_bash(dirty, cmd), capsys) == (0, ""), cmd
 
 
@@ -1062,15 +1097,15 @@ def test_fr_read_03_hook_agent_scan_with_history_or_show_secrets_is_refused(repo
         files["cfg.py"] = f'GITHUB_TOKEN = "{_canary_token(canaries)}"\n'
     root = _git_repo(tmp_path / where, "", files, tracked=tuple(files))
     suffix = "(git history and --show-secrets can't be checked)"
-    for cmd in ("harpocrates scan --history", "harpocrates scan . --history", "harpocrates scan --show-secrets .",
-                "harpocrates scan --history --show-secrets --json", "python -m Harpocrates scan --history --json",
-                "python -m Harpocrates.cli scan . --show-secrets", "sudo harpocrates scan src --history",
-                "bash -c 'harpocrates scan --history'", "uv run harpocrates scan --show-secrets"):
+    for cmd in with_each_name(["<bin> scan --history", "<bin> scan . --history", "<bin> scan --show-secrets .",
+                               "<bin> scan --history --show-secrets --json", "python -m Harpocrates scan --history --json",
+                               "python -m Harpocrates.cli scan . --show-secrets", "sudo <bin> scan src --history",
+                               "bash -c '<bin> scan --history'", "uv run <bin> scan --show-secrets"]):
         code, out = _run(_bash(root, cmd), capsys)
         reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out else ""
-        assert code == 0 and _denied(out) and reason.startswith("harpocrates scan prints secret values.")
+        assert code == 0 and _denied(out) and reason.startswith("harpo scan prints secret values.")
         assert reason.endswith(suffix), cmd
-    for cmd in ("harpocrates scan --help --history", "echo harpocrates scan --history", "harpocrates --version"):
+    for cmd in with_each_name(["<bin> scan --help --history", "echo <bin> scan --history", "<bin> --version"]):
         assert _run(_bash(root, cmd), capsys) == (0, ""), cmd
 
 

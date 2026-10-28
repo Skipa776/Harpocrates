@@ -12,7 +12,7 @@ cli/tests/fixtures/test_tokens.py
 cli/tests/fixtures/fake_secrets.txt
 
 # Source code that references secret patterns for detection logic
-cli/Harpocrates/training/generators/secret_templates.py
+bench/canaries/secret_templates.py
 cli/Harpocrates/training/generators/generate_data.py
 cli/Harpocrates/ml/features.py
 cli/Harpocrates/detectors/regex_patterns.py

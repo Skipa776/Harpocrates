@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from Harpocrates.utils.redaction import mask_secrets
+
 
 class EvidenceType(Enum):
-    """Type of evidence that triggered the detection."""
+    """
+    Description: Represent the evidence source that triggered detection.
+    Parameters: None
+    Output: Enum members provide regex, entropy, ML, LLM, and hybrid evidence labels.
+    """
     REGEX = "regex"
     ENTROPY = "entropy"
     ML = 'ml'
@@ -14,7 +21,11 @@ class EvidenceType(Enum):
     HYBRID = 'hybrid'
 
 class Severity(Enum):
-    """Severity level of the finding."""
+    """
+    Description: Represent the severity assigned to a finding.
+    Parameters: None
+    Output: Enum members provide critical, high, medium, low, and informational levels.
+    """
     CRITICAL = 'critical'
     HIGH = "high"
     MEDIUM = 'medium'
@@ -25,18 +36,24 @@ class Severity(Enum):
 @dataclass
 class Finding:
     """
-    Represents a single secret detection finding.
-
-    Attributes:
-        type: Type of secret detected (e.g., "AWS_ACCESS_KEY", "GITHUB_TOKEN")
-        file: Path to the file where secret was found (None for text scans)
-        line: Line number in the file (None for text scans)
-        snippet: Code snippet containing the secret (truncated)
-        entropy: Shannon entropy of the detected token (if applicable)
-        evidence: How the secret was detected (regex, entropy, ml, etc.)
-        severity: Severity level of the finding
-        confidence: Confidence score (0.0-1.0) for ML-based detection
-        token: The actual detected token (use with caution)
+    Description: Represent a single secret detection with evidence, location, and optional classification metadata.
+    Parameters:
+        type: Type of detected secret, such as AWS_ACCESS_KEY or GITHUB_TOKEN.
+        snippet: Source snippet containing the secret, potentially truncated.
+        evidence: Evidence source that triggered detection.
+        file: Optional source path; None for text scans.
+        line: Optional source line number; None for text scans.
+        entropy: Optional Shannon entropy of the token.
+        severity: Finding severity, defaulting to medium.
+        confidence: Optional model confidence from 0.0 to 1.0.
+        token: Actual detected token; use with caution.
+        token_start: Optional inclusive internal token offset.
+        token_end: Optional exclusive internal token offset.
+        in_comment: Optional flag for commented-out findings.
+        category: Optional violation-category value.
+        category_reason: Optional category inference trace.
+    Output: Instances provide finding fields, redacted display, and serialization; raw token and snippet
+        fields require care.
     """
     type: str
     snippet: str
@@ -60,11 +77,15 @@ class Finding:
     @property
     def redacted_token(self) -> Optional[str]:
         """
+        Description: Render the token through the shared redaction utility for consistent safe
+        display.
+        Parameters: None
+        Output: Redacted token string or None for absent/blank input; lazily imports the shared
+        utility.
         Returns a redacted version of the token for safe display.
-
-        Delegates to :func:`Harpocrates.utils.redaction.redact_token` so
-        that every surface (CLI, API, logs) shares a single redaction
-        contract. Kept as a property for backward compatibility.
+        Delegates to :func:`Harpocrates.utils.redaction.redact_token` so that every surface (CLI,
+        API, logs) shares a single redaction contract. Kept as a property for backward
+        compatibility.
         """
         # Local import avoids a core <-> utils import cycle.
         from Harpocrates.utils.redaction import redact_token
@@ -72,7 +93,13 @@ class Finding:
         return redact_token(self.token)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert finding to dictionary representation"""
+        """
+        Description: Serialize finding fields and enum values for programmatic consumers.
+        Parameters: None
+        Output: Dictionary retaining the raw token and snippet but omitting internal token offsets;
+        retains in_comment.
+        Convert finding to dictionary representation
+        """
         result = asdict(self)
         result['evidence'] = self.evidence.value
         result['severity'] = self.severity.value
@@ -83,14 +110,36 @@ class Finding:
         result.pop('token_end', None)
         return result
 
-    def to_json_dict(self, include_token: bool = False) -> Dict[str, Any]:
+    def to_json_dict(
+        self, include_token: bool = False, also_mask: Iterable[Optional[str]] = ()
+    ) -> Dict[str, Any]:
+        """
+        Description: Serialize a finding with optional raw-token inclusion for JSON consumers (SEC-01).
+        Parameters:
+            include_token: Whether to retain raw tokens and unredacted text in serialized findings.
+            also_mask: Other secrets to hide from the text fields, such as the tokens of the other
+                findings on the same line; ignored when include_token is true.
+        Output: Dictionary excluding token by default. Unless include_token is true, snippet and
+        category_reason carry each occurrence of the token (and of also_mask) in redacted form,
+        so no field holds a plaintext secret. Field names are unchanged.
+        """
         d = self.to_dict()
         if not include_token:
             d.pop('token', None)
+            hidden = [self.token, *also_mask]
+            d['snippet'] = mask_secrets(self.snippet, hidden)
+            if self.category_reason:
+                d['category_reason'] = mask_secrets(self.category_reason, hidden)
         return d
 
     def __str__(self) -> str:
-        """Human-readable string representation"""
+        """
+        Description: Format the finding location, category, severity, and evidence for
+        human-readable output.
+        Parameters: None
+        Output: Summary string without the raw token or snippet.
+        Human-readable string representation
+        """
         loc = f"{self.file}:{self.line}" if self.file and self.line else "text"
         cat_str = f" [{self.category}]" if self.category else ""
         return (
@@ -98,17 +147,33 @@ class Finding:
             f"at {loc} (evidence: {self.evidence.value})"
         )
 
+def findings_to_json(findings: List[Finding], include_token: bool = False) -> List[Dict[str, Any]]:
+    """
+    Description: Serialize findings for JSON output, hiding every finding's token from the text fields
+        of all findings on the same line (SEC-01).
+    Parameters:
+        findings: Findings to serialize, in order.
+        include_token: Whether to keep raw tokens and unredacted text (the --show-secrets opt-in).
+    Output: One dictionary per finding, in the same order, as Finding.to_json_dict returns. Two
+        findings on one line mask each other's secrets, so a snippet never shows a neighbour's value.
+    """
+    by_line: Dict[Any, List[Optional[str]]] = {}
+    for f in findings:
+        by_line.setdefault((f.file, f.line), []).append(f.token)
+    return [f.to_json_dict(include_token=include_token, also_mask=by_line[(f.file, f.line)]) for f in findings]
+
+
 @dataclass
 class ScanResult:
     """
-    Represents the complete result of a scan operation.
-
-    Attributes:
-        findings: List of all findings detected
-        scanned_files: Number of files scanned
-        total_lines: Total lines of code scanned
-        duration_ms: Scan duration in milliseconds
-        errors: List of errors encountered during scanning
+    Description: Represent all findings, scan statistics, and errors from a scan operation.
+    Parameters:
+        findings: List of detected findings.
+        scanned_files: Number of scanned files.
+        total_lines: Number of scanned source lines.
+        duration_ms: Scan duration in milliseconds.
+        errors: Optional list of scanning errors, normalized to an empty list if absent.
+    Output: Instances provide findings, counts, errors, and serialization helpers.
     """
     findings: List[Finding]
     scanned_files: int = 0
@@ -117,28 +182,55 @@ class ScanResult:
     errors: Optional[list[str]] = None
 
     def __post_init__(self):
+        """
+        Description: Normalize missing scan errors to an independent list for each result.
+        Parameters: None
+        Output: None; replaces a None errors field with an empty list.
+        """
         if self.errors is None:
             self.errors = []
 
     @property
     def found_secrets(self) -> bool:
-        """Returns True if any findings were dectected"""
+        """
+        Description: Check whether the scan produced any findings.
+        Parameters: None
+        Output: True for a nonempty findings list, otherwise False.
+        Returns True if any findings were dectected
+        """
         return len(self.findings) > 0
 
     @property
     def critical_count(self) -> int:
-        """Count of critical severity findings were detected."""
+        """
+        Description: Count critical findings for the scan summary.
+        Parameters: None
+        Output: Number of findings with Severity.CRITICAL.
+        Count of critical severity findings were detected.
+        """
         return sum(1 for f in self.findings if f.severity == Severity.CRITICAL)
 
     @property
     def high_count(self) -> int:
-        """Count of high severity findings findings"""
+        """
+        Description: Count high-severity findings for the scan summary.
+        Parameters: None
+        Output: Number of findings with Severity.HIGH.
+        Count of high severity findings findings
+        """
         return sum(1 for f in self.findings if f.severity == Severity.HIGH)
 
     def to_dict(self, include_token: bool = False) -> Dict[str, Any]:
-        """Convert scan result to a dictionary"""
+        """
+        Description: Serialize findings and scan statistics with summary counts for consumers.
+        Parameters:
+            include_token: Whether to retain raw tokens in serialized findings.
+        Output: Dictionary of findings, statistics, errors, and counts; raw tokens are excluded
+        unless requested, and so is every plaintext secret in snippets (SEC-01).
+        Convert scan result to a dictionary
+        """
         return {
-            "findings": [f.to_json_dict(include_token=include_token) for f in self.findings],
+            "findings": findings_to_json(self.findings, include_token=include_token),
             "scanned_files": self.scanned_files,
             "total_lines": self.total_lines,
             "duration_ms": self.duration_ms,
@@ -151,11 +243,16 @@ class ScanResult:
         }
 
     def __str__(self) -> str:
-        """Human readable summary"""
+        """
+        Description: Format scan counts and duration as a human-readable summary.
+        Parameters: None
+        Output: Summary string with finding, file, and line counts and duration in milliseconds.
+        Human readable summary
+        """
         return (
             f"Scan complete: {len(self.findings)} findings in "
             f"{self.scanned_files} files ({self.total_lines} lines) "
             f"[{self.duration_ms:.2f}ms]"
         )
 
-__all__ = ["Finding", "ScanResult", "EvidenceType", "Severity"]
+__all__ = ["Finding", "ScanResult", "EvidenceType", "Severity", "findings_to_json"]

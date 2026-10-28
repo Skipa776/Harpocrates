@@ -1,12 +1,14 @@
-// Reads the reason of a Harpocrates PreToolUse "ask" verdict (FR-READ-06: only
+// Reads the reason of a Harpo PreToolUse "ask" verdict (FR-READ-06: only
 // edits of a file that holds secrets ask, one file per call). Only the path and
 // the secret kinds are in it; secret values never are, and nothing here logs
 // anything.
 
 import { truncateLeft } from './width'
 
-export const PREFIX = 'Harpocrates: '
-export const HEADER = 'Harpocrates'
+export const PREFIX = 'Harpo: '
+/** What a hook from before the rename wrote ("Harpocrates: ..."): still drawn, so a plugin update needs no CLI update. */
+export const LEGACY_PREFIX = 'Harpocrates: '
+export const HEADER = 'Harpo'
 export const KEEP_PROTECTED = 'Keep secrets protected'
 export const ALLOW_EDITS = 'Allow edits this session'
 
@@ -25,11 +27,11 @@ const KINDS = '(?:[a-z0-9_]+(?:, [a-z0-9_]+)*|unscanned \\(over the size limit\\
 // that itself spells an anchor still splits at the last one, where the kinds
 // are. Anything the hook words differently is not ours to draw.
 const REASON = new RegExp(
-  '^Harpocrates: Claude wants to edit (.+) without secret protection\\. ' +
+  '^(?:Harpo|Harpocrates): Claude wants to edit (.+) without secret protection\\. ' +
     `It contains secrets \\((${KINDS})\\)\\. ` +
     'Allowing lets Claude read and edit this file with its built-in tools for the rest of this session; ' +
     'these values go to the model provider as-is\\. ' +
-    'Choose No to keep them protected: Claude can still read it with mcp__harpocrates__safe_read\\.$',
+    'Choose No to keep them protected: Claude can still read it with mcp__(?:harpo|harpocrates)__safe_read\\.$',
   's',
 )
 // Control characters, bidi controls (which can reorder a name so ".exe" reads
@@ -40,7 +42,7 @@ const UNSAFE = new RegExp(
 )
 
 export const isHarpocratesReason = (reason: unknown): reason is string =>
-  typeof reason === 'string' && reason.startsWith(PREFIX)
+  typeof reason === 'string' && (reason.startsWith(PREFIX) || reason.startsWith(LEGACY_PREFIX))
 
 /** Unsafe characters become '?', so nothing drawn can move the cursor, recolour or reorder. */
 export const sanitize = (text: string): string => text.replace(UNSAFE, '?')
@@ -103,10 +105,10 @@ export function uniqueQuestion(question: string, taken: (q: string) => boolean):
 }
 
 export const denyReason = (ask: ParsedAsk): string =>
-  `The user kept ${ask.path} protected. Read it with mcp__harpocrates__safe_read; ask the user to make the edit.`
+  `The user kept ${ask.path} protected. Read it with mcp__harpo__safe_read; ask the user to make the edit.`
 
 export const noAnswerReason = (ask: ParsedAsk): string =>
-  `No one answered the Harpocrates prompt, so ${ask.path} stays protected. Read it with mcp__harpocrates__safe_read.`
+  `No one answered the Harpo prompt, so ${ask.path} stays protected. Read it with mcp__harpo__safe_read.`
 
 export type CallLine = { readonly label: string; readonly path: string }
 
