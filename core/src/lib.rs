@@ -5,6 +5,8 @@
 //! features and ML verification.
 
 mod candidates;
+#[cfg(feature = "python")]
+mod python;
 
 use candidates::{CharIndex, assigned_name, context_window};
 use regex::{Regex, RegexSet};
@@ -385,6 +387,29 @@ pub fn scan_text(text: &str, options: &ScanOptions) -> Result<Vec<RawFinding>, S
     }
 
     Ok(findings)
+}
+
+/// One line through every tier, as the Python detector's `_scan_line` takes it: `continued` is None for a line or its
+/// first piece, and for a later piece of a long line (FR-CORE-05) whether the line is a comment; such a piece is
+/// scanned as it is, and its offsets count from its start. `extension` is the file's, as `_file_ext` gives it.
+pub fn scan_line_raw(
+    line: &str,
+    lineno: usize,
+    extension: &str,
+    continued: Option<bool>,
+) -> Result<Vec<RawFinding>, ScanError> {
+    let engine = engine()?;
+    Ok(match continued {
+        None => scan_line(engine, line, lineno, extension),
+        Some(is_comment) => scan_prepared(
+            engine,
+            line,
+            Cow::Borrowed(line),
+            is_comment,
+            lineno,
+            extension,
+        ),
+    })
 }
 
 pub fn scan_file(

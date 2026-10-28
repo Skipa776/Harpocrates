@@ -5,21 +5,23 @@ missing binary fails instead of silently testing Python twice.
 """
 
 import dataclasses
+import importlib
 import json
 import math
 import random
 import string
 import subprocess
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
 from Harpocrates import envvars
-from Harpocrates.core import classification, detector
+from Harpocrates.core import detector
 from Harpocrates.core.result import Finding
 from Harpocrates.core.rust_backend import RustScannerBackend
 from Harpocrates.core.scanner import scan_directory
-from Harpocrates.detectors.regex_patterns import CRITICAL_SIGNATURES, HIGH_SIGNATURES
 
 ROOT = Path(__file__).resolve().parents[2]
 SAMPLES = ROOT / "docs" / "samples" / "samples"
@@ -29,13 +31,8 @@ _ALNUM = string.ascii_letters + string.digits
 _TOKEN_CHARS = _ALNUM + "_-"
 _UPPER_ALNUM = string.ascii_uppercase + string.digits
 _HEX = "0123456789abcdef"
-_PYTHON_NAMES = (
-    "_TOKEN_RE", "_URL_RE", "_PEM_BODY_RE", "_COMMENT_STRIP_RE", "_PROSE_FILTER_RE", "_SENSITIVE_ASSIGNMENT_RE",
-    "_ENV_ASSIGNMENT_RE", "_CONN_URI_RE", "_KV_PASSWORD_RE", "_COLON_CREDENTIAL_RE", "_URL_TOKEN_RE",
-    "_HEX_SECRET_RE", "_QUOTED_LITERAL_RE", "_BEARER_RE", "_HEADER_SECRET_RE", "_URL_IN_LINE_RE", "_URL_PIECE_RE",
-    "_USERINFO_KEY_RE", "_WORDS_JOINED_RE", "_UUID_RE", "_ASSIGNED_VALUE_RE", "_LETTER_RUN_RE",
-)
 _SYMBOL_SETS = ("_PASSWORD_SYMBOLS", "_SOUP_SYMBOLS")
+_FIELDS = [f.name for f in dataclasses.fields(Finding) if f.name not in ("entropy", "confidence")]
 
 
 @pytest.fixture(scope="module")
@@ -46,52 +43,43 @@ def rust_available():
         pytest.skip("Rust scanner binary not built")
 
 
+@pytest.fixture(scope="module")
+def native():
+    try:
+        return importlib.import_module("harpo_native")
+    except ImportError:
+        if envvars.getenv("REQUIRE_NATIVE") == "1":
+            pytest.fail("HARPO_REQUIRE_NATIVE=1 (or HARPOCRATES_REQUIRE_NATIVE=1) but harpo_native is not installed")
+        pytest.skip("harpo_native is not installed (pip install ./core)")
+
+
 def _keys(result):
     return sorted((Path(f.file).name, f.line, f.type, f.token) for f in result.findings)
 
 
-def _same_candidates(path):
+def _assert_same(python, other, fields):
+    """Assert two engines' candidates agree on these fields, with entropy and confidence within 1e-9."""
+
+    def row(f):
+        return tuple(getattr(f, n) for n in fields)
+
+    assert [row(f) for f in python] == [row(f) for f in other]
+    for a, b in zip(python, other):
+        assert math.isclose(a.entropy, b.entropy, abs_tol=1e-9)
+        assert math.isclose(a.confidence, b.confidence, abs_tol=1e-9)
+
+
+def _same_candidates(path, monkeypatch):
     """Assert both engines return the same raw candidates for one file, and return the Python ones."""
+    monkeypatch.setattr(detector, "_native", None)
     py = detector._collect_file_findings(path)
     rs = RustScannerBackend.discover(required=True)._collect_file(path, memory_cap=None)
-    fields = [f.name for f in dataclasses.fields(Finding) if f.name not in ("file", "entropy", "confidence")]
-    assert [tuple(getattr(f, n) for n in fields) for f in py] == [tuple(getattr(f, n) for n in fields) for f in rs]
-    for a, b in zip(py, rs):
-        assert math.isclose(a.entropy, b.entropy, rel_tol=1e-9, abs_tol=1e-9)
-        assert math.isclose(a.confidence, b.confidence, rel_tol=1e-9, abs_tol=1e-9)
+    _assert_same(py, rs, [n for n in _FIELDS if n != "file"])
     return py
 
 
-def test_fr_core_01_rust_matches_python(rust_available):
-    rust = scan_directory(SAMPLES, engine="rust")
-    python = scan_directory(SAMPLES, engine="python")
-    assert rust.errors == []  # Rust scan failure or per-file read errors
-    assert rust.findings, "samples should contain findings"
-    assert _keys(rust) == _keys(python)
-
-
-def test_fr_core_01_rust_patterns_are_the_python_patterns(rust_available):
-    """The Rust core matches with the Python patterns, so editing one without the other fails here."""
-    executable = str(RustScannerBackend.discover(required=True).executable)
-    out = subprocess.run([executable, "patterns"], capture_output=True, text=True, check=True)
-    rust = [
-        (name, "".join(sorted(text)) if name in _SYMBOL_SETS else text)
-        for name, text in json.loads(out.stdout)
-    ]
-    python = [(name, pattern.pattern) for name, pattern in {**CRITICAL_SIGNATURES, **HIGH_SIGNATURES}.items()]
-    python += [(name, getattr(detector, name).pattern) for name in _PYTHON_NAMES]
-    python += [
-        ("_PASSWORD_SYMBOLS", "".join(sorted(detector._PASSWORD_SYMBOLS))),
-        ("_SOUP_SYMBOLS", "".join(sorted(detector._SOUP_SYMBOLS))),
-        ("_URL_TRAILING", detector._URL_TRAILING),
-        ("_VAR_NAME_WINDOW", str(classification._VAR_NAME_WINDOW)),
-        ("_SEGMENT_CAP", str(classification._SEGMENT_CAP)),
-    ]
-    assert rust == python
-
-
-def test_fr_core_01_every_rule_gives_the_same_candidates(rust_available, tmp_path):
-    """Every regex and entropy rule, with its edge cases, gives the same raw candidates on both engines."""
+def _rule_files(tmp_path):
+    """Write the fixture files that cover every regex and entropy rule with its edge cases; return their paths."""
     rng = random.Random(1)
 
     def pick(alphabet, n):
@@ -181,23 +169,96 @@ def test_fr_core_01_every_rule_gives_the_same_candidates(rust_available, tmp_pat
         "cert.txt": [pick(_ALNUM + "+/", 64)],
     }
 
-    findings = []
+    paths = []
     for name, lines in files.items():
         path = tmp_path / name
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        findings.extend(_same_candidates(path))
+        paths.append(path)
+    return paths
 
-    types = {f.type for f in findings}
+
+def test_fr_core_01_rust_matches_python(rust_available):
+    rust = scan_directory(SAMPLES, engine="rust")
+    python = scan_directory(SAMPLES, engine="python")
+    assert rust.errors == []  # Rust scan failure or per-file read errors
+    assert rust.findings, "samples should contain findings"
+    assert _keys(rust) == _keys(python)
+
+
+def test_fr_core_01_rust_patterns_are_the_python_patterns(rust_available):
+    """The Rust core matches with the Python patterns, so editing one without the other fails here."""
+    executable = str(RustScannerBackend.discover(required=True).executable)
+    out = subprocess.run([executable, "patterns"], capture_output=True, text=True, check=True)
+    rust = [
+        (name, "".join(sorted(text)) if name in _SYMBOL_SETS else text)
+        for name, text in json.loads(out.stdout)
+    ]
+    assert rust == detector.rule_patterns()
+
+
+def test_fr_core_01_every_rule_gives_the_same_candidates(rust_available, tmp_path, monkeypatch):
+    """Every regex and entropy rule, with its edge cases, gives the same raw candidates on both engines."""
+    findings = []
+    for path in _rule_files(tmp_path):
+        findings.extend(_same_candidates(path, monkeypatch))
+
+    types_found = {f.type for f in findings}
     assert {
         "TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY_LEGACY", "AWS_ACCESS_KEY_ID", "ENTROPY_CANDIDATE", "ML_CANDIDATE",
         "ENV_ASSIGNMENT",
-    } <= types
+    } <= types_found
     assert sum(f.type == "ML_CANDIDATE" for f in findings) >= 15
 
 
-def test_fr_core_01_samples_give_the_same_candidates(rust_available):
+def test_fr_core_01_samples_give_the_same_candidates(rust_available, monkeypatch):
     """The README's samples give the same raw candidates on both engines."""
     paths = sorted(p for p in SAMPLES.rglob("*") if p.is_file())
     assert paths, "docs/samples/samples should contain files"
     for path in [*paths, READMES]:
-        _same_candidates(path)
+        _same_candidates(path, monkeypatch)
+
+
+def test_fr_core_01_native_rules_give_the_same_candidates(native, tmp_path, monkeypatch):
+    """The harpo_native rules give the same candidates as the Python rules on every fixture and README sample."""
+    paths = [*_rule_files(tmp_path), *sorted(p for p in SAMPLES.rglob("*") if p.is_file()), READMES]
+    for path in paths:
+        monkeypatch.setattr(detector, "_native", None)
+        python = detector._collect_file_findings(path)
+        monkeypatch.setattr(detector, "_native", native)
+        native_found = detector._collect_file_findings(path)
+        _assert_same(python, native_found, _FIELDS)
+
+
+def test_fr_core_01_native_is_used_only_with_the_same_rules(native, monkeypatch):
+    """harpo_native is used only with exactly the Python rules; otherwise, or with HARPO_NATIVE=0, Python runs."""
+    monkeypatch.delenv("HARPO_NATIVE", raising=False)
+    monkeypatch.delenv("HARPOCRATES_NATIVE", raising=False)
+    monkeypatch.setattr(detector, "_native", detector._UNSET)
+    assert detector._native_module() is native
+
+    monkeypatch.setattr(detector, "_native", detector._UNSET)
+    monkeypatch.setenv("HARPO_NATIVE", "0")
+    assert detector._native_module() is None
+
+    monkeypatch.delenv("HARPO_NATIVE", raising=False)
+    monkeypatch.setattr(detector, "_native", detector._UNSET)
+    other_rules = types.SimpleNamespace(
+        PROTOCOL_VERSION=native.PROTOCOL_VERSION, patterns=lambda: [("X", "y")], scan_line=native.scan_line,
+    )
+    monkeypatch.setitem(sys.modules, "harpo_native", other_rules)
+    assert detector._native_module() is None
+
+    monkeypatch.setattr(detector, "_native", detector._UNSET)
+    other_protocol = types.SimpleNamespace(
+        PROTOCOL_VERSION=native.PROTOCOL_VERSION + 1, patterns=native.patterns, scan_line=native.scan_line,
+    )
+    monkeypatch.setitem(sys.modules, "harpo_native", other_protocol)
+    assert detector._native_module() is None
+
+
+def test_fr_core_01_native_is_in_use_when_required():
+    """With REQUIRE_NATIVE=1 (CI's Rust job), the harpo_native rules are the ones in use."""
+    if envvars.getenv("REQUIRE_NATIVE") == "1":
+        assert detector._native_module() is not None
+    else:
+        pytest.skip("HARPO_REQUIRE_NATIVE is not set")

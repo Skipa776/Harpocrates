@@ -8,6 +8,8 @@ license = "MIT"
 [lib]
 name = "harpocrates_rust_scanner"
 path = "src/lib.rs"
+# cdylib is the Python extension module (feature "python", built by maturin from core/pyproject.toml).
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "harpocrates-rust-scanner"
@@ -17,7 +19,11 @@ path = "src/main.rs"
 name = "scanner"
 harness = false
 
+[features]
+python = ["dep:pyo3"]
+
 [dependencies]
+pyo3 = { version = "0.23", features = ["abi3-py310"], optional = true }
 regex = "1.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

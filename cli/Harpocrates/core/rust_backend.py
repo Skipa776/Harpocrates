@@ -16,15 +16,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from Harpocrates import envvars, paths
-from Harpocrates.core.classification import infer_category
 from Harpocrates.core.detector import (
     _apply_ml_verification_with_contexts,
-    _severity_from_classification,
-    _severity_from_entropy,
     _streamed_contexts,
+    findings_from_raw,
     verify_file_candidates,
 )
-from Harpocrates.core.result import EvidenceType, Finding, Severity
+from Harpocrates.core.result import EvidenceType, Finding
 
 if TYPE_CHECKING:
     from Harpocrates.ml.context import CodeContext
@@ -638,79 +636,10 @@ class RustScannerBackend:
         Output: List of Finding objects; raises RustScannerError for missing, invalidly typed, or
             invalid-valued payload fields.
         """
-        findings = []
-        for index, raw in enumerate(payload):
-            try:
-                evidence = EvidenceType(str(raw["evidence"]))
-                kind = str(raw["type"])
-                token = str(raw["token"])
-                var_name = raw.get("var_name")
-                signature = (
-                    kind if evidence == EvidenceType.REGEX and kind != "ENV_ASSIGNMENT" else None
-                )
-                context = raw.get("context")
-                # The same inputs the Python detector gives the classifier: a signature alone, or the variable name
-                # and the line around the token (the context window holds every character the classifier reads).
-                inference = infer_category(
-                    signature_name=signature,
-                    var_name=str(var_name) if var_name else None,
-                    token=token,
-                    line=str(context) if signature is None and context else None,
-                )
-
-                if signature is not None:
-                    severity = Severity(str(raw["severity"]))
-                    confidence = float(raw["confidence"])
-                else:
-                    severity = (
-                        _severity_from_classification(inference)
-                        if kind == "ENV_ASSIGNMENT"
-                        else _severity_from_entropy(inference)
-                    )
-                    confidence = (
-                        inference.confidence
-                        if kind == "ENV_ASSIGNMENT"
-                        else float(raw["confidence"])
-                    )
-
-                findings.append(
-                    Finding(
-                        type=kind,
-                        file=file,
-                        line=int(raw["line"]),
-                        snippet=str(raw["snippet"]),
-                        entropy=float(raw["entropy"]),
-                        evidence=evidence,
-                        severity=severity,
-                        confidence=confidence,
-                        token=token,
-                        token_start=_optional_int(raw.get("token_start")),
-                        token_end=_optional_int(raw.get("token_end")),
-                        in_comment=raw.get("in_comment"),
-                        category=inference.category.value,
-                        category_reason=inference.reason,
-                    )
-                )
-            except (KeyError, TypeError, ValueError) as exc:
-                raise RustScannerError(f"Invalid Rust finding payload at index {index}") from exc
-        return findings
-
-
-def _optional_int(value: object) -> Optional[int]:
-    """
-    Description: Convert optional integer metadata while explicitly rejecting booleans.
-    Parameters:
-        value: Integer, integer string, or None to convert.
-    Output: Integer or None; raises TypeError for booleans and unsupported types, or ValueError for
-        invalid integer strings.
-    """
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        raise TypeError("expected an integer, string, or null")
-    if isinstance(value, (int, str)):
-        return int(value)
-    raise TypeError("expected an integer, string, or null")
+        try:
+            return findings_from_raw(payload, file=file)
+        except ValueError as exc:
+            raise RustScannerError(str(exc)) from exc
 
 
 __all__ = [

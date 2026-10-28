@@ -8,17 +8,23 @@ Three-phase pipeline per line:
 
 Regex hits bypass XGBoost entirely; only entropy candidates are forwarded
 to the ML verifier. This keeps the fast path deterministic and CPU-free.
+
+The rules run in Rust when the optional `harpo_native` extension is installed and has the same rules
+(`rule_patterns()`); otherwise in Python, in `_python_scan_line`. HARPO_NATIVE=0 forces Python.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import functools
+import json
 import re
 from collections.abc import Sequence as SequenceABC
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
+from Harpocrates import envvars
+from Harpocrates.core import classification
 from Harpocrates.core.classification import extract_var_name, infer_category
 from Harpocrates.core.result import EvidenceType, Finding, Severity
 from Harpocrates.detectors.entropy_detector import looks_like_secret, shannon_entropy
@@ -351,7 +357,136 @@ def _assigned_name(text: str, value_start: int) -> Optional[str]:
     return text[:value_start].split("=")[0].split(":")[0].strip() or None
 
 
+# The names, in order, of the patterns and constants the line scan uses besides the signatures (rule_patterns).
+_RULE_NAMES = (
+    "_TOKEN_RE", "_URL_RE", "_PEM_BODY_RE", "_COMMENT_STRIP_RE", "_PROSE_FILTER_RE", "_SENSITIVE_ASSIGNMENT_RE",
+    "_ENV_ASSIGNMENT_RE", "_CONN_URI_RE", "_KV_PASSWORD_RE", "_COLON_CREDENTIAL_RE", "_URL_TOKEN_RE", "_HEX_SECRET_RE",
+    "_QUOTED_LITERAL_RE", "_BEARER_RE", "_HEADER_SECRET_RE", "_URL_IN_LINE_RE", "_URL_PIECE_RE", "_USERINFO_KEY_RE",
+    "_WORDS_JOINED_RE", "_UUID_RE", "_ASSIGNED_VALUE_RE", "_LETTER_RUN_RE",
+)
+_SYMBOL_SETS = ("_PASSWORD_SYMBOLS", "_SOUP_SYMBOLS")
+
+
+def rule_patterns() -> List[Tuple[str, str]]:
+    """
+    Description: List every pattern and constant the line scan uses, the way the Rust core lists its own
+        (`harpocrates-rust-scanner patterns`, `harpo_native.patterns()`), so the two can be compared.
+    Parameters: None
+    Output: (name, text) pairs: the signatures in tier order, then the other patterns, then the symbol sets (their
+        characters sorted), the URL trailing characters, and the two classifier windows.
+    """
+    out = [(name, pattern.pattern) for name, pattern in {**CRITICAL_SIGNATURES, **HIGH_SIGNATURES}.items()]
+    out += [(name, globals()[name].pattern) for name in _RULE_NAMES]
+    out += [(name, "".join(sorted(globals()[name]))) for name in _SYMBOL_SETS]
+    out += [("_URL_TRAILING", _URL_TRAILING), ("_VAR_NAME_WINDOW", str(classification._VAR_NAME_WINDOW)),
+            ("_SEGMENT_CAP", str(classification._SEGMENT_CAP))]
+    return out
+
+
+_UNSET = object()
+_native: object = _UNSET  # the harpo_native module, None for the Python rules, or _UNSET before the first line
+
+
+def _native_module():
+    """
+    Description: Find the Rust rules for this process, once.
+    Parameters: None
+    Output: The harpo_native module when it is installed, HARPO_NATIVE is not "0", it speaks the scanner protocol
+        and its rules are these (rule_patterns); otherwise None, and the Python rules run. Those are the same rules,
+        so a stale or missing build changes speed, not findings. The answer is kept in _native.
+    """
+    global _native
+    if _native is _UNSET:
+        _native = None
+        if envvars.getenv("NATIVE") != "0":
+            try:
+                import harpo_native
+            except ImportError:
+                harpo_native = None
+            from Harpocrates.core.rust_backend import PROTOCOL_VERSION
+            if harpo_native is not None and harpo_native.PROTOCOL_VERSION == PROTOCOL_VERSION:
+                native = [(name, "".join(sorted(text)) if name in _SYMBOL_SETS else text)
+                          for name, text in harpo_native.patterns()]
+                if native == rule_patterns():
+                    _native = harpo_native
+    return _native
+
+
 def _scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[bool] = None) -> List[Finding]:
+    """
+    Description: Scan one line through all three detection phases, in Rust when harpo_native is in use, else in
+        Python. Both give the same findings.
+    Parameters:
+        line: Source line to scan.
+        lineno: One-based source line number.
+        file: Optional source file path.
+        continued: For a later piece of a long line (FR-CORE-05), whether the line is a comment.
+    Output: The line's findings, as _python_scan_line describes them.
+    """
+    native = _native_module()
+    if native is None:
+        return _python_scan_line(line, lineno, file, continued)
+    raw = native.scan_line(line, lineno, _file_ext(file) if file is not None else "", continued)
+    return findings_from_raw(json.loads(raw), file=file) if raw else []
+
+
+def findings_from_raw(payload: List[dict], *, file: Optional[str]) -> List[Finding]:
+    """
+    Description: Turn the Rust core's raw findings into Findings, with the category and severity the Python line
+        scan gives: a signature alone, or the variable name and the context window around the token.
+    Parameters:
+        payload: Raw findings in the scanner protocol's finding format.
+        file: The file label for every finding.
+    Output: Findings in payload order. Raises ValueError naming the index of a malformed item.
+    """
+    findings = []
+    for index, raw in enumerate(payload):
+        try:
+            evidence = EvidenceType(str(raw["evidence"]))
+            kind = str(raw["type"])
+            token = str(raw["token"])
+            var_name = raw.get("var_name")
+            context = raw.get("context")
+            signature = kind if evidence == EvidenceType.REGEX and kind != "ENV_ASSIGNMENT" else None
+            inference = infer_category(
+                signature_name=signature,
+                var_name=str(var_name) if var_name else None,
+                token=token,
+                line=str(context) if signature is None and context else None,
+            )
+            if signature is not None:
+                severity, confidence = Severity(str(raw["severity"])), float(raw["confidence"])
+            elif kind == "ENV_ASSIGNMENT":
+                severity, confidence = _severity_from_classification(inference), inference.confidence
+            else:
+                severity, confidence = _severity_from_entropy(inference), float(raw["confidence"])
+            findings.append(Finding(
+                type=kind, file=file, line=int(raw["line"]), snippet=str(raw["snippet"]),
+                entropy=float(raw["entropy"]), evidence=evidence, severity=severity, confidence=confidence,
+                token=token, token_start=_optional_offset(raw.get("token_start")),
+                token_end=_optional_offset(raw.get("token_end")), in_comment=raw.get("in_comment"),
+                category=inference.category.value, category_reason=inference.reason,
+            ))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid Rust finding payload at index {index}") from exc
+    return findings
+
+
+def _optional_offset(value: object) -> Optional[int]:
+    """
+    Description: Read an optional character offset, refusing booleans.
+    Parameters:
+        value: An integer, an integer string, or None.
+    Output: The integer, or None. Raises TypeError for a boolean or another type, ValueError for a bad string.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise TypeError("expected an integer, string, or null")
+    return int(value)
+
+
+def _python_scan_line(line: str, lineno: int, file: Optional[str], continued: Optional[bool] = None) -> List[Finding]:
     """
     Description: Scan one line through all three detection phases.
     Parameters:
