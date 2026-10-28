@@ -78,6 +78,12 @@ Cause: The result is inconclusive: an agent CLI is missing or did not finish.
 
 Fix: Install `claude` and `codex` with `npm install -g @anthropic-ai/claude-code @openai/codex`. Never log them in. Run again. An exit code of 0 from `python -m bench.gate_e2e` only means the real home did not change. Read each scenario in its report, as described in [testing.md](testing.md).
 
+**The Codex scenarios of the end-to-end suites see no file contents, or an after-down control receives nothing.**
+
+Cause: Codex runs its commands in a bubblewrap sandbox, which needs unprivileged user namespaces. Ubuntu 24.04 restricts them through AppArmor for regular users, so Codex's reads fail. As root the restriction does not apply.
+
+Fix: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, which CI's integration job runs before the tests.
+
 ## The read hook
 
 **A Read, Grep or `cat` of a file is refused with a pointer to `safe_read`.**

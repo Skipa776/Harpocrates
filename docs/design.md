@@ -800,7 +800,7 @@ A Linux x86-64 cloud container with 4 cores. Python 3.13.16, Rust 1.97.0, Claude
 | FR-GATE-07 | Policy documented and tested | Tested in unit tests; end to end, no agent sent a non-image file as media |
 | FR-INSTALL-05 | A Claude Code subscription session works through the gate | Needs a subscription login |
 | FR-READ-03 | Fresh-machine setup in under 5 minutes, verified by someone else | Needs another person |
-| NFR-01 | Latency benchmark in CI | In CI from Oct 28: `bench/check_latency.py` runs in the integration job on the agent sessions it records, and does not block yet. Here, on the Oct 21 recordings: follow-up 16.8 ms p95 (n = 111, target 50), first turns 58.4 ms p95 (n = 41, largest body 1.04 MB, target 500); the two follow-ups of about 1 MB alone 53.7 ms p95 (n = 2). Open until a CI run passes |
+| NFR-01 | Latency benchmark in CI | In CI from Oct 28: `bench/check_latency.py` runs in the integration job on the agent sessions it records, and does not block yet. First CI run (`1084191`): follow-up 2.7 ms p95 (n = 18, target 50), first turns 35.0 ms p95 (n = 6, target 500), but its largest body was 48 KB, so the 1 MB part of the first-turn target is still measured only here: on the Oct 21 recordings, follow-up 16.8 ms p95 (n = 111), first turns 58.4 ms p95 (n = 41, largest body 1.04 MB); the two follow-ups of about 1 MB alone 53.7 ms p95 (n = 2) |
 | TEST-01 | The CI unit job fails a change below the floor | CI ran on #41 (coverage 93.47%, the floor reached); no change below the floor has been pushed to show the job failing |
 
 #### Final pass, Oct 21 to 28, 2026
