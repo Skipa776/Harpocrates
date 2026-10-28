@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from Harpocrates.detectors.regex_patterns import (
     CRITICAL_SIGNATURES,
     HIGH_SIGNATURES,
@@ -67,28 +69,43 @@ def test_openai_api_key() -> None:
     assert not pattern.search("sx-" + "x" * 48)
 
 
-def test_anthropic_api_key() -> None:
-    pattern = CRITICAL_SIGNATURES["ANTHROPIC_API_KEY"]
-    assert pattern.search("sk-ant-api03-" + "a" * 93)
-    assert not pattern.search("sk-ant-api03-" + "a" * 10)  # too short
+@pytest.mark.parametrize(
+    "signatures, key, positive, negative",
+    [
+        # too short
+        (
+            CRITICAL_SIGNATURES,
+            "ANTHROPIC_API_KEY",
+            "sk-ant-api03-" + "a" * 93,
+            "sk-ant-api03-" + "a" * 10,
+        ),
+        # wrong prefix case
+        (CRITICAL_SIGNATURES, "GCP_API_KEY", "key=AIza" + "A" * 35, "key=Aiza" + "A" * 35),
+        # too short
+        (CRITICAL_SIGNATURES, "NPM_TOKEN", "NPM_TOKEN=npm_" + "a" * 36, "npm_" + "a" * 10),
+        (CRITICAL_SIGNATURES, "PYPI_TOKEN", "pypi-" + "a" * 50, "pypi-" + "a" * 10),  # too short
+        # 'g' not in [0-9a-fA-F]
+        (HIGH_SIGNATURES, "TWILIO_API_KEY", "SK" + "a1b2c3d4" * 4, "SK" + "g" * 32),
+        # 'z' not in [a-f0-9]
+        (HIGH_SIGNATURES, "DATABRICKS_TOKEN", "dapi" + "a1b2" * 8, "dapi" + "z" * 32),
+        # too short
+        (HIGH_SIGNATURES, "HASHICORP_VAULT_TOKEN", "hvs." + "a" * 90, "hvs." + "a" * 10),
+    ],
+    ids=[
+        "anthropic_api_key",
+        "gcp_api_key",
+        "npm_token",
+        "pypi_token",
+        "twilio_api_key",
+        "databricks_token",
+        "hashicorp_vault_token",
+    ],
+)
+def test_signature_rule_matches_its_token(signatures, key, positive, negative) -> None:
+    pattern = signatures[key]
+    assert pattern.search(positive)
+    assert not pattern.search(negative)
 
-
-def test_gcp_api_key() -> None:
-    pattern = CRITICAL_SIGNATURES["GCP_API_KEY"]
-    assert pattern.search("key=AIza" + "A" * 35)
-    assert not pattern.search("key=Aiza" + "A" * 35)  # wrong prefix case
-
-
-def test_npm_token() -> None:
-    pattern = CRITICAL_SIGNATURES["NPM_TOKEN"]
-    assert pattern.search("NPM_TOKEN=npm_" + "a" * 36)
-    assert not pattern.search("npm_" + "a" * 10)  # too short
-
-
-def test_pypi_token() -> None:
-    pattern = CRITICAL_SIGNATURES["PYPI_TOKEN"]
-    assert pattern.search("pypi-" + "a" * 50)
-    assert not pattern.search("pypi-" + "a" * 10)  # too short
 
 
 # ---------------------------------------------------------------------------
@@ -124,24 +141,6 @@ def test_sendgrid_api_key() -> None:
     key = "SG." + "a" * 22 + "." + "b" * 43
     assert pattern.search(key)
     assert not pattern.search("SG." + "a" * 5 + "." + "b" * 43)  # too short
-
-
-def test_twilio_api_key() -> None:
-    pattern = HIGH_SIGNATURES["TWILIO_API_KEY"]
-    assert pattern.search("SK" + "a1b2c3d4" * 4)
-    assert not pattern.search("SK" + "g" * 32)  # 'g' not in [0-9a-fA-F]
-
-
-def test_databricks_token() -> None:
-    pattern = HIGH_SIGNATURES["DATABRICKS_TOKEN"]
-    assert pattern.search("dapi" + "a1b2" * 8)
-    assert not pattern.search("dapi" + "z" * 32)  # 'z' not in [a-f0-9]
-
-
-def test_hashicorp_vault_token() -> None:
-    pattern = HIGH_SIGNATURES["HASHICORP_VAULT_TOKEN"]
-    assert pattern.search("hvs." + "a" * 90)
-    assert not pattern.search("hvs." + "a" * 10)  # too short
 
 
 # ---------------------------------------------------------------------------

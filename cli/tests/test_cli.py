@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from cli_entry import COMMAND_NAMES, CommandNameRunner
 
+from Harpocrates import __version__
 from Harpocrates.cli import app
 
 runner = CommandNameRunner()
@@ -129,6 +130,12 @@ def test_cli_version() -> None:
     assert "version" in result.stdout.lower()
 
 
+def test_version_flag_prints_and_exits_zero() -> None:
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == f"harpo {__version__}"  # FR-NAME-01: both command names print the new name
+
+
 # --- --show-secrets flag ----------------------------------------------------
 
 
@@ -244,22 +251,26 @@ def test_cli_scan_fail_on_default_medium_exits_one(tmp_path: Path) -> None:
     assert result.exit_code == 1
 
 
-def test_cli_scan_fail_on_critical_exits_one_for_critical(tmp_path: Path) -> None:
-    """--fail-on critical: critical finding still triggers exit 1."""
+@pytest.mark.parametrize(
+    "fail_on, expected_exit",
+    [
+        # --fail-on accepts uppercase severity names (case-insensitive)
+        pytest.param("HIGH", 1, id="case_insensitive"),
+        # --fail-on critical: critical finding still triggers exit 1
+        pytest.param("critical", 1, id="critical_exits_one_for_critical"),
+        # Invalid --fail-on value returns exit 2 (argument error)
+        pytest.param("bogus", 2, id="invalid_value_exits_two"),
+        # --fail-on none: findings are reported but exit code stays 0
+        pytest.param("none", 0, id="none_exits_zero_with_findings"),
+    ],
+)
+def test_cli_scan_fail_on(tmp_path: Path, fail_on: str, expected_exit: int) -> None:
+    """--fail-on: each threshold value maps to its documented exit code."""
     file_path = _write_critical_secret(tmp_path)
 
-    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "critical"])
+    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", fail_on])
 
-    assert result.exit_code == 1
-
-
-def test_cli_scan_fail_on_none_exits_zero_with_findings(tmp_path: Path) -> None:
-    """--fail-on none: findings are reported but exit code stays 0."""
-    file_path = _write_critical_secret(tmp_path)
-
-    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "none"])
-
-    assert result.exit_code == 0
+    assert result.exit_code == expected_exit
 
 
 def test_cli_scan_fail_on_none_json_exits_zero(tmp_path: Path) -> None:
@@ -273,24 +284,6 @@ def test_cli_scan_fail_on_none_json_exits_zero(tmp_path: Path) -> None:
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert len(data["findings"]) >= 1
-
-
-def test_cli_scan_fail_on_invalid_value_exits_two(tmp_path: Path) -> None:
-    """Invalid --fail-on value returns exit 2 (argument error)."""
-    file_path = _write_critical_secret(tmp_path)
-
-    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "bogus"])
-
-    assert result.exit_code == 2
-
-
-def test_cli_scan_fail_on_case_insensitive(tmp_path: Path) -> None:
-    """--fail-on accepts uppercase severity names (case-insensitive)."""
-    file_path = _write_critical_secret(tmp_path)
-
-    result = runner.invoke(app, ["scan", str(file_path), "--fail-on", "HIGH"])
-
-    assert result.exit_code == 1
 
 
 def test_cli_scan_fail_on_no_findings_exits_zero(tmp_path: Path) -> None:

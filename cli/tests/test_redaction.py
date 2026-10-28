@@ -33,31 +33,30 @@ def test_redact_token_handles_multibyte_unicode() -> None:
     assert redact_token(token) == "\u00e9...\u00e9"
 
 
-def test_redact_token_short_unicode_token_is_redacted() -> None:
-    # 4-char multibyte token must hit the short-token floor.
-    assert redact_token("\u00e9\u00e9\u00e9\u00e9") == "[REDACTED]"
-
-
-def test_redact_token_short_token_uses_first_and_last_char() -> None:
-    # len == 8 -> short: first char + "..." + last char
-    assert redact_token("abcdefgh") == "a...h"
-
-
-def test_redact_token_boundary_eight_char_token_is_short() -> None:
-    assert redact_token("12345678") == "1...8"
-
-
-def test_redact_token_medium_token_uses_first_and_last_two_chars() -> None:
-    # 8 < len <= 10
-    assert redact_token("abcdefghij") == "ab...ij"
-
-
-def test_redact_token_boundary_ten_char_token_is_medium() -> None:
-    assert redact_token("1234567890") == "12...90"
-
-
-def test_redact_token_long_token_uses_first_and_last_four_chars() -> None:
-    assert redact_token("AKIAIOSFODNN7EXAMPLE") == "AKIA...MPLE"
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        # 4-char multibyte token must hit the short-token floor.
+        pytest.param(
+            "\u00e9\u00e9\u00e9\u00e9", "[REDACTED]", id="short_unicode_token_is_redacted"
+        ),
+        # len == 8 -> short: first char + "..." + last char
+        pytest.param("abcdefgh", "a...h", id="short_token_uses_first_and_last_char"),
+        pytest.param("12345678", "1...8", id="boundary_eight_char_token_is_short"),
+        # 8 < len <= 10
+        pytest.param(
+            "abcdefghij", "ab...ij", id="medium_token_uses_first_and_last_two_chars"
+        ),
+        pytest.param("1234567890", "12...90", id="boundary_ten_char_token_is_medium"),
+        pytest.param(
+            "AKIAIOSFODNN7EXAMPLE",
+            "AKIA...MPLE",
+            id="long_token_uses_first_and_last_four_chars",
+        ),
+    ],
+)
+def test_redact_token(token: str, expected: str) -> None:
+    assert redact_token(token) == expected
 
 
 def test_redact_token_preserves_pattern_for_very_long_tokens() -> None:
