@@ -437,23 +437,45 @@ def test_fr_read_03_hook_grep_tool_oversize_output_stays_refused(repo, capsys, t
     assert code == 0 and _denied(out) and "too large to check" in out
 
 
-def test_fr_read_03_hook_oversize_binary_passes_oversize_text_refused(repo, capsys, tmp_path: Path) -> None:
+def _small_pieces(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int]]:
+    """Read text files in 128 KiB pieces (a sixteenth of a 2 MiB cap) instead of about 4 MiB, so an oversize file is
+    still chunked but small enough to test quickly. Returns the list that collects (file name, first line) per piece."""
+    from Harpocrates import read
+
+    real, pieces = read.file_chunks, []
+
+    def chunks(path: Path):
+        for number, text in real(path, memory_cap=2 * 1024 * 1024):
+            pieces.append((Path(path).name, number))
+            yield number, text
+
+    monkeypatch.setattr(read, "file_chunks", chunks)
+    return pieces
+
+
+def test_fr_read_03_hook_oversize_binary_passes_oversize_text_refused(repo, capsys, monkeypatch: pytest.MonkeyPatch,
+                                                                      tmp_path: Path) -> None:
     """A big executable named in a command (`.venv/bin/tool --version | cat`) is binary: it passes like images and
     PDFs, whatever its size. An oversize TEXT file is checked in chunks (FR-CORE-05): refused when it holds a secret."""
-    from Harpocrates.read import MAX_BYTES
+    from Harpocrates import read
+
+    monkeypatch.setattr(read, "MAX_BYTES", 256 * 1024)  # a small limit, so the files below are small too
+    pieces = _small_pieces(monkeypatch)
+    limit = read.MAX_BYTES
 
     binary = tmp_path / "tool"
     binary.write_bytes(b"\x7fELF\x00" + b"\x01" * 1000)
     with binary.open("ab") as f:
-        f.truncate(MAX_BYTES + 1024 * 1024)  # ~11 MB, NUL-filled
-    text = tmp_path / "big.txt"
-    text.write_bytes(b"filler line\n" * ((MAX_BYTES + 1024 * 1024) // 12)
+        f.truncate(limit + 64 * 1024)  # just over the limit, NUL-filled
+    text = tmp_path / "big.txt"  # about 512 KiB of lines; the secret is the last line, in a later piece
+    text.write_bytes(b"filler line\n" * ((512 * 1024) // 12)
                      + f"GITHUB_TOKEN={_canary('github_token')}\n".encode())
-    assert binary.stat().st_size > MAX_BYTES and text.stat().st_size > MAX_BYTES
+    assert binary.stat().st_size > limit and text.stat().st_size > limit
     assert _run(_bash(tmp_path, "./tool --version | cat"), capsys) == (0, "")
     assert _run(_bash(tmp_path, "cat tool"), capsys) == (0, "")
     code, out = _run(_bash(tmp_path, "cat big.txt"), capsys)
     assert code == 0 and _denied(out) and "api_token" in out
+    assert len([number for name, number in pieces if name == "big.txt"]) > 1
 
 
 @pytest.mark.parametrize("ripgrep", [True, False])

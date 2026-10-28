@@ -129,7 +129,7 @@ def scan_text(text: str, include_contributions: bool = False) -> List[Dict[str, 
     Parameters:
         text: Text content to scan.
         include_contributions: Whether to add an explanation key with TreeSHAP per-feature
-            contributions; requires xgboost: pip install 'harpocrates[explain]'.
+            contributions; requires xgboost: pip install 'harpo-scan[explain]'.
     Output: List of findings with type, severity, evidence, confidence, category (use it to
         choose remediation: rotate password vs revoke token vs regenerate keypair), in_comment,
         file, line, column, and placeholder (<<HARPO:type:hash4>>, stable within this session).
@@ -155,7 +155,7 @@ def scan_file(
         path: Absolute path to the file to scan.
         max_bytes: Optional lower size limit; 10 MB is the most regardless of this value.
         include_contributions: As in scan_text, add TreeSHAP per-feature explanations;
-            requires xgboost: pip install 'harpocrates[explain]'.
+            requires xgboost: pip install 'harpo-scan[explain]'.
     Output: List of finding dictionaries with the same fields as scan_text; secret values are
         never returned. Returns an empty list if the path does not exist or is binary. Reads
         with the filesystem scope of the user who launched the server and follows symlinks.

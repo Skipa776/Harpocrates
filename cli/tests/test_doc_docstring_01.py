@@ -112,7 +112,7 @@ def test_doc_docstring_01_every_package_module_enforced():
     """Every tracked package module that defines a function or class is on the enforce list."""
     import ast
 
-    import tomllib
+    from toml_compat import tomllib
 
     root = Path(__file__).resolve().parents[2]
     tracked = subprocess.run(

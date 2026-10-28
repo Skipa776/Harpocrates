@@ -30,6 +30,7 @@ import os
 import re
 import signal
 import socket
+import socketserver
 import sys
 import threading
 import urllib.parse
@@ -787,6 +788,15 @@ class _Httpd(ThreadingHTTPServer):
 
     daemon_threads = True
     request_queue_size = 64
+
+    def server_bind(self) -> None:
+        """
+        Description: Bind as HTTPServer does, without its reverse DNS lookup (socket.getfqdn), slow on macOS.
+        Parameters: None
+        Output: None. Raises OSError when the address cannot be bound.
+        """
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     def __init__(self, address: tuple[str, int], config: Config, record_dir: Optional[Path]) -> None:
         """

@@ -454,7 +454,7 @@ def scan(
             from Harpocrates.ml.context import extract_context_from_finding
             from Harpocrates.ml.explain import explain_finding
         except ImportError:
-            error_console.print("[red]✗[/red] --explain requires xgboost: pip install 'harpocrates[explain]'")
+            error_console.print("[red]✗[/red] --explain requires xgboost: pip install 'harpo-scan[explain]'")
             raise typer.Exit(code=2)
 
         payload = []
@@ -496,7 +496,7 @@ def version() -> None:
     Output: None; prints version information and propagates metadata lookup or output errors.
     """
     from importlib.metadata import version as _version
-    console.print(f"Harpo version {_version('harpocrates')}")
+    console.print(f"Harpo version {_version('harpo-scan')}")
 
 
 @app.command(help=(

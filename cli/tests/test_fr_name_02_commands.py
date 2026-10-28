@@ -1,7 +1,7 @@
 """FR-NAME-02: the commands are `harpo` and `harpo-mcp`. `harpocrates` and `harpocrates-mcp` keep working for two
 minor releases and print one deprecation line, on stderr only (stdout carries JSON and the MCP stdio protocol).
 
-The CLI tests in test_cli.py and test_cli_version.py also run once under each name (cli_entry.py).
+The CLI tests in test_cli.py also run once under each name (cli_entry.py).
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-import tomllib
+from toml_compat import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI_NOTICE = "harpocrates is now harpo; this name stops working after two minor releases."

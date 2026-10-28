@@ -201,7 +201,7 @@ def test_fr_gate_04_e2e_real_agents_through_the_scanner_zero_known_format_canari
             if s["hook_installed"]:  # the hook refused the reads, so no tool result held a secret for the gate to redact
                 assert s["tool_results_with_placeholder"] == 0, s["scenario"]
             else:  # only the gate stands between the files and the provider
-                assert s["tool_results_with_placeholder"] == s["tool_results_seen"] == 3 and s["placeholders"]["total"] >= 8
+                assert s["tool_results_with_placeholder"] == s["tool_results_seen"] == 3 and s["placeholders"]["total"] >= 8, s["scenario"]
         else:  # the gate is off: the counter must see the leak
             assert s["received"]["known_format"] >= 5, s["scenario"]
 
@@ -252,7 +252,7 @@ def test_fr_gate_07_e2e_with_mcp_adds_only_the_media_server_confined_to_the_repo
 
 
 def test_fr_gate_07_e2e_codex_mcp_config_appends_one_approved_server_confined_to_the_repo(tmp_path: Path) -> None:
-    import tomllib
+    from toml_compat import tomllib
     config = tmp_path / "config.toml"
     config.write_text('model = "m"\n')
     e2e.codex_mcp_config(config, tmp_path / "repo")

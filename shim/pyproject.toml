@@ -1,0 +1,29 @@
+# Shim for the old PyPI name `harpocrates`: contains no code. It only depends on harpo-scan.
+# publish.yml builds it with the main package, so both distributions ship from one release.
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harpocrates"
+version = "1.4.0"
+description = "Renamed to harpo-scan: installing this installs harpo-scan"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Joshua Do", email = "joshalfonsodo@gmail.com"}
+]
+dependencies = [
+    "harpo-scan==1.4.0",
+]
+
+[project.optional-dependencies]
+mcp = ["harpo-scan[mcp]==1.4.0"]
+explain = ["harpo-scan[explain]==1.4.0"]
+train = ["harpo-scan[train]==1.4.0"]
+native = ["harpo-scan[native]==1.4.0"]
+
+[tool.setuptools]
+packages = []
+py-modules = []

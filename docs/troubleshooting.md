@@ -14,6 +14,12 @@ Cause: In a clone, the model files come from Git LFS. Without `git lfs pull`, `c
 
 Fix: Run `git lfs install`, then `git lfs pull`. `file cli/Harpocrates/ml/models/model.onnx` should no longer say "ASCII text". The PyPI package ships the real files.
 
+**On macOS, `harpo scan --explain` or the tests fail with "XGBoost Library (libxgboost.dylib) could not be loaded".**
+
+Cause: xgboost, which the `explain` extra installs, needs the OpenMP runtime, and macOS does not ship it.
+
+Fix: `brew install libomp`.
+
 **`ruff check .` gives a different result from CI.**
 
 Cause: Another ruff is first on PATH.
@@ -30,7 +36,7 @@ Fix: Use `harpo` and `harpo-mcp`. The old names still work for two minor release
 
 Cause: Harpo uses the module only when `harpo_native.patterns()` equals `detector.rule_patterns()` and its protocol version matches, so a build older than the Python code is ignored. `HARPO_NATIVE=0` also turns it off.
 
-Fix: Rebuild it with `pip install ./core` from the same checkout. `python -c "from Harpocrates.core import detector; print(detector._native_module())"` prints the module when it is in use and None when it is not.
+Fix: Install the release that matches Harpo with `pip install "harpo-scan[native]"`, or rebuild it with `pip install ./core` from the same checkout. `python -c "from Harpocrates.core import detector; print(detector._native_module())"` prints the module when it is in use and None when it is not.
 
 ## Scanning
 
@@ -71,6 +77,12 @@ Fix: None needed. Any other skip needs a reason.
 Cause: The result is inconclusive: an agent CLI is missing or did not finish.
 
 Fix: Install `claude` and `codex` with `npm install -g @anthropic-ai/claude-code @openai/codex`. Never log them in. Run again. An exit code of 0 from `python -m bench.gate_e2e` only means the real home did not change. Read each scenario in its report, as described in [testing.md](testing.md).
+
+**The Codex scenarios of the end-to-end suites see no file contents, or an after-down control receives nothing.**
+
+Cause: Codex runs its commands in a bubblewrap sandbox, which needs unprivileged user namespaces. Ubuntu 24.04 restricts them through AppArmor for regular users, so Codex's reads fail. As root the restriction does not apply.
+
+Fix: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, which CI's integration job runs before the tests.
 
 ## The read hook
 

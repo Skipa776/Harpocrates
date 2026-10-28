@@ -29,7 +29,7 @@ def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
         text=True,
     )
     assert result.returncode == 0, f"Wheel build failed:\n{result.stdout}\n{result.stderr}"
-    wheels: List[Path] = sorted(outdir.glob("harpocrates-*.whl"))
+    wheels: List[Path] = sorted(outdir.glob("harpo_scan-*.whl"))
     assert wheels, "No wheel produced"
     return wheels[-1]
 

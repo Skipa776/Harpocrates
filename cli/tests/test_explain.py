@@ -255,7 +255,7 @@ def test_missing_model_raises_file_not_found() -> None:
     finding = _make_ml_finding()
     ctx = _make_context()
     # Must be inside _MODELS_DIR to pass path validation; file does not exist.
-    with pytest.raises(FileNotFoundError, match="pip install harpocrates"):
+    with pytest.raises(FileNotFoundError, match="pip install harpo-scan"):
         explain_finding(finding, ctx, model_path=_MODELS_DIR / "nonexistent_test.json")
 
 

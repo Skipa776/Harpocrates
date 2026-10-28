@@ -325,6 +325,10 @@ class UpstreamPool:
             for this upstream. Every other case closes the connection.
         """
         connection, response = exchange.connection, exchange.response
+        if complete and response.length == 0 and not response.isclosed():
+            # A reply read to its end: Python 3.10's read1 leaves one read to its Content-Length open (3.11 closes it),
+            # and a reply with no body is never read. _quiet still checks the connection before it is reused.
+            response.close()
         reusable = (complete and response.isclosed() and response.version == 11 and not response.will_close
                     and connection.sock is not None)
         if reusable:

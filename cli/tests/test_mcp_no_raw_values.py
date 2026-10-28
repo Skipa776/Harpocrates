@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("mcp", reason="mcp package not installed; install harpocrates[mcp]")
+pytest.importorskip("mcp", reason="mcp package not installed; install harpo-scan[mcp]")
 
 _ALNUM = string.ascii_letters + string.digits
 _RUN = 12

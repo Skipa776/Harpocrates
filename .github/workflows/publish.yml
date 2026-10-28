@@ -1,14 +1,18 @@
-# Publishes harpocrates to PyPI on every v* tag push.
+# Publishes harpo-scan, the harpocrates shim and prebuilt harpo-native wheels to PyPI on every v* tag push.
+# A manual run (workflow_dispatch) and a pull request that touches packaging build and check everything but publish nothing;
+# the publish job runs only on a tag.
 #
 # Uses OIDC trusted publishing — no PYPI_TOKEN secret required.
-# ONE-TIME SETUP (before pushing the first tag):
-#   1. Go to https://pypi.org/manage/account/publishing/
-#   2. Add a new publisher:
-#        Owner:    Skipa776
-#        Repo:     Harpocrates
-#        Workflow: publish.yml
-#        Env:      (leave blank)
-#   Without this step the publish step will fail with HTTP 403.
+# ONE-TIME SETUP (before pushing the first tag), on PyPI, a GitHub trusted publisher with
+#   Owner: Skipa776   Repository: Harpocrates   Workflow: publish.yml
+# for each project:
+#   harpo-scan    pending publisher (https://pypi.org/manage/account/publishing/), Environment blank
+#   harpocrates   the project's own Publishing settings, Environment blank
+#   harpo-native  pending publisher, Environment pypi-native. PyPI takes one pending publisher per owner,
+#                 repository, workflow and environment, so the second new project needs its own environment;
+#                 the publish-native job below runs in it.
+#   Without these the upload fails with HTTP 403.
+# RELEASE: merge to main with CI green, then push the tag vX.Y.Z (it must match every version in the repo).
 
 name: Publish to PyPI
 
@@ -16,13 +20,21 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/publish.yml"
+      - "core/**"
+      - "shim/**"
+      - "pyproject.toml"
+      - "cli/Harpocrates/__init__.py"   # holds __version__, which the version check reads
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-publish:
+  python:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # required for OIDC trusted publishing
-      contents: read
 
     steps:
       - uses: actions/checkout@v6
@@ -33,16 +45,151 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build dependencies
+      - name: Check that all versions match (and the tag, on a release)
+        id: version
+        run: |
+          python - <<'EOF'
+          import os, re, tomllib
+          versions = {}
+          for path in ["pyproject.toml", "shim/pyproject.toml", "core/pyproject.toml"]:
+              with open(path, "rb") as f:
+                  versions[path] = tomllib.load(f)["project"]["version"]
+          with open("cli/Harpocrates/__init__.py", encoding="utf-8") as f:
+              match = re.search(r'^__version__\s*=\s*"([^"]+)"', f.read(), re.M)
+          versions["cli/Harpocrates/__init__.py"] = match.group(1) if match else None
+          print(versions)
+          if len(set(versions.values())) != 1 or None in versions.values():
+              raise SystemExit("version mismatch: every file must carry the same version")
+          version = versions["pyproject.toml"]
+          ref = os.environ["GITHUB_REF"]
+          if ref.startswith("refs/tags/v") and ref[len("refs/tags/v"):] != version:
+              raise SystemExit(f"tag {ref} does not match version {version}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"version={version}\n")
+          EOF
+
+      - name: Install build tools
         run: pip install build
 
-      - name: Build wheel and sdist
-        run: python -m build
-
-      - name: Smoke test — install from wheel, verify CLI runs clean
+      - name: Build harpo-scan and the harpocrates shim
         run: |
-          pip install "$(ls dist/*.whl)"
-          harpocrates scan cli/tests/fixtures/safe_file.txt --engine python
+          python -m build --outdir dist .
+          python -m build --outdir dist shim
 
-      - name: Publish to PyPI
+      - name: Smoke test — install from dist into a fresh venv, verify the CLI runs clean
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python -m venv "$RUNNER_TEMP/smoke"
+          source "$RUNNER_TEMP/smoke/bin/activate"
+          pip install --find-links dist "harpocrates==$VERSION"
+          harpo scan cli/tests/fixtures/safe_file.txt --engine python
+          harpocrates --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-python
+          path: dist/
+          if-no-files-found: error
+
+  native:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Prebuilt harpo-native wheels. abi3-py310 means one wheel per platform covers Python 3.10+.
+          # No Windows wheels: Harpo does not run on Windows (the logs use flock).
+          # test: true runs on the runner whose architecture matches the target, so the native code is exercised.
+          - {os: ubuntu-latest, target: x86_64, test: true}
+          - {os: ubuntu-latest, target: aarch64}
+          - {os: macos-latest, target: x86_64}
+          - {os: macos-latest, target: aarch64, test: true}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build harpo-native wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: auto
+          args: --release --out dist --manifest-path core/Cargo.toml
+
+      - name: Check the prebuilt module gives the Python rules' results
+        if: matrix.test
+        env:
+          HARPO_REQUIRE_NATIVE: "1"
+        run: |
+          pip install -e ".[dev]"
+          pip install dist/harpo_native-*.whl
+          pytest -q cli/tests/test_fr_core_01_rust_parity.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-native-${{ matrix.os }}-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  native-sdist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Build harpo-native sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist --manifest-path core/Cargo.toml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-native-sdist
+          path: dist/
+          if-no-files-found: error
+
+  # harpo-native first, so harpo-scan's `native` extra can be installed as soon as harpo-scan appears.
+  publish-native:
+    needs: [python, native, native-sdist]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: pypi-native   # matches harpo-native's trusted publisher on PyPI
+    permissions:
+      id-token: write   # required for OIDC trusted publishing
+      contents: read
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-native-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish harpo-native to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish:
+    needs: [publish-native]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for OIDC trusted publishing
+      contents: read
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-python
+          path: dist
+
+      - name: Publish harpo-scan and the harpocrates shim to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
-import tomllib
+from toml_compat import tomllib
 
 from Harpocrates import harness, hooks, install
 from Harpocrates.mcp import server

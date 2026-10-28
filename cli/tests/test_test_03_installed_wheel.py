@@ -67,7 +67,7 @@ def wheel_venv(tmp_path_factory: pytest.TempPathFactory) -> Path:
     built = subprocess.run([sys.executable, "-m", "build", "--wheel", "--outdir", str(out)], cwd=ROOT,
                            capture_output=True, text=True, check=False)
     assert built.returncode == 0, built.stderr[-2000:]
-    (wheel,) = out.glob("harpocrates-*.whl")
+    (wheel,) = out.glob("harpo_scan-*.whl")
     venv = tmp_path_factory.mktemp("venv")
     subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True, capture_output=True)
     pip = subprocess.run([str(venv / "bin" / "python"), "-m", "pip", "install", "-q", f"{wheel}[mcp]", "pre-commit"],

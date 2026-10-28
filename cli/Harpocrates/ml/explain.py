@@ -261,7 +261,7 @@ def _load_booster(model_path: Optional[Path]) -> "xgb.Booster":
             raise FileNotFoundError(
                 f"TreeSHAP requires {path}. "
                 "xgboost_model.json ships with the package: reinstall with "
-                "`pip install harpocrates` (explain extra: `harpocrates[explain]`) to restore it."
+                "`pip install harpo-scan` (explain extra: `harpo-scan[explain]`) to restore it."
             )
 
         # SEC-07: load the exact bytes that passed the hash check, not a re-read of the path.

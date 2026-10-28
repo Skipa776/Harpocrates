@@ -239,7 +239,7 @@ Restated Oct 21, 2026 from the R0 spec notes, which have been kept locally since
 | --- | --- | --- | --- |
 | FR-NAME-01 | User-facing text says Harpo: README, docs, CLI help and errors, and the MCP server name `harpo`. The tool names `safe_read` and `safe_grep` do not change, so installed deny and allow rules keep working | `test_fr_name_01_*` | R0 |
 | FR-NAME-02 | Console scripts `harpo` and `harpo-mcp`. `harpocrates` and `harpocrates-mcp` stay, print one deprecation line on stderr, then run the same entry point | Both names run the same CLI test suite (`test_fr_name_02_*`) | R0 |
-| FR-NAME-03 | Distribution `harpo-scan`; `harpocrates` on PyPI becomes a shim that depends on it (see Key design decisions) | Recorded in this doc. Publishing waits for the release | R0 |
+| FR-NAME-03 | Distribution `harpo-scan`; `harpocrates` on PyPI becomes a shim that depends on it (see Key design decisions) | Built by `publish.yml` (harpo-scan 1.4.0 and the `harpocrates` shim, Oct 28); published when the v1.4.0 tag is pushed | R0 |
 | FR-NAME-04 | State folder `~/.harpo`, copied (not moved) from `~/.harpocrates` on first use; `HARPO_*` variables are read first, then `HARPOCRATES_*` | `test_fr_name_04_*`; security points are under SEC-08 and SEC-09 | R0 |
 | FR-NAME-05 | `.pre-commit-hooks.yaml` has `id: harpo` and keeps `id: harpocrates` | Both ids run in a fixture repo (`test_fr_name_05_*`) | R0 |
 | FR-NAME-06 | The placeholder `<<HARPO:type:xxxx>>` does not change | Existing tests pass unchanged (`test_fr_name_06_*`) | R0 |
@@ -730,7 +730,7 @@ v1 ships in about 8 weeks. Apply to internships from week 2 onward; don't wait f
 
 ### Progress (Oct 21, 2026)
 
-R0, M1 and the M2 work so far are on the `r0/cleanup` branch and not yet merged to `main`; the last release is v1.3.0. This checkout collects 3,552 tests (3,539 unit, 13 integration) and 23 Rust tests (Oct 28). The 3,544 counted earlier on Josh's machine include the tests of the training code, which is kept locally and untracked (seven gitignored test files).
+R0, M1 and the M2 work are merged to `main` (PR #41, Oct 28, 2026). PR #42 prepares release 1.4.0: the package is renamed to `harpo-scan`, the old name becomes a shim, and `harpo-native` is built as prebuilt wheels; it is published when Josh pushes the v1.4.0 tag. No further features are planned (Josh, Oct 28); the README's "If I kept going" names the next steps. After the Oct 28 test pass below, this checkout collects 3,468 tests (3,455 unit, 13 integration) and 23 Rust tests. The 3,544 counted earlier on Josh's machine include the tests of the training code, which is kept locally and untracked (seven gitignored test files).
 
 **CI.** `ci.yml` runs on pushes to `main`, `feature/**` and `feat/**`, and on pull requests, so it first ran on this branch with draft pull request #41, on Oct 21. That run passed Rust, the plugin tests and the demos; the unit jobs failed one test, whose help-text check broke when typer draws a colored panel under `GITHUB_ACTIONS` (fixed the same day). The rest below marked Oct 21 was run by hand (Verification run, below).
 
@@ -800,7 +800,7 @@ A Linux x86-64 cloud container with 4 cores. Python 3.13.16, Rust 1.97.0, Claude
 | FR-GATE-07 | Policy documented and tested | Tested in unit tests; end to end, no agent sent a non-image file as media |
 | FR-INSTALL-05 | A Claude Code subscription session works through the gate | Needs a subscription login |
 | FR-READ-03 | Fresh-machine setup in under 5 minutes, verified by someone else | Needs another person |
-| NFR-01 | Latency benchmark in CI | Measured locally only: follow-up turns 12.2 ms p95 (target 50), first turns 347 ms p95 (target 500); not in CI |
+| NFR-01 | Latency benchmark in CI | In CI from Oct 28: `bench/check_latency.py` runs in the integration job on the agent sessions it records, and does not block yet. First CI run (`1084191`): follow-up 2.7 ms p95 (n = 18, target 50), first turns 35.0 ms p95 (n = 6, target 500), but its largest body was 48 KB, so the 1 MB part of the first-turn target is still measured only here: on the Oct 21 recordings, follow-up 16.8 ms p95 (n = 111), first turns 58.4 ms p95 (n = 41, largest body 1.04 MB); the two follow-ups of about 1 MB alone 53.7 ms p95 (n = 2) |
 | TEST-01 | The CI unit job fails a change below the floor | CI ran on #41 (coverage 93.47%, the floor reached); no change below the floor has been pushed to show the job failing |
 
 #### Final pass, Oct 21 to 28, 2026
@@ -848,11 +848,32 @@ Same container and tool versions as the verification run above. Branch `r0/clean
 | --- | --- |
 | 1. Zero known-format canaries reach the provider, across every read path | Met in the test harness, against the mock provider: 0 received through the read hook, the gate (scripted reads, MCP images, the ChatGPT-login route) and `harpo guard up`. Not shown against a real provider. ML-only canaries do get through the gate (12 to 13 of 23 in the parser corpus) |
 | 2. Task resolve rate within 3 points with Guard on | Not measured (M3) |
-| 3. Under 50 ms p95 added per request | Follow-up turns 12.2 ms p95, first turns 347 ms p95, measured locally on Oct 20 to 21; not in CI |
+| 3. Under 50 ms p95 added per request | Follow-up turns 12.2 ms p95 and first turns 347 ms p95 on an M3 Pro (Oct 20 to 21); 16.8 ms and 58.4 ms with `bench/check_latency.py` in this container (Oct 28), which now runs in CI and does not block yet |
 | 4. Fail closed | Shown end to end for a scanner error (g3) and in unit tests for an unusable or damaged audit log, unknown encodings and parse errors |
 | 5. Never store or log a plaintext secret | SEC-01 sweep: 0 canary values in every Harpo file and temp file, in both guard runs |
 | 6. Full protection for Claude Code and Codex; setup under 5 minutes | Both routed and protected in the harness; Codex needs the one-time `/hooks` trust; setup time by someone else not measured (FR-READ-03) |
 | 7. Publish a reproducible benchmark and an evasion suite | Detector benchmark published (README); evasion and prompt-injection suites not built (M3) |
+
+#### Test and CI pass, Oct 28, 2026
+
+**Decided by Josh on Oct 28, 2026 (second set).** Release 1.4.0 goes out from PR #42: `harpo-scan`, the `harpocrates` shim and `harpo-native`, all at the same version, published by `publish.yml` on the tag. `harpo-native` is prebuilt for Linux and macOS on x86_64 and arm64; no Windows wheels, since Harpo does not run there. Redundant test cases may be removed when another test checks the same input with an equal or stronger assertion; same-shape tests become one parametrized test. CI adds Python 3.10 and 3.14, a macOS unit job, both agent CLIs in the integration job, and the NFR-01 latency check.
+
+**Test consolidation.** Checked by listing every collected case before and after (case parameters, not just ids):
+
+| Change | Cases |
+| --- | --- |
+| `test_hooks_allowlist.py`: removed the `touches()`-only cases whose command `test_fr_name_04_state_dir.py` also checks, with `touches()` and the hook's decision (two tests removed whole, the obfuscated-spellings list cut to the 3 the state-dir test lacks) | 95 removed |
+| `test_cli_version.py` merged into `test_cli.py`; its copy of `test_cli_version` dropped | 2 removed |
+| `test_cli.py` fail-on (4 tests), `test_regex.py` signatures (7), `test_redaction.py` `redact_token` (6): one parametrized test each | same cases |
+| `test_nfr_01_check_latency.py`: new, the latency check's pass/fail rule | 10 added |
+
+Collected tests went from 3,555 to 3,468; the consolidated files are 93 lines shorter. The oversize-text hook test now reads a 512 KiB file in 128 KiB pieces instead of an 11 MB one (19.5 s to 0.4 s under coverage) and still fails if the hook skips the last piece. Unit suite (Python 3.13): on the Python rules 3,448 passed, 7 skipped, coverage 93.79%; on the Rust rules with both engines required, 3,449 passed, 6 skipped. The skips: 5 because root ignores file modes, 1 that needs a case-insensitive file system, and the native-module check when it is not required. The remaining overlap is deliberate: unit tests and end-to-end tests of the same route, and input matrices that share code paths but not inputs.
+
+**CI.** `lint-and-test` runs on Python 3.10, 3.11 and 3.14; `unit-macos` runs the unit suite on macOS; `integration` installs Claude Code 2.1.312 and Codex 0.163.0, so the real-agent suites run in CI against the mock, then records sessions and runs the latency check; `publish.yml` builds every package, including the native wheels on four platforms, on pull requests that change packaging. Here, Python 3.10: 3,444 passed, 11 skipped, coverage 93.75%; Python 3.14: 3,446 passed, 9 skipped, 93.76% (both without `harpo_native`, as in CI's `lint-and-test`; 3.10 also skips the two SEC-08 tests that need `-P`). Integration, with both agent CLIs: 13 of 13 passed.
+
+**Found by the Python 3.10 run.** The package declares 3.10 but CI had only run 3.11. Two real gaps: (1) the gate never reused a provider connection on 3.10, because 3.10's `HTTPResponse.read1` leaves a response read to its Content-Length open (3.11 closes it), so the pool saw it as unfinished; `gate/upstream.py` now closes a reply read to its end before deciding, and the six FR-GATE-06 connection-reuse tests that failed on 3.10 pass. (2) `harpo install` refused to write Codex's config.toml on 3.10 unless tomli happened to be installed; tomli is now a dependency before 3.11. The rest were tests and dev scripts importing `tomllib` and one SEC-08 control passing `-P`, a 3.11 flag.
+
+**Found by the macOS run.** `harpo guard up` could not start the gate on macOS: the gate process printed nothing for over 10 s, so guard up gave up. Python's `HTTPServer.server_bind` looks up the bound address's host name (`socket.getfqdn`), and on macOS that reverse lookup can block for seconds; the gate's server and the mock provider inherited it. Both now bind without it (only the CGI handler reads that name). The macOS unit job then passed, and in 4.5 minutes instead of 8. The same run found that xgboost needs `brew install libomp` on macOS (now in troubleshooting.md), and guard up's refusal now says whether the gate exited, printed something else or never answered.
 
 **Decided by Josh on Oct 21, 2026.** FR-GATE-02's acceptance points at the Gate design decisions, `docs/gate-transport.md` and the corpus tests. FR-READ-04 is reworded to the deny that shipped. The code stays in `cli/Harpocrates/`. The FR-CLEAN rows are confirmed. `zstandard` is a runtime dependency before Python 3.14 (gate decision 16). This branch gets CI through a draft pull request. The block message keeps its pointer to `harpo doctor`, which ships with G7. NFR-01 has a separate first-turn target. The parser corpus becomes the only source of each case's expectation. TEST-03 and TEST-04 are approved; TEST-02 is not.
 

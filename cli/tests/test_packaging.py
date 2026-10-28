@@ -37,7 +37,7 @@ def test_wheel_installs_with_ml_pipeline() -> None:
 
     # Step 2: Locate most-recent wheel
     wheels = sorted(
-        glob.glob(str(PROJECT_ROOT / "dist" / "harpocrates-*.whl")),
+        glob.glob(str(PROJECT_ROOT / "dist" / "harpo_scan-*.whl")),
         key=lambda p: Path(p).stat().st_mtime,
     )
     assert wheels, "No wheel found in dist/ after build"
