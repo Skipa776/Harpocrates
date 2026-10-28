@@ -3,14 +3,15 @@
 # the publish job runs only on a tag.
 #
 # Uses OIDC trusted publishing — no PYPI_TOKEN secret required.
-# ONE-TIME SETUP (before pushing the first tag):
-#   1. Go to https://pypi.org/manage/account/publishing/
-#   2. Add a (pending) trusted publisher for EACH of harpo-scan, harpocrates and harpo-native:
-#        Owner:    Skipa776
-#        Repo:     Harpocrates
-#        Workflow: publish.yml
-#        Env:      (leave blank)
-#   Without this step the publish step fails with HTTP 403.
+# ONE-TIME SETUP (before pushing the first tag), on PyPI, a GitHub trusted publisher with
+#   Owner: Skipa776   Repository: Harpocrates   Workflow: publish.yml
+# for each project:
+#   harpo-scan    pending publisher (https://pypi.org/manage/account/publishing/), Environment blank
+#   harpocrates   the project's own Publishing settings, Environment blank
+#   harpo-native  pending publisher, Environment pypi-native. PyPI takes one pending publisher per owner,
+#                 repository, workflow and environment, so the second new project needs its own environment;
+#                 the publish-native job below runs in it.
+#   Without these the upload fails with HTTP 403.
 # RELEASE: merge to main with CI green, then push the tag vX.Y.Z (it must match every version in the repo).
 
 name: Publish to PyPI
@@ -156,8 +157,28 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish:
+  # harpo-native first, so harpo-scan's `native` extra can be installed as soon as harpo-scan appears.
+  publish-native:
     needs: [python, native, native-sdist]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: pypi-native   # matches harpo-native's trusted publisher on PyPI
+    permissions:
+      id-token: write   # required for OIDC trusted publishing
+      contents: read
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-native-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish harpo-native to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish:
+    needs: [publish-native]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -167,9 +188,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: dist-*
-          merge-multiple: true
+          name: dist-python
           path: dist
 
-      - name: Publish to PyPI
+      - name: Publish harpo-scan and the harpocrates shim to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
