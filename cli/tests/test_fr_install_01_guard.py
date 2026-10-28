@@ -294,14 +294,15 @@ def test_fr_install_01_harpo_install_keeps_the_gate_entry(home):
 
 
 @pytest.mark.parametrize("script,reason", [
-    ("print('a warning first'); import time; time.sleep(30)", "its first output line was not its listening line: 'a warning first'"),
+    ("print('a warning first', flush=True); import time; time.sleep(30)",
+     "its first output line was not its listening line: 'a warning first'"),
     ("raise SystemExit(3)", "it exited with status 3"),
-    ("import time; time.sleep(30)", "it did not start listening within 1 s"),
+    ("import time; time.sleep(30)", "it did not start listening within 3 s"),
 ])
 def test_fr_install_01_a_gate_that_does_not_start_is_reported_with_the_reason(home, monkeypatch, script, reason):
     """With nothing in its log, the refusal says what happened instead, so a gate that never starts can be told apart
     from one that printed something else first or exited."""
-    monkeypatch.setattr(guard, "START_TIMEOUT", 1.0)
+    monkeypatch.setattr(guard, "START_TIMEOUT", 3.0)  # enough for a cold interpreter on a busy runner
     monkeypatch.setattr(guard, "gate_command", lambda *_: [sys.executable, "-c", script])
     files = guard.Files(home / ".harpo")
     with pytest.raises(guard.RefusalError) as refused:
