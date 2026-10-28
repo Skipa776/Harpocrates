@@ -356,7 +356,8 @@ def start_gate(files: Files, port: int, token: str) -> tuple[int, int]:
         port: the port to ask for (0: any free port).
         token: the gate token, written to gate.token first.
     Output: (pid, port it listens on). Raises RefusalError, after stopping the process, when the gate exits or does
-        not print its listening line within START_TIMEOUT; the message is the last line of its log.
+        not print its listening line within START_TIMEOUT; the message is the last line of its log, or, when the log
+        is empty, what happened instead (it exited, printed something else first, or never answered).
     """
     files.state.mkdir(mode=0o700, parents=True, exist_ok=True)
     session_token.write_token_file(files.token, token)
@@ -371,19 +372,23 @@ def start_gate(files: Files, port: int, token: str) -> tuple[int, int]:
         os.close(out_fd)
         os.close(log_fd)
     deadline = time.monotonic() + START_TIMEOUT
+    why = f"it did not start listening within {START_TIMEOUT:.0f} s"
     while time.monotonic() < deadline and proc.poll() is None:
         first = files.out.read_text(encoding="utf-8", errors="replace").partition("\n")
         if first[1]:
             try:
                 return proc.pid, int(json.loads(first[0])["listening"].rsplit(":", 1)[1])
             except (ValueError, KeyError, TypeError, AttributeError):
+                why = f"its first output line was not its listening line: {first[0][:120]!r}"
                 break
         time.sleep(0.05)
     if proc.poll() is None:
         proc.kill()
         proc.wait()
+    elif not why.startswith("its first"):
+        why = f"it exited with status {proc.returncode}"
     lines = files.log.read_text(encoding="utf-8", errors="replace").strip().splitlines()
-    raise RefusalError("The gate did not start" + (f": {lines[-1]}" if lines else ".") + " Nothing was routed to it.")
+    raise RefusalError(f"The gate did not start: {lines[-1] if lines else why}. Nothing was routed to it.")
 
 
 # --- guard up / guard down -----------------------------------------------------------------------------------------

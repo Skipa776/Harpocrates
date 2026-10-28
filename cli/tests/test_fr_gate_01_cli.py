@@ -26,14 +26,20 @@ def start(child_python, *args: str) -> subprocess.Popen:
 
 
 def listening_url(proc: subprocess.Popen) -> str:
-    """Read the one JSON line the gate prints once it serves; kill the process if it never does."""
+    """Read the one JSON line the gate prints once it serves; kill the process if it never does, and say why."""
     timer = threading.Timer(20, proc.kill)
     timer.start()
     try:
         line = proc.stdout.readline()
     finally:
         timer.cancel()
-    return json.loads(line)["listening"]
+    try:
+        return json.loads(line)["listening"]
+    except (ValueError, KeyError) as error:
+        proc.kill()
+        _, err = proc.communicate(timeout=15)
+        raise AssertionError(f"no listening line (exit status {proc.returncode}); first line {line[:120]!r}, "
+                             f"stderr ends {err[-800:]!r}") from error
 
 
 def stop(proc: subprocess.Popen, sig: int = signal.SIGTERM) -> tuple[int, str]:

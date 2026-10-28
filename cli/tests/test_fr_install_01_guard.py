@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 
 import pytest
 from toml_compat import tomllib
@@ -290,3 +291,19 @@ def test_fr_install_01_harpo_install_keeps_the_gate_entry(home):
 
     install.uninstall_harnesses(["codex"])
     assert _json(files.record)["gate"] == gate
+
+
+@pytest.mark.parametrize("script,reason", [
+    ("print('a warning first'); import time; time.sleep(30)", "its first output line was not its listening line: 'a warning first'"),
+    ("raise SystemExit(3)", "it exited with status 3"),
+    ("import time; time.sleep(30)", "it did not start listening within 1 s"),
+])
+def test_fr_install_01_a_gate_that_does_not_start_is_reported_with_the_reason(home, monkeypatch, script, reason):
+    """With nothing in its log, the refusal says what happened instead, so a gate that never starts can be told apart
+    from one that printed something else first or exited."""
+    monkeypatch.setattr(guard, "START_TIMEOUT", 1.0)
+    monkeypatch.setattr(guard, "gate_command", lambda *_: [sys.executable, "-c", script])
+    files = guard.Files(home / ".harpo")
+    with pytest.raises(guard.RefusalError) as refused:
+        guard.start_gate(files, 0, session_token.new_token())
+    assert str(refused.value) == f"The gate did not start: {reason}. Nothing was routed to it."
