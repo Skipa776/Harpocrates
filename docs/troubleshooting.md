@@ -14,6 +14,12 @@ Cause: In a clone, the model files come from Git LFS. Without `git lfs pull`, `c
 
 Fix: Run `git lfs install`, then `git lfs pull`. `file cli/Harpocrates/ml/models/model.onnx` should no longer say "ASCII text". The PyPI package ships the real files.
 
+**On macOS, `harpo scan --explain` or the tests fail with "XGBoost Library (libxgboost.dylib) could not be loaded".**
+
+Cause: xgboost, which the `explain` extra installs, needs the OpenMP runtime, and macOS does not ship it.
+
+Fix: `brew install libomp`.
+
 **`ruff check .` gives a different result from CI.**
 
 Cause: Another ruff is first on PATH.

@@ -111,6 +111,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      # xgboost (the explain extra) needs the OpenMP runtime, which macOS does not ship.
+      - name: Install OpenMP
+        run: brew install libomp
+
       - name: Install dependencies
         run: pip install -e ".[dev,explain,mcp]"
 
