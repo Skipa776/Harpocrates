@@ -151,6 +151,11 @@ jobs:
       - name: Install the agent CLIs
         run: npm install -g @anthropic-ai/claude-code@2.1.312 @openai/codex@0.163.0
 
+      # Codex runs its commands in a bubblewrap sandbox, which needs unprivileged user namespaces; Ubuntu 24.04
+      # runners restrict them through AppArmor, so without this Codex's reads fail and its checks see no file contents.
+      - name: Allow unprivileged user namespaces for Codex's sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Run integration tests
         run: pytest -q -m integration -v
 
