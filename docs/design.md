@@ -304,7 +304,7 @@ These extend M3, which already has the mock-server canary harness and `FR-INSTAL
 - **`harpo proof [--last N] [--json]` (FR-PROOF-03)** prints the last N entries and verifies the chain across both files; exit status 1 when verification fails. `harpo doctor` reports the chain's state too.
 - The gate writes both logs only when started with `--audit-dir` (which `harpo guard up` passes), so a gate started by a test writes nothing to the user's home.
 - **As built, Oct 21, 2026** (`cli/Harpocrates/audit.py`). A finding is a placeholder the layer made itself: one that was already in the request or the file (from `safe_read`, say) is not logged again. A block of a request without the gate token is not a finding, so a local program that lacks the token cannot fill the log and rotate older findings away; `harpo doctor`'s probe shows as one `request_blocked` line per run. Writers hold an flock on `<log>.lock`. The SHA-256 is of the body bytes as sent; headers are left out, and an authentication header is never logged (FR-INSTALL-05). An entry is written before the request is sent, so a request the provider then failed to answer (502) still has one. The hook logs refused reads (Read, Grep, and files a Bash command reads); its other refusals (edits, environment, the state folder) are not findings yet. A state folder that is a symlink or a file is never written through (SEC-09).
-- **Proposed, for Josh's review: a chain that does not verify blocks every request** (HARPO-BLOCK-AUDIT) until the user moves `proof.jsonl`, `proof.1.jsonl` and `proof.head` aside: `proof.head` missing while entries exist, entries missing while it exists, a damaged last line, or a last line that is not the head's. The one exception is a last line that follows the head (written just before a crash); the chain moves on to it. Why: rebuilding the head silently would hide a removed tail, which is what the head is there to catch. The alternative is to start a new chain on its own and log the break as a finding, which keeps the agents working but leaves the user to notice.
+- **Decided by Josh, Oct 28, 2026: a chain that does not verify blocks every request** (HARPO-BLOCK-AUDIT) until the user moves `proof.jsonl`, `proof.1.jsonl` and `proof.head` aside: `proof.head` missing while entries exist, entries missing while it exists, a damaged last line, or a last line that is not the head's. The one exception is a last line that follows the head (written just before a crash); the chain moves on to it. Why: rebuilding the head silently would hide a removed tail, which is what the head is there to catch. The alternative, rejected, was to start a new chain on its own and log the break as a finding, which keeps the agents working but leaves the user to notice.
 
 ### M4: Serving and reliability
 
@@ -322,6 +322,8 @@ These extend M3, which already has the mock-server canary harness and `FR-INSTAL
 | NFR-06 | Backfill throughput at least 2× the `FR-SERVE-01` baseline after fixing the top bottleneck, and scaling to 4 workers at ≥ 70% efficiency **(proposed)** | Throughput benchmark, lines per second | M4 |
 
 ### M5: Learns your false alarms, not your secrets
+
+**Dropped (Josh, Oct 28, 2026):** no further ML work; the project's effort moves to other projects. The bundled model (v17) stays as shipped and keeps running in Python as the last step of every scan. M5's labeling, fingerprints and local suppressor are not built; the text below is kept as the record of the plan.
 
 Three parts: a person labels uncertain blocks, exact fingerprints remember single values, and a small local model learns the places where false alarms appear.
 
@@ -354,6 +356,8 @@ Three parts: a person labels uncertain blocks, exact fingerprints remember singl
 The tagline "learns your false alarms, not your secrets" may appear in the README only once `FR-LEARN-06` and `FR-LEARN-07` are published.
 
 ### M6: Model lifecycle
+
+**Dropped (Josh, Oct 28, 2026):** no further ML work; the project's effort moves to other projects. The bundled model (v17) stays as shipped and keeps running in Python as the last step of every scan. M6 is not built; the text below is kept as the record of the plan.
 
 The training pipeline was untracked in R0 (reproduce v17 at tag `v1.3.0`). `FR-ML-02` rebuilds it as one command.
 
@@ -401,7 +405,7 @@ Deferred by Josh on Oct 18, 2026. Kept here so the IDs are reserved and the plan
 
 ### Priority if time runs short
 
-Finish in this order, and treat each finished item as a release: (1) R0 cleanup, docstrings, rename and the first two demos; (2) M2 egress gate and the M3 proof requirements; (3) M4 profiling and daemon; (4) M5 asking, fingerprints and the local suppressor; (5) M6 lifecycle; (6) M4 backfill reliability; (7) M7; (8) M8. A smaller system that meets its targets beats a larger one that does not.
+Finish in this order, and treat each finished item as a release: (1) R0 cleanup, docstrings, rename and the first two demos; (2) M2 egress gate and the M3 proof requirements; (3) M4 profiling and daemon; (4) M4 backfill reliability; (5) M7; (6) M8. M5 and M6 are dropped (Josh, Oct 28, 2026). A smaller system that meets its targets beats a larger one that does not.
 
 ## Threat model
 
@@ -636,6 +640,8 @@ The claim to prove is that swapping in Guard causes no meaningful drop in agent 
 
 ## Detector training data
 
+**Dropped (Josh, Oct 28, 2026):** no further ML work; the project's effort moves to other projects. The bundled model (v17) stays as shipped and keeps running in Python as the last step of every scan. The rebuilt training set and the v1.1 retrained detector below are not built.
+
 Rebuild the training set so the model learns what separates real credentials from secret-like strings in real code, not what Gemma thinks a secret looks like. The current model ships in v1 and becomes the baseline; the rebuilt model ships as v1.1.
 
 **Current data:** labeled data from open research sets and scanner fixtures (TruffleHog and other detectors), plus about 40K samples generated by Gemma 4 4B.
@@ -717,8 +723,8 @@ v1 ships in about 8 weeks. Apply to internships from week 2 onward; don't wait f
 | M3: Evaluate and publish | Nov 10 to Nov 23 | Evasion and prompt-injection suites; utility, latency, and competitor comparison study; SARIF and GitHub Action; write-up and 2-minute demo video | All targets in the Evaluation plan measured and published, including failures |
 | R0: Cleanup, docs and rename | Oct 18 to Oct 19 (inserted before M2) | Cleanup review and untracks; docstrings enforced in CI; rename to Harpo (`harpo`, `harpo-mcp`, `~/.harpo`, pre-commit `harpo`, MCP server `harpo`); first two README demos; security fixes FR-CORE-07, SEC-01, SEC-07 to SEC-09 | Findings byte-identical to before the cleanup; full suite and coverage floor green |
 | M4: Serving and reliability | Dates set aside (Josh, Oct 18) | Stage profile; detector daemon and thin hook client; fallback that never allows; checkpointed history scans; atomic state files | NFR-03 to NFR-06 met and published |
-| M5: Learns false alarms, not secrets | Dates set aside | Out-of-band questions and `harpo review`; fingerprint allowlist; local context-only suppressor | FR-LEARN-06 and FR-LEARN-07 published; labeling study done |
-| M6: Model lifecycle | Dates set aside | Feedback export; one-command retrain; CI evaluation gate; shadow runs; versioned manifests and rollback | A deliberately worse model is rejected; feedback retrain target met |
+| M5: Learns false alarms, not secrets | Dropped (Josh, Oct 28) | Out-of-band questions and `harpo review`; fingerprint allowlist; local context-only suppressor | FR-LEARN-06 and FR-LEARN-07 published; labeling study done |
+| M6: Model lifecycle | Dropped (Josh, Oct 28) | Feedback export; one-command retrain; CI evaluation gate; shadow runs; versioned manifests and rollback | A deliberately worse model is rejected; feedback retrain target met |
 | M7: Org scanning service | Dates set aside | Replay generator; 3-broker Redpanda; scanner consumer group; dead-letter topic | 0 missed and 0 duplicated under worker kill and broker stop; NFR-07 load report |
 | M8: Detections, cloud and publication (deferred) | Deferred (Josh, Oct 18) | ATT&CK map; Sigma rules; Terraform deployment; cost runs; README benchmark section | Every rule fires on its recording and is silent on benign logs; cost report |
 
@@ -734,7 +740,8 @@ R0, M1 and the M2 work so far are on the `r0/cleanup` branch and not yet merged 
 | R0 | Done, proposals open | Cleanup review and untracks (shipped code down 30%, findings byte-identical; FR-CLEAN-01 to -04); docstring format enforced (DOC-DOCSTRING-01); rename to Harpo (FR-NAME-01 to -06); two README demos (DOC-DEMO-01, -02); FR-CORE-07, SEC-07 to SEC-09, and SEC-01 for `harpo scan` output. Oct 21: agent instructions and internal spec notes removed from the repo; the R0 IDs and the gate decisions they held are restated in this doc | FR-NAME-07 (rename the GitHub repo) waits for the release. TEST-02 to TEST-04 are still proposals. TEST-01's CI check has not run on this branch |
 | M1 | Done, two checks open | FR-READ-01 to FR-READ-03, FR-READ-05, FR-READ-06, SEC-02, SEC-06, FR-CORE-02, FR-CORE-03, FR-INSTALL-03. Live run on Claude Code with 0 of 15 canaries in the agent's context (Oct 19). Oct 21: scripted reads through the installed hook, Claude Code 2.1.306 and Codex 0.163.0 against the mock provider, 0 of 22 known-format canaries received | Fresh-machine setup by someone else (FR-READ-03's acceptance); the one-time Codex `/hooks` trust and a live Codex run |
 | M2 | In progress | Built and tested: localhost proxy with per-session token (FR-GATE-01, SEC-03); per-format parsing (FR-GATE-02); fail closed (FR-GATE-03); full-history scan and deterministic placeholders (FR-GATE-04, FR-GATE-05); streaming, ChatGPT-login upstream and connection reuse (FR-GATE-06); media policy (FR-GATE-07); transport notes (FR-GATE-09); thinking blocks (FR-GATE-10); base64 inside text (FR-GATE-11); gzip and zstd request bodies, with unknown encodings blocked (FR-INSTALL-04); authentication headers forwarded untouched and never logged (FR-INSTALL-05); bypass check in the hook (SEC-10); mock provider and canary harness; FR-READ-04 as reworded (the deny that shipped with FR-READ-06). G7, Oct 21: `harpo guard up` and `harpo guard down` start the gate in the background with a new token, route Claude Code and Codex through their own settings files, and restore those files byte-identical (FR-INSTALL-01's gate routing, FR-INSTALL-06, FR-INSTALL-08, FR-UX-01); `harpo doctor` checks the setup locally (FR-INSTALL-02); `harpo install` keeps the gate entry; the SEC-10 check applies to Claude Code only when guard up routed it. G6, Oct 21: the findings log (FR-LOG-01) from the gate, the read tool and the hook; the hash-chained proof log of every forwarded request, fail closed when it cannot be written (FR-PROOF-01, FR-PROOF-02); `harpo proof` (FR-PROOF-03); and the SEC-01 sweep of every Harpo file and temp file after the agent runs. FR-CORE-05, Oct 21: every file is scanned whole in bounded pieces on both engines, and the read tool and the hook check files over 10 MB in chunks; before it, a single-file scan read only the first 10 MB of a larger file without saying so. End-to-end runs with the real Claude Code and Codex CLIs against the mock provider leak 0 known-format canaries (Oct 20, and again Oct 21). Measured on an Apple M3 Pro (Oct 20 to 21): follow-up turns add 12.2 ms p95 (n = 275); first turns, with a cold cache, add 347 ms p95 (n = 16, two of them 0.7 to 1 MB); over TLS the gate adds a median 0.19 ms per request with connection reuse and 1.14 ms without; the FR-GATE-11 rule would block 3 of 1,038 recorded requests, all three holding planted canaries, so 0 false blocks | Live check against chatgpt.com with a real login. The acceptance checks listed below |
-| M3 to M7 | Not started | | |
+| M3, M4, M7 | Not started | | |
+| M5, M6 | Dropped (Josh, Oct 28, 2026): no further ML work | | |
 | M8 | Deferred | | |
 
 **Gate work items.** Code comments and commits cite these.
@@ -851,7 +858,7 @@ Same container and tool versions as the verification run above. Branch `r0/clean
 
 No "Josh writes" item is in R0 to M2, so none was started.
 
-**After v1:** v1.1 (January 2027) ships the retrained detector from Detector training data. v1.2 (February 2027) ships repo preflight. The lab repo starts after that. Each release must leave the repo finished and demoable.
+**After v1:** the v1.1 retrained detector is dropped with the rest of the ML work (Josh, Oct 28, 2026). v1.2 (February 2027) ships repo preflight. The lab repo starts after that. Each release must leave the repo finished and demoable.
 
 **Schedule risk and cut order:** scope grew after these dates were set (installer adapters, `harpo doctor`, signed-block handling, competitor comparison). If M2 or M3 slips, cut in this order: (1) OpenCode and Copilot adapters, to v1.1; (2) competitor comparison, to v1.1; (3) OCR for images, which stays pass-with-warning; (4) the full SWE-bench run, falling back to the 10-task subset with the result labeled preliminary. Never cut fail closed, `harpo doctor`, the no-plaintext-logging rule, or the canary leakage test.
 
