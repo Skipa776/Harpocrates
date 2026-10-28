@@ -1,8 +1,12 @@
 //! Native regex and entropy scanner for Harpocrates.
 //!
-//! The crate deliberately stops at candidate generation. Python remains the
-//! owner of classification, context feature extraction, and ML verification.
+//! The crate owns candidate generation, every regex and entropy rule, with the Python detector's patterns and
+//! order (`patterns()` lists them; a Python test compares the two). Python owns category inference, context
+//! features and ML verification.
 
+mod candidates;
+
+use candidates::{CharIndex, assigned_name, context_window};
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -15,7 +19,8 @@ use std::sync::OnceLock;
 use std::thread;
 
 /// 2: `memory_cap` replaced the read limits `max_bytes` and `max_file_size` (FR-CORE-05).
-pub const PROTOCOL_VERSION: u32 = 2;
+/// 3: candidates carry the Python detector's variable name and a `context` window, and the Phase 2d candidates exist.
+pub const PROTOCOL_VERSION: u32 = 3;
 /// The most bytes one file's scan holds (FR-CORE-05); every file is scanned whole, in pieces.
 pub const MEMORY_CAP: usize = 64 * 1024 * 1024;
 /// Bytes that two pieces of a long line share: longer than any token the regex and entropy tiers match.
@@ -81,6 +86,9 @@ pub struct RawFinding {
     pub entropy: f64,
     pub in_comment: Option<bool>,
     pub var_name: Option<String>,
+    /// The line around the token's first occurrence, for the classifier; None for regex signatures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -142,9 +150,174 @@ impl Display for ScanError {
 
 impl std::error::Error for ScanError {}
 
+const CRITICAL_SIGNATURES: &[(&str, &str)] = &[
+    (
+        "AWS_ACCESS_KEY_ID",
+        r"\b(?:AKIA|A3T|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}\b",
+    ),
+    (
+        "GITHUB_PAT",
+        r"\b(?:gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})\b",
+    ),
+    (
+        "SLACK_TOKEN",
+        r"\bxox[pboar]-[0-9]{10,13}-[a-zA-Z0-9\-]{24,48}\b",
+    ),
+    ("STRIPE_KEY", r"\b[rs]k_(?:live|test)_[a-zA-Z0-9]{24,99}\b"),
+    (
+        "OPENAI_API_KEY",
+        r"\b(?:sk-[a-zA-Z0-9]{48}|sk-proj-[a-zA-Z0-9]{20}T3[a-zA-Z0-9]{20,})\b",
+    ),
+    ("ANTHROPIC_API_KEY", r"\bsk-ant-api03-[a-zA-Z0-9\-_]{93,}\b"),
+    ("GCP_API_KEY", r"\bAIza[0-9A-Za-z\-_]{35}\b"),
+    ("NPM_TOKEN", r"\bnpm_[a-zA-Z0-9]{36}\b"),
+    ("PYPI_TOKEN", r"\bpypi-[a-zA-Z0-9\-_]{50,}\b"),
+];
+
+const HIGH_SIGNATURES: &[(&str, &str)] = &[
+    (
+        "TELEGRAM_BOT_TOKEN",
+        r"(?<![0-9])[0-9]{8,10}:[A-Za-z0-9_\-]{35}(?![A-Za-z0-9_\-])",
+    ),
+    (
+        "PRIVATE_KEY",
+        r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+    ),
+    (
+        "SLACK_WEBHOOK",
+        r"\bhttps://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8,10}/B[a-zA-Z0-9_]{8,10}/[a-zA-Z0-9_]{24}\b",
+    ),
+    (
+        "DISCORD_WEBHOOK",
+        r"\bhttps://discord\.com/api/webhooks/[0-9]{17,19}/[a-zA-Z0-9\-_]{68}\b",
+    ),
+    (
+        "SENDGRID_API_KEY",
+        r"\bSG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}\b",
+    ),
+    ("TWILIO_API_KEY", r"\bSK[0-9a-fA-F]{32}\b"),
+    ("DATABRICKS_TOKEN", r"\bdapi[a-f0-9]{32}\b"),
+    ("HASHICORP_VAULT_TOKEN", r"\bhvs\.[a-zA-Z0-9\-_]{90,}\b"),
+    // Matched by Matcher::OpenAiLegacy, which is written from this pattern: change both together.
+    (
+        "OPENAI_API_KEY_LEGACY",
+        r"\bsk-(?!proj-)(?!ant-api03-)(?![a-zA-Z0-9]{48}\b)[A-Za-z0-9_-]{16,}\b",
+    ),
+];
+
+const TOKEN: &str = r"[A-Za-z0-9+/=_\-]{20,}";
+const URL: &str = r"(?:https?://|data:)\S+";
+const PEM_BODY: &str = r"^[A-Za-z0-9+/]{64}$";
+const COMMENT_STRIP: &str = r"^(?:#+|//+|/\*+|\*+|<!--|--)\s*";
+const PROSE_FILTER: &str = r#"[=:'\"]"#;
+
+/// Every pattern and constant the scan uses, by its Python name, in the Python order.
+pub fn patterns() -> Vec<(&'static str, String)> {
+    let mut out: Vec<(&'static str, String)> = CRITICAL_SIGNATURES
+        .iter()
+        .chain(HIGH_SIGNATURES)
+        .chain(&[
+            ("_TOKEN_RE", TOKEN),
+            ("_URL_RE", URL),
+            ("_PEM_BODY_RE", PEM_BODY),
+            ("_COMMENT_STRIP_RE", COMMENT_STRIP),
+            ("_PROSE_FILTER_RE", PROSE_FILTER),
+        ])
+        .map(|(name, pattern)| (*name, (*pattern).to_owned()))
+        .collect();
+    out.extend(candidates::patterns());
+    out
+}
+
+/// How a signature finds its matches.
+enum Matcher {
+    Plain(Regex),
+    /// A one-character lookbehind or lookahead around the match (TELEGRAM_BOT_TOKEN).
+    Bounded(candidates::Bounded),
+    /// `\bsk-`, three lookaheads, then the body.
+    OpenAiLegacy {
+        start: Regex,
+        body: Regex,
+        all_48: Regex,
+    },
+}
+
 struct Signature {
     name: &'static str,
-    pattern: Regex,
+    matcher: Matcher,
+}
+
+impl Signature {
+    /// The signature, and a pattern without lookarounds that matches wherever it does, for the prefilter set.
+    fn compile(name: &'static str, python: &str) -> Result<(Self, String), regex::Error> {
+        let (matcher, prefilter) = if name == "OPENAI_API_KEY_LEGACY" {
+            let matcher = Matcher::OpenAiLegacy {
+                start: Regex::new(r"\bsk-")?,
+                body: Regex::new(r"[A-Za-z0-9_-]{16,}\b")?,
+                all_48: Regex::new(r"[a-zA-Z0-9]{48}\b")?,
+            };
+            (matcher, r"\bsk-[A-Za-z0-9_-]{16,}\b".to_owned())
+        } else if python.contains("(?<!") || python.contains("(?!") {
+            let bounded = candidates::Bounded::new(python)?;
+            let prefilter = bounded.body().as_str().to_owned();
+            (Matcher::Bounded(bounded), prefilter)
+        } else {
+            (Matcher::Plain(Regex::new(python)?), python.to_owned())
+        };
+        Ok((Self { name, matcher }, prefilter))
+    }
+
+    /// Byte spans of the matches, like Python's `finditer`.
+    fn spans(&self, text: &str) -> Vec<(usize, usize)> {
+        match &self.matcher {
+            Matcher::Plain(pattern) => pattern
+                .find_iter(text)
+                .map(|found| (found.start(), found.end()))
+                .collect(),
+            Matcher::Bounded(bounded) => bounded.spans(text, 0),
+            Matcher::OpenAiLegacy {
+                start,
+                body,
+                all_48,
+            } => {
+                // A match of `pattern` that starts exactly at `at`, with the text before it as context.
+                let at_start = |pattern: &Regex, at: usize| {
+                    pattern
+                        .find_at(text, at)
+                        .filter(|found| found.start() == at)
+                };
+                let mut out = Vec::new();
+                let mut at = 0;
+                while let Some(prefix) = start.find_at(text, at) {
+                    let rest = &text[prefix.end()..];
+                    let excluded = rest.starts_with("proj-")
+                        || rest.starts_with("ant-api03-")
+                        || at_start(all_48, prefix.end()).is_some();
+                    match (!excluded).then(|| at_start(body, prefix.end())).flatten() {
+                        Some(found) => {
+                            out.push((prefix.start(), found.end()));
+                            at = found.end();
+                        }
+                        None => at = prefix.start() + 1,
+                    }
+                }
+                out
+            }
+        }
+    }
+}
+
+fn compile_tier(
+    definitions: &[(&'static str, &'static str)],
+) -> Result<(Vec<Signature>, RegexSet), regex::Error> {
+    let mut signatures = Vec::new();
+    let mut prefilters = Vec::new();
+    for (name, python) in definitions {
+        let (signature, prefilter) = Signature::compile(name, python)?;
+        signatures.push(signature);
+        prefilters.push(prefilter);
+    }
+    Ok((signatures, RegexSet::new(prefilters)?))
 }
 
 struct Engine {
@@ -157,89 +330,26 @@ struct Engine {
     pem_body: Regex,
     comment_strip: Regex,
     prose_filter: Regex,
-    sensitive_assignment: Regex,
-    env_assignment: Regex,
+    candidates: candidates::Candidates,
 }
 
 impl Engine {
     fn compile() -> Result<Self, regex::Error> {
-        let critical_definitions = [
-            (
-                "AWS_ACCESS_KEY_ID",
-                r"\b(?:AKIA|A3T|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}\b",
-            ),
-            (
-                "GITHUB_PAT",
-                r"\b(?:gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})\b",
-            ),
-            (
-                "SLACK_TOKEN",
-                r"\bxox[pboar]-[0-9]{10,13}-[a-zA-Z0-9\-]{24,34}\b",
-            ),
-            ("STRIPE_KEY", r"\b[rs]k_(?:live|test)_[a-zA-Z0-9]{24,99}\b"),
-            (
-                "OPENAI_API_KEY",
-                r"\b(?:sk-[a-zA-Z0-9]{48}|sk-proj-[a-zA-Z0-9]{20}T3[a-zA-Z0-9]{20,})\b",
-            ),
-            ("ANTHROPIC_API_KEY", r"\bsk-ant-api03-[a-zA-Z0-9\-_]{93,}\b"),
-            ("GCP_API_KEY", r"\bAIza[0-9A-Za-z\-_]{35}\b"),
-            ("NPM_TOKEN", r"\bnpm_[a-zA-Z0-9]{36}\b"),
-            ("PYPI_TOKEN", r"\bpypi-[a-zA-Z0-9\-_]{50,}\b"),
-        ];
-        let high_definitions = [
-            (
-                "PRIVATE_KEY",
-                r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
-            ),
-            (
-                "SLACK_WEBHOOK",
-                r"\bhttps://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8,10}/B[a-zA-Z0-9_]{8,10}/[a-zA-Z0-9_]{24}\b",
-            ),
-            (
-                "DISCORD_WEBHOOK",
-                r"\bhttps://discord\.com/api/webhooks/[0-9]{17,19}/[a-zA-Z0-9\-_]{68}\b",
-            ),
-            (
-                "SENDGRID_API_KEY",
-                r"\bSG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}\b",
-            ),
-            ("TWILIO_API_KEY", r"\bSK[0-9a-fA-F]{32}\b"),
-            ("DATABRICKS_TOKEN", r"\bdapi[a-f0-9]{32}\b"),
-            ("HASHICORP_VAULT_TOKEN", r"\bhvs\.[a-zA-Z0-9\-_]{90,}\b"),
-            ("OPENAI_API_KEY_LEGACY", r"\bsk-[A-Za-z0-9_-]{16,}\b"),
-        ];
+        let (critical, critical_set) = compile_tier(CRITICAL_SIGNATURES)?;
+        let (high, high_set) = compile_tier(HIGH_SIGNATURES)?;
         Ok(Self {
-            critical: compile_signatures(&critical_definitions)?,
-            critical_set: RegexSet::new(critical_definitions.map(|(_, pattern)| pattern))?,
-            high: compile_signatures(&high_definitions)?,
-            high_set: RegexSet::new(high_definitions.map(|(_, pattern)| pattern))?,
-            token: Regex::new(r"[A-Za-z0-9+/=_\-]{20,}")?,
-            url: Regex::new(r"(?:https?://|data:)\S+")?,
-            pem_body: Regex::new(r"^[A-Za-z0-9+/]{64}$")?,
-            comment_strip: Regex::new(r"^(?:#+|//+|/\*+|\*+|<!--|--)\s*")?,
-            prose_filter: Regex::new(r#"[=:'\"]"#)?,
-            sensitive_assignment: Regex::new(
-                r#"(?i)(?:^|[^A-Za-z])((?:pass(?:word|wd|w)?|pwd|usr(?:name)?|user|host|conn(?:ection|str)?|secret|token|key|auth|cred)[a-z0-9_]*)\s*[:=]\s*['\"]([^'\"]{3,100})['\"]"#,
-            )?,
-            env_assignment: Regex::new(
-                r#"(?i)(?:^|[^A-Za-z])((?:pass(?:word|wd|w)?|pwd|conn(?:ection|str)?|secret|token|key|auth|cred|url|endpoint|callback)[a-z0-9_]*)\s*=\s*([^\s'\"]{3,200})"#,
-            )?,
+            critical,
+            critical_set,
+            high,
+            high_set,
+            token: Regex::new(TOKEN)?,
+            url: Regex::new(URL)?,
+            pem_body: Regex::new(PEM_BODY)?,
+            comment_strip: Regex::new(COMMENT_STRIP)?,
+            prose_filter: Regex::new(PROSE_FILTER)?,
+            candidates: candidates::Candidates::compile()?,
         })
     }
-}
-
-fn compile_signatures(
-    definitions: &[(&'static str, &'static str)],
-) -> Result<Vec<Signature>, regex::Error> {
-    definitions
-        .iter()
-        .map(|(name, pattern)| {
-            Ok(Signature {
-                name,
-                pattern: Regex::new(pattern)?,
-            })
-        })
-        .collect()
 }
 
 static ENGINE: OnceLock<Result<Engine, String>> = OnceLock::new();
@@ -811,8 +921,8 @@ fn scan_line(engine: &Engine, line: &str, lineno: usize, extension: &str) -> Vec
     scan_prepared(engine, stripped, target, is_comment, lineno, extension)
 }
 
-/// The three detection tiers over a prepared target. A later piece of a long line comes here as it is, with the
-/// line's comment flag, so its offsets count from the piece's start.
+/// The detection tiers over a prepared target, in the Python detector's order (`_scan_line`). A later piece of a long
+/// line comes here as it is, with the line's comment flag, so its offsets count from the piece's start.
 fn scan_prepared(
     engine: &Engine,
     stripped: &str,
@@ -824,65 +934,68 @@ fn scan_prepared(
     if stripped.trim().is_empty() {
         return Vec::new();
     }
-    let comment_flag = is_comment.then_some(true);
-    let snippet: String = stripped.chars().take(200).collect();
+    let target: &str = &scan_target;
+    let line = LineFacts {
+        lineno,
+        snippet: stripped.chars().take(200).collect(),
+        in_comment: is_comment.then_some(true),
+    };
     let mut findings = Vec::new();
 
+    // Phase 1: CRITICAL, then HIGH signatures.
+    let mut index = CharIndex::new(target);
     for (signatures, signature_set, severity, confidence) in [
         (&engine.critical, &engine.critical_set, "critical", 0.99),
         (&engine.high, &engine.high_set, "high", 0.95),
     ] {
-        for signature_index in signature_set.matches(&scan_target).iter() {
+        for signature_index in signature_set.matches(target).iter() {
             let signature = &signatures[signature_index];
-            for match_ in signature.pattern.find_iter(&scan_target) {
-                let token = match_.as_str();
-                if signature_is_excluded(signature.name, token) {
-                    continue;
-                }
+            for (start, end) in signature.spans(target) {
+                let token = &target[start..end];
                 findings.push(RawFinding {
                     kind: signature.name.to_owned(),
                     line: lineno,
-                    snippet: snippet.clone(),
+                    snippet: line.snippet.clone(),
                     token: token.to_owned(),
-                    token_start: Some(byte_to_char_index(&scan_target, match_.start())),
-                    token_end: Some(byte_to_char_index(&scan_target, match_.end())),
+                    token_start: Some(index.at(start)),
+                    token_end: Some(index.at(end)),
                     evidence: Evidence::Regex,
                     severity: severity.to_owned(),
                     confidence,
                     entropy: shannon_entropy(token),
-                    in_comment: comment_flag,
+                    in_comment: line.in_comment,
                     var_name: None,
+                    context: None,
                 });
             }
         }
     }
 
-    if !findings.is_empty() {
+    // Phase 2 runs only when no signature matched.
+    if !findings.is_empty()
+        || (is_comment && !engine.prose_filter.is_match(target))
+        || engine.pem_body.is_match(target)
+        || LOW_NOISE_EXTENSIONS.contains(&extension)
+    {
         return findings;
     }
-    if is_comment && !engine.prose_filter.is_match(&scan_target) {
-        return findings;
-    }
-    if engine.pem_body.is_match(&scan_target) {
-        return findings;
-    }
-
-    if LOW_NOISE_EXTENSIONS.contains(&extension) {
-        return findings;
-    }
-    let scan_text: Cow<'_, str> = if HIGH_RISK_EXTENSIONS.contains(&extension) {
-        Cow::Borrowed(&scan_target)
+    let high_risk = HIGH_RISK_EXTENSIONS.contains(&extension);
+    // URLs are credentials in .env-style files, and noise elsewhere.
+    let scan_text: Cow<'_, str> = if high_risk {
+        Cow::Borrowed(target)
     } else {
-        engine.url.replace_all(&scan_target, " ")
+        engine.url.replace_all(target, " ")
     };
+    let candidates = &engine.candidates;
 
-    for match_ in engine.token.find_iter(&scan_text) {
-        let token = match_.as_str();
+    // Phase 2a: high-entropy tokens.
+    for found in engine.token.find_iter(&scan_text) {
+        let token = found.as_str();
         if let Some(entropy) = secret_entropy(token, 4.0) {
             findings.push(RawFinding {
                 kind: "ENTROPY_CANDIDATE".to_owned(),
                 line: lineno,
-                snippet: snippet.clone(),
+                snippet: line.snippet.clone(),
                 token: token.to_owned(),
                 token_start: None,
                 token_end: None,
@@ -890,57 +1003,66 @@ fn scan_prepared(
                 severity: "info".to_owned(),
                 confidence: entropy_confidence(entropy),
                 entropy,
-                in_comment: comment_flag,
-                var_name: extract_var_name(&scan_target, token),
+                in_comment: line.in_comment,
+                var_name: candidates.extract_var_name(target, token),
+                context: context_window(target, token),
             });
         }
     }
 
+    // Each later phase skips a value already found on this line.
     let mut found_tokens: HashSet<String> = findings
         .iter()
         .map(|finding| finding.token.clone())
         .collect();
-    for captures in engine.sensitive_assignment.captures_iter(&scan_text) {
-        let Some(var_match) = captures.get(1) else {
-            continue;
-        };
-        let Some(value_match) = captures.get(2) else {
-            continue;
-        };
-        if found_tokens.insert(value_match.as_str().to_owned()) {
-            findings.push(candidate_finding(
+    let mut text_index = CharIndex::new(&scan_text);
+    // Phase 2b: quoted values of credential-named variables.
+    for (start, end) in candidates.sensitive_assignment.spans(&scan_text, 1) {
+        let value = &scan_text[start..end];
+        if found_tokens.insert(value.to_owned()) {
+            let span = (text_index.at(start), text_index.at(end));
+            findings.push(line.candidate(
                 "ML_CANDIDATE",
                 Evidence::Ml,
-                0.5,
-                lineno,
-                &snippet,
-                &scan_text,
-                value_match,
-                var_match.as_str(),
-                comment_flag,
+                value,
+                span,
+                assigned_name(&scan_text, start),
+                context_window(target, value),
             ));
         }
     }
-
-    if HIGH_RISK_EXTENSIONS.contains(&extension) {
-        for captures in engine.env_assignment.captures_iter(&scan_text) {
-            let Some(var_match) = captures.get(1) else {
-                continue;
-            };
-            let Some(value_match) = captures.get(2) else {
-                continue;
-            };
-            if found_tokens.insert(value_match.as_str().to_owned()) {
-                findings.push(candidate_finding(
+    // Phase 2d: credential shapes the tokenizer cannot see.
+    for (value, start, end) in candidates.structured(target) {
+        if found_tokens.contains(&value) {
+            continue;
+        }
+        let (var_name, context) = (
+            candidates.extract_var_name(target, &value),
+            context_window(target, &value),
+        );
+        findings.push(line.candidate(
+            "ML_CANDIDATE",
+            Evidence::Ml,
+            &value,
+            (start, end),
+            var_name,
+            context,
+        ));
+        found_tokens.insert(value);
+    }
+    // Phase 2c: unquoted KEY=VALUE in .env-style files.
+    if high_risk {
+        for (start, end) in candidates.env_assignment.spans(&scan_text, 1) {
+            let value = &scan_text[start..end];
+            if found_tokens.insert(value.to_owned()) {
+                let span = (text_index.at(start), text_index.at(end));
+                findings.push(line.candidate(
                     "ENV_ASSIGNMENT",
                     Evidence::Regex,
-                    0.5,
-                    lineno,
-                    &snippet,
-                    &scan_text,
-                    value_match,
-                    var_match.as_str(),
-                    comment_flag,
+                    value,
+                    span,
+                    assigned_name(&scan_text, start),
+                    context_window(target, value),
                 ));
             }
         }
@@ -949,45 +1071,40 @@ fn scan_prepared(
     findings
 }
 
-#[allow(clippy::too_many_arguments)]
-fn candidate_finding(
-    kind: &str,
-    evidence: Evidence,
-    confidence: f64,
-    line: usize,
-    snippet: &str,
-    scan_text: &str,
-    value_match: regex::Match<'_>,
-    var_name: &str,
+/// What every finding on one line shares.
+struct LineFacts {
+    lineno: usize,
+    snippet: String,
     in_comment: Option<bool>,
-) -> RawFinding {
-    let token = value_match.as_str();
-    RawFinding {
-        kind: kind.to_owned(),
-        line,
-        snippet: snippet.to_owned(),
-        token: token.to_owned(),
-        token_start: Some(byte_to_char_index(scan_text, value_match.start())),
-        token_end: Some(byte_to_char_index(scan_text, value_match.end())),
-        evidence,
-        severity: "info".to_owned(),
-        confidence,
-        entropy: shannon_entropy(token),
-        in_comment,
-        var_name: Some(var_name.to_owned()),
-    }
 }
 
-fn signature_is_excluded(name: &str, token: &str) -> bool {
-    if name != "OPENAI_API_KEY_LEGACY" {
-        return false;
+impl LineFacts {
+    /// A Phase 2 candidate at character offsets `span`; Python sets its severity and confidence.
+    fn candidate(
+        &self,
+        kind: &str,
+        evidence: Evidence,
+        token: &str,
+        span: (usize, usize),
+        var_name: Option<String>,
+        context: Option<String>,
+    ) -> RawFinding {
+        RawFinding {
+            kind: kind.to_owned(),
+            line: self.lineno,
+            snippet: self.snippet.clone(),
+            token: token.to_owned(),
+            token_start: Some(span.0),
+            token_end: Some(span.1),
+            evidence,
+            severity: "info".to_owned(),
+            confidence: 0.5,
+            entropy: shannon_entropy(token),
+            in_comment: self.in_comment,
+            var_name,
+            context,
+        }
     }
-    let Some(body) = token.strip_prefix("sk-") else {
-        return false;
-    };
-    body.starts_with("proj-")
-        || body.starts_with("ant-api03-")
-        || (body.len() == 48 && body.bytes().all(|byte| byte.is_ascii_alphanumeric()))
 }
 
 fn effective_extension(file: Option<&str>) -> String {
@@ -1007,25 +1124,6 @@ fn effective_extension(file: Option<&str>) -> String {
         .and_then(|extension| extension.to_str())
         .map(|extension| format!(".{}", extension.to_ascii_lowercase()))
         .unwrap_or_default()
-}
-
-fn extract_var_name(line: &str, token: &str) -> Option<String> {
-    let token_start = line.find(token)?;
-    let prefix = line[..token_start].trim_end();
-    let assignment = prefix.rsplit_once(['=', ':'])?.0.trim_end();
-    let name: String = assignment
-        .chars()
-        .rev()
-        .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    (!name.is_empty()).then_some(name)
-}
-
-fn byte_to_char_index(value: &str, byte_index: usize) -> usize {
-    value[..byte_index].chars().count()
 }
 
 fn entropy_confidence(entropy: f64) -> f64 {

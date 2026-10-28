@@ -1,6 +1,6 @@
 use harpocrates_rust_scanner::{
-    BatchScanRequest, DirectoryScanRequest, ScanOptions, scan_batch, scan_directory, scan_file,
-    scan_text,
+    BatchScanRequest, DirectoryScanRequest, ScanOptions, patterns, scan_batch, scan_directory,
+    scan_file, scan_text,
 };
 use serde::Serialize;
 use std::env;
@@ -74,6 +74,12 @@ fn run() -> Result<(), String> {
             let response = scan_directory(request).map_err(|error| error.to_string())?;
             write_output(&response)?;
         }
+        "patterns" => {
+            if args.next().is_some() {
+                return Err(usage());
+            }
+            write_output(&patterns())?;
+        }
         _ => return Err(usage()),
     }
     Ok(())
@@ -85,6 +91,6 @@ fn write_output(value: &impl Serialize) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: harpocrates-rust-scanner scan-text [--file PATH] | scan-file PATH [--memory-cap N] | scan-batch | scan-directory"
+    "usage: harpocrates-rust-scanner scan-text [--file PATH] | scan-file PATH [--memory-cap N] | scan-batch | scan-directory | patterns"
         .to_owned()
 }

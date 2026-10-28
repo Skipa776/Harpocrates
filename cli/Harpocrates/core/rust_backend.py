@@ -34,7 +34,7 @@ _BINARY_ENV = "RUST_SCANNER"  # read as HARPO_RUST_SCANNER, then HARPOCRATES_RUS
 _BINARY_NAME = "harpocrates-rust-scanner"
 _DIRECTORY_TIMEOUT_ENV = "RUST_TIMEOUT_SECONDS"  # likewise
 _DEFAULT_DIRECTORY_TIMEOUT_SECONDS = 300.0
-PROTOCOL_VERSION = 2  # 2: memory_cap replaces the read limits (FR-CORE-05)
+PROTOCOL_VERSION = 3  # 2: memory_cap replaces the read limits (FR-CORE-05); 3: candidates carry var_name and context
 _ML_BATCH_SIZE = 1024
 
 
@@ -648,11 +648,14 @@ class RustScannerBackend:
                 signature = (
                     kind if evidence == EvidenceType.REGEX and kind != "ENV_ASSIGNMENT" else None
                 )
+                context = raw.get("context")
+                # The same inputs the Python detector gives the classifier: a signature alone, or the variable name
+                # and the line around the token (the context window holds every character the classifier reads).
                 inference = infer_category(
                     signature_name=signature,
                     var_name=str(var_name) if var_name else None,
                     token=token,
-                    line=str(raw.get("snippet") or "") or None,
+                    line=str(context) if signature is None and context else None,
                 )
 
                 if signature is not None:
