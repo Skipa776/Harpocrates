@@ -730,7 +730,7 @@ v1 ships in about 8 weeks. Apply to internships from week 2 onward; don't wait f
 
 ### Progress (Oct 21, 2026)
 
-R0, M1 and the M2 work so far are on the `r0/cleanup` branch and not yet merged to `main`; the last release is v1.3.0. This checkout collects 3,552 tests (3,539 unit, 13 integration) and 23 Rust tests (Oct 28). The 3,544 counted earlier on Josh's machine include the tests of the training code, which is kept locally and untracked (seven gitignored test files).
+R0, M1 and the M2 work are merged to `main` (PR #41, Oct 28, 2026) and not released; the last release is v1.3.0. No further features are planned (Josh, Oct 28); the README's "If I kept going" names the next steps. This checkout collects 3,552 tests (3,539 unit, 13 integration) and 23 Rust tests (Oct 28). The 3,544 counted earlier on Josh's machine include the tests of the training code, which is kept locally and untracked (seven gitignored test files).
 
 **CI.** `ci.yml` runs on pushes to `main`, `feature/**` and `feat/**`, and on pull requests, so it first ran on this branch with draft pull request #41, on Oct 21. That run passed Rust, the plugin tests and the demos; the unit jobs failed one test, whose help-text check broke when typer draws a colored panel under `GITHUB_ACTIONS` (fixed the same day). The rest below marked Oct 21 was run by hand (Verification run, below).
 

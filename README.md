@@ -4,7 +4,7 @@
 
 Harpo is a secrets scanner and a guard that keeps secrets out of AI coding agents (Claude Code and Codex). The scanner finds candidates with regex patterns and Shannon entropy, then a bundled ML model decides on the ones no pattern settles, with no network calls. The guard puts two layers around the agent: a read tool and hook that keep secrets out of what the agent reads, and an egress gate that scans every request the agent sends to its model provider.
 
-**Status.** v1.3.0 on PyPI has the scanner, the read tool and the hook. The egress gate, `harpo guard`, `harpo doctor` and the audit logs are built and tested on the `r0/cleanup` branch ([draft PR #41](https://github.com/Skipa776/Harpocrates/pull/41)) and are not released yet. Requirements, decisions and progress are tracked in [docs/design.md](docs/design.md).
+**Status.** v1.3.0 on PyPI has the scanner, the read tool and the hook. The egress gate, `harpo guard`, `harpo doctor`, the audit logs and the Rust rules are built, tested and merged to `main` ([PR #41](https://github.com/Skipa776/Harpocrates/pull/41)), but not released. No further features are planned; what I would build next is under [If I kept going](#if-i-kept-going). Requirements, decisions and progress are tracked in [docs/design.md](docs/design.md).
 
 ## At a glance
 
@@ -114,6 +114,24 @@ $ python -c "from Harpocrates.mcp.server import safe_read; print(safe_read('.env
 [harpo: 4 secret(s) redacted as <<HARPO:type:hash>>. They are not the real values; reference the variable or config key instead of copying them.]
 ```
 
+## Challenges and what went wrong
+
+These are the problems I ran into, what I changed for each, and what each one taught me.
+
+- **Entropy and the model flagged every random-looking string, including images in web pages.** Early versions turned any long high-entropy token into a candidate, so inline base64 images (`data:` URIs) in HTML and CSS, webpack content hashes, CSS class fingerprints and SVG path data were all flagged, and the ML step did not filter them out. In v0.2.0 (Apr 2026) I stripped URLs and `data:` URIs before tokenizing and added filters for camelCase and lowercase-slug tokens, which cut false positives on a real codebase from 1,299 to 16; a May 2026 fix then skips the entropy step for .html, .css, .svg and .xml files while keeping the regex signatures, so an API key pasted into a `<script>` block is still caught. Lesson: entropy measures randomness, not secrecy, and the kind of file matters.
+- **The model learned a shortcut from variable names.** With variable-name features, the model leaned on names like `password` instead of the value. Zeroing the 10 variable-name features in training raised validation AUC, so the shipped model judges the value and its surroundings, never the name. Lesson: a feature that makes the training data easy can make the real task harder.
+- **I reused my benchmark until it stopped being a test.** The held-out benchmark was scored for several model versions, so it was no longer a clean test for choosing the next one. I retired it for model selection and kept it only as the published measure of the shipped model. Lesson: a held-out set is only held out the first time you look at it.
+- **A large file was scanned only partly, and the scan still passed.** A single-file scan read only the first 10 MB of a larger file without saying so, so a secret after that point was missed with a clean exit. Now every file is scanned whole, in bounded pieces under a 64 MB memory cap, and a test plants a secret on the last line of a 100 MB file. Lesson: a size limit in a security tool must fail loudly, never quietly pass.
+- **The Rust engine drifted from the Python one.** The Rust scanner had older copies of some patterns and lacked a whole rule phase, so on this repository it found 140 of the Python engine's 159 findings, while its parity test passed because it only compared seven sample files that none of the missing rules touched. Now Rust reports every pattern by name and a test compares the two lists, and both engines are compared field by field on a fixture with a line for every rule. Lesson: a parity test is only as good as the cases it covers.
+- **Blocking reads in the agent was not enough.** The hook that refuses an agent's reads of secret-bearing files covers a fixed list of shell commands, and `python -c "print(open('app.yaml').read())"`, `perl`, `vim -es` and `xargs cat` all got through in testing. That is why I built the egress gate, which scans what actually leaves the machine, whatever tool produced it. Lesson: guard the boundary the data crosses, not each way of reaching it.
+
+## If I kept going
+
+Development has stopped, and these are the next steps I would take.
+
+- **Learn from the user's "not a secret" answers, locally.** When Harpo flags a value the user knows is harmless, it should remember the answer so the same value is not flagged on the next run. The design constraints are already worked out: the hook cannot show a dialog inside the agent and has a time budget of about 25 seconds, so the read is refused at once and the question is asked out of band. The answer is stored as a keyed fingerprint (a hash, never the value), and only the user can answer, never the agent, so a prompt-injected agent cannot teach Harpo to ignore a real secret. A small local model could later learn the places where false alarms cluster. The goal is to learn your false alarms, not your secrets.
+- **Protect more than credentials: high-risk personal data.** The egress gate already parses every request an agent sends and rewrites matching strings to placeholders, so the same machinery could keep the highest-risk class of data (P4 in a P1 to P4 data classification: Social Security numbers, health records, payment card and bank details) from reaching a model provider. This would likely matter to more people than API keys. The hard part is false alarms: a nine-digit number is usually not a Social Security number, so it would need validity checks (for example the Luhn check for card numbers) and context, and it was out of scope for this version.
+
 ## Model card
 
 - **Model:** v17 (detector v1.2), frozen: no further training is planned.
@@ -179,10 +197,10 @@ Codex needs one manual step: start `codex`, type `/hooks`, and trust the Harpo h
 
 Setup steps are in [docs/setup.md](docs/setup.md). What the setup does and doesn't protect is in [docs/threat-model.md](docs/threat-model.md).
 
-### 3. Egress gate (unreleased, from a clone of this branch)
+### 3. Egress gate (unreleased, from a clone)
 
 ```bash
-git clone -b r0/cleanup https://github.com/Skipa776/Harpocrates harpo && cd harpo && git lfs pull
+git clone https://github.com/Skipa776/Harpocrates harpo && cd harpo && git lfs pull
 pip install -e ".[mcp]"
 harpo guard up        # start the gate on 127.0.0.1 with a new token; route Claude Code and Codex to it
 harpo doctor          # check locally that each agent is routed to the running gate and nothing bypasses it
@@ -409,7 +427,7 @@ What to do: install the new package with `pip install harpo-scan` once it is pub
 
 ## Past versions
 
-- **Unreleased (`r0/cleanup`):** the egress gate (Anthropic Messages and OpenAI Responses, including streaming, gzip and zstd bodies, media and base64 inside text); `harpo guard up` / `down`, `harpo doctor` and `harpo proof`; the findings and proof logs; whole-file scans under a 64 MB memory cap; every regex and entropy rule in the Rust core, matching the Python detector, as a binary and as an in-process module (`harpo_native`); the rename to Harpo.
+- **Unreleased (on `main`):** the egress gate (Anthropic Messages and OpenAI Responses, including streaming, gzip and zstd bodies, media and base64 inside text); `harpo guard up` / `down`, `harpo doctor` and `harpo proof`; the findings and proof logs; whole-file scans under a 64 MB memory cap; every regex and entropy rule in the Rust core, matching the Python detector, as a binary and as an in-process module (`harpo_native`); the rename to Harpo.
 - **v1.3.0:** agent protection reworked: reads of secret-bearing files are refused (use `safe_read`), edits ask once per file and session; `harpocrates install` / `uninstall` for Claude Code and Codex; allowlist names (`harpocrates allow --name`); Claude Code plugin `harpocrates-prompt` with `/harpocrates` allowlist commands; hook hardening.
 - **v1.2.0** (model v17): higher recall, read tool for AI agents, calibrated confidence. `--ml` was removed so the model always runs (drop `--ml` from scripts and pre-commit `args`; it is now an error); the REST API, LLM verifier, and legacy training CLI were removed.
 - **v0.4:** redesigned 64-feature vector, TreeSHAP `--explain`, severity calibration.
