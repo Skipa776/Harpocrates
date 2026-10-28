@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
-import tomllib
+from toml_compat import tomllib
 from typer.testing import CliRunner
 
 from Harpocrates import harness, install

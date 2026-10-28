@@ -13,7 +13,7 @@ import types
 from pathlib import Path
 
 import pytest
-import tomllib
+from toml_compat import tomllib
 
 from Harpocrates.gate import body
 from Harpocrates.gate.body import Decoded, Zstd, decode_body, encode_body, load_zstd

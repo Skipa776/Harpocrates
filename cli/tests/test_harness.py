@@ -98,7 +98,7 @@ def test_fr_read_06_claude_code_settings_register_the_post_hooks() -> None:
 
 
 def test_fr_read_03_codex_denies_every_sensitive_path() -> None:
-    tomllib = pytest.importorskip("tomllib")
+    from toml_compat import tomllib
     cfg = tomllib.loads(codex_config())
     profile = cfg["permissions"][cfg["default_permissions"]]
     for d in SENSITIVE_HOME_DIRS:
@@ -151,7 +151,7 @@ def test_fr_read_03_odd_interpreter_paths_survive(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(harness, "mcp_server", lambda: (odd, ["-m", "Harpocrates.mcp.server"]))
     line = next(ln for ln in harness.setup_instructions("Claude-Code").splitlines() if "claude mcp add" in ln)
     assert shlex.split(line)[-3] == odd
-    tomllib = pytest.importorskip("tomllib")
+    from toml_compat import tomllib
     assert tomllib.loads(harness.codex_config())["mcp_servers"]["harpo"]["command"] == odd
 
 
@@ -176,7 +176,7 @@ def test_fr_install_01_codex_config_stays_deny_only() -> None:
 def test_fr_install_01_pretooluse_hooks_fail_closed_when_the_interpreter_is_gone(
         monkeypatch: pytest.MonkeyPatch) -> None:
     """A missing venv makes a bare hook command exit 127, which a harness treats as allow. Wrapped, it is 2."""
-    tomllib = pytest.importorskip("tomllib")
+    from toml_compat import tomllib
     monkeypatch.setattr(harness_mod, "mcp_server", lambda: ("/nonexistent/venv/bin/python", ["-m", "x"]))
     cfg = json.loads(json.dumps(claude_code_settings()))
     pre = [cfg["hooks"]["PreToolUse"][0]["hooks"][0]["command"],

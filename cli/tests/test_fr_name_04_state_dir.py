@@ -341,7 +341,7 @@ def _bash(cmd: str, cwd: Path, capsys) -> tuple[int, str]:
 
 
 # `{d}` is the folder name (.harpo or .harpocrates), `{n}` the same without the dot. The glob and obfuscated cases are
-# built from pieces, as in test_hooks_allowlist.py, so no spelling of the path sits in one literal.
+# built from pieces so no spelling of the path sits in one literal; test_hooks_allowlist.py no longer repeats them.
 _WRITES = [
     "echo /tmp >> ~/{d}/allow",
     "bash -c 'printf x > $HOME/{d}/allow'",
@@ -399,7 +399,7 @@ _NO_DOT = [  # the folder by name with no dot before it: only the `allow` / `gra
     "echo '{}' > ~/{.,}{n}/grants/s9.json",
     "echo '{}' > $'~/\\056{n}/grants/s9.json'",
 ]
-_SPELLINGS = [  # the obfuscated spellings test_hooks_allowlist.py covers for .harpocrates, for either name
+_SPELLINGS = [  # the obfuscated spellings for .harpocrates, for either name; this file is now where they are tested
     "echo / >> ~/.\\{n}/allow",
     "cd ~ && echo / >> .h\\{n1}/allow",
     'echo / >> ~/.ha""{n2}/allow',
@@ -498,7 +498,7 @@ def test_fr_name_04_claude_settings_deny_edits_of_both_dirs() -> None:
 
 
 def test_fr_name_04_codex_profile_denies_both_dirs() -> None:
-    tomllib = pytest.importorskip("tomllib")
+    from toml_compat import tomllib
     cfg = tomllib.loads(harness.codex_config())
     filesystem = cfg["permissions"][cfg["default_permissions"]]["filesystem"]
     assert filesystem["~/.harpo"] == "deny" and filesystem["~/.harpocrates"] == "deny"
@@ -519,7 +519,7 @@ def test_fr_name_04_setup_output_lists_both_deny_rules() -> None:
 
 
 def test_fr_name_04_install_writes_the_deny_rules_for_both_dirs(home: Path) -> None:
-    tomllib = pytest.importorskip("tomllib")
+    from toml_compat import tomllib
     install.install_harnesses(["claude-code", "codex"])
     deny = json.loads((home / ".claude" / "settings.json").read_text())["permissions"]["deny"]
     assert "Edit(~/.harpo/**)" in deny and "Edit(~/.harpocrates/**)" in deny

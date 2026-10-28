@@ -107,7 +107,9 @@ def _denied(done: subprocess.CompletedProcess) -> bool:
 def test_sec_08_control_a_planted_pythonpath_package_runs_without_the_flags(tmp_path: Path) -> None:
     """Without -I or -E the planted package shadows the real one: the test below would catch nothing otherwise."""
     env = _planted_pythonpath(tmp_path)
-    done = subprocess.run([sys.executable, "-P", "-m", "Harpocrates.hooks"], input=CANARY_EVENT, env=env,
+    # -P exists from 3.11; without it the planted package still shadows the real one.
+    argv = [sys.executable, *(["-P"] if sys.version_info >= (3, 11) else []), "-m", "Harpocrates.hooks"]
+    done = subprocess.run(argv, input=CANARY_EVENT, env=env,
                           cwd=tmp_path, capture_output=True, text=True, timeout=60, check=False)
     assert (tmp_path / "PLANTED").exists() and not _denied(done)
 

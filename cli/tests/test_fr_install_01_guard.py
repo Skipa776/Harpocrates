@@ -9,7 +9,7 @@ import os
 import stat
 
 import pytest
-import tomllib
+from toml_compat import tomllib
 
 from Harpocrates import guard, install
 from Harpocrates.gate import session_token

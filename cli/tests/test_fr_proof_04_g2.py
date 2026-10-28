@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-import tomllib
+from toml_compat import tomllib
 
 from bench import agent_isolation as iso
 from bench import agent_runner as runner

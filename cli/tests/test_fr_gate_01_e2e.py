@@ -252,7 +252,7 @@ def test_fr_gate_07_e2e_with_mcp_adds_only_the_media_server_confined_to_the_repo
 
 
 def test_fr_gate_07_e2e_codex_mcp_config_appends_one_approved_server_confined_to_the_repo(tmp_path: Path) -> None:
-    import tomllib
+    from toml_compat import tomllib
     config = tmp_path / "config.toml"
     config.write_text('model = "m"\n')
     e2e.codex_mcp_config(config, tmp_path / "repo")
