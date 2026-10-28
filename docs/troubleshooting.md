@@ -26,6 +26,12 @@ Cause: The commands were renamed (FR-NAME-02). The rename note near the end of t
 
 Fix: Use `harpo` and `harpo-mcp`. The old names still work for two minor releases.
 
+**`harpo_native` is installed but the Python rules run.**
+
+Cause: Harpo uses the module only when `harpo_native.patterns()` equals `detector.rule_patterns()` and its protocol version matches, so a build older than the Python code is ignored. `HARPO_NATIVE=0` also turns it off.
+
+Fix: Rebuild it with `pip install ./core` from the same checkout. `python -c "from Harpocrates.core import detector; print(detector._native_module())"` prints the module when it is in use and None when it is not.
+
 ## Scanning
 
 **`harpo scan` reported "Skipped large file" (before Oct 21, 2026), or older versions passed a large file without a finding.**

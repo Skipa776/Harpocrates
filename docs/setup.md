@@ -14,6 +14,8 @@ pip install "harpocrates[mcp]"      # CLI
 pip install -e ".[dev,explain,mcp]"
 ```
 
+**Rust rules, optional.** From a clone, `pip install ./core` builds `harpo_native` (needs a Rust toolchain; maturin is fetched for the build). With it installed, the read tool, the hook, the gate and `harpo scan`'s Python engine run the regex and entropy rules in Rust, in process; the ML step stays in Python. Without it they run the same rules in Python. Harpo uses the module only when its rules equal the Python ones, so a stale build falls back to Python instead of scanning differently; `HARPO_NATIVE=0` turns it off. `cargo build --release --manifest-path core/Cargo.toml` builds the separate scanner binary that `harpo scan --engine rust` runs.
+
 **CLI path (FR-INSTALL-01).** Then write the setup into each agent's own config:
 
 ```bash
