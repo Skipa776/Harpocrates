@@ -724,7 +724,7 @@ v1 ships in about 8 weeks. Apply to internships from week 2 onward; don't wait f
 
 ### Progress (Oct 21, 2026)
 
-R0, M1 and the M2 work so far are on the `r0/cleanup` branch and not yet merged to `main`; the last release is v1.3.0. This checkout collects 3,427 tests (3,420 unit, 7 integration). The 3,544 counted earlier on Josh's machine include the tests of the training code, which is kept locally and untracked (seven gitignored test files).
+R0, M1 and the M2 work so far are on the `r0/cleanup` branch and not yet merged to `main`; the last release is v1.3.0. This checkout collects 3,549 tests (3,536 unit, 13 integration) and 23 Rust tests (Oct 28). The 3,544 counted earlier on Josh's machine include the tests of the training code, which is kept locally and untracked (seven gitignored test files).
 
 **CI.** `ci.yml` runs on pushes to `main`, `feature/**` and `feat/**`, and on pull requests, so it first ran on this branch with draft pull request #41, on Oct 21. That run passed Rust, the plugin tests and the demos; the unit jobs failed one test, whose help-text check broke when typer draws a colored panel under `GITHUB_ACTIONS` (fixed the same day). The rest below marked Oct 21 was run by hand (Verification run, below).
 
@@ -795,6 +795,57 @@ A Linux x86-64 cloud container with 4 cores. Python 3.13.16, Rust 1.97.0, Claude
 | FR-READ-03 | Fresh-machine setup in under 5 minutes, verified by someone else | Needs another person |
 | NFR-01 | Latency benchmark in CI | Measured locally only: follow-up turns 12.2 ms p95 (target 50), first turns 347 ms p95 (target 500); not in CI |
 | TEST-01 | The CI unit job fails a change below the floor | CI ran on #41 (coverage 93.47%, the floor reached); no change below the floor has been pushed to show the job failing |
+
+#### Final pass, Oct 21 to 28, 2026
+
+Same container and tool versions as the verification run above. Branch `r0/cleanup` at `3cd5dff` for every run below.
+
+**Redundancy changes.** Each moves or merges code without changing behavior, and each was checked before it was committed:
+
+| Change | Commit | Evidence |
+| --- | --- | --- |
+| One loop for the CRITICAL and HIGH regex tiers; `harpo scan` split into `_scan_paths` and `_print_findings_table` | `9573191` | Unit suite |
+| One placeholder pattern (`audit.PLACEHOLDER`) for the read tool, the hook and the logs | `f236404` | Unit suite |
+| One Python fallback for file and directory scans (`scanner._python_findings`) | `7fb87bd` | Scanner tests, unit suite |
+| `_scan_line` builds a finding in one place; 206 to 149 lines | `3cd5dff` | Old and new detector on 413 files of this repo: 629 plain and 162 ML-verified findings, 0 files differ |
+| Gate modules: `body_read` and `body_encoding` into `gate/body.py`; `jsonspan`, `jsonlocate` and `jsonstring` into `gate/jsontext.py`; `header_scan` into `request_scan.py` (27 gate modules to 23) | `21643c6`, `c0d7093`, `ba276ad` | AST check that every top-level statement moved; gate tests 1,242 passed |
+| Test files: one per tested module for FR-CORE-05, FR-LOG-01, the G2 probes and the mock provider (9 files to 4) | `7821639`, `c10be44` | Collected test ids identical before and after each merge |
+
+`724be3d` (a docs commit) carried the body merge's rename without its importers, so that one commit does not import; `21643c6` completes it, and CI is green from there on.
+
+**Verification.**
+
+| Check | Requirement IDs | Result |
+| --- | --- | --- |
+| Lint, docstrings | DOC-DOCSTRING-01 | Pass |
+| Unit tests, Python engine | TEST-01 | 3,530 passed, 6 skipped (5 root file modes, 1 case-insensitive file system); coverage 93.83% |
+| Unit tests, Rust engine | FR-CORE-01, TEST-01 | 3,530 passed, 6 skipped; coverage 93.85% |
+| Rust | FR-CORE-01 | fmt, clippy `-D warnings`: clean; 23 tests passed |
+| Integration | SEC-07, FR-GATE-04, FR-PROOF-04, FR-NAME-05, TEST-03, FR-CORE-05 | 11 passed, 2 failed: both FR-NAME-05 tests, because this container's `/etc/gitconfig` skips LFS downloads, so the `pre-commit try-repo` clone holds the model's pointer file and the SHA-256 check refuses it (SEC-07 working as meant). With smudging on for the run: 2 passed, so 13 of 13. Noted in `docs/testing.md` |
+| Counter | FR-PROOF-04 | 80 of 80 planted canaries received |
+| Parser corpus through the gate, seeds 0 and 1 | FR-GATE-02, FR-PROOF-04 | 0 of 57 known-format received; 11 requests blocked; 2 MCP connector credentials passed by design; ML-only received 13 and 12 of 23 |
+| Read hook with real agents, and control | FR-READ-01, FR-READ-03, FR-READ-06 | Each agent made its 3 tool calls; 0 of 22 known-format received. Control: 10 of 22 known-format and 6 of 8 ML-only received |
+| Gate, g3 | FR-GATE-03, SEC-10 | Both scanner-error sessions blocked with HARPO-BLOCK-SCAN-ERROR, 0 requests reached the mock; with a mismatched install record, 3 of 3 tool results carried the SEC-10 refusal |
+| Gate, g4 | FR-GATE-01, FR-GATE-04, FR-GATE-05 | Gate only: 0 received, 3 of 3 tool results redacted (9 and 10 placeholders). Gate and hook: 0 received, the hook refused the reads. Gate off: 5 known-format and 3 ML-only received per agent |
+| Gate, g5 | FR-GATE-06, FR-GATE-07, FR-GATE-11 | 5 gated sessions, 0 known-format received, 0 inside base64. The Codex MCP image request was blocked with HARPO-BLOCK-ENCODED-SECRET (its control leaked 1, and 3 inside base64). Codex with a fake ChatGPT login: 0 (control: 5). The media controls and the Claude MCP control leaked nothing either, so those paths show no effect of the gate |
+| Guard, seeds 0 and 7 | FR-INSTALL-01, -02, -08, FR-UX-01, FR-LOG-01, FR-PROOF-01, -02, SEC-01 | Both seeds, both agents: routed by `harpo guard up` alone, 0 known-format received, doctor passed, 4 proof entries matching the 4 requests the mock received, chain verified, 7 or 8 `secret_redacted` and 1 `request_blocked`. After `guard down`: files byte-identical, 5 known-format received. SEC-01 sweep: 0 canary values in any Harpo file or temp file |
+| Real home | SEC-08 | Unchanged in every agent run |
+
+**Engine parity (found in this pass).** On this repository, with the commit-layer model, the Python engine reports 159 findings and the Rust engine 140, in 7.3 s against 0.6 s. All 19 differences are findings only Python makes: 17 ML candidates and 2 Telegram bot tokens. The Rust core has 17 of the 18 regex signatures (no `TELEGRAM_BOT_TOKEN`) and none of the Python detector's Phase 2d structured candidates (connection strings, password literals, URL tokens, bearer and header values, among others). `test_fr_core_01_rust_parity.py` compares the engines on the seven files in `docs/samples/samples`, which none of those rules touch, so it passes. In auto mode, `harpo scan` uses the Rust binary whenever one is built in the checkout or on the PATH; a pip install has none and always runs Python.
+
+- **Proposed, for Josh's review: make auto mode choose Python until the Rust core passes a parity test that covers Phase 2d and every signature**, and keep `--engine rust` for those who want the speed and accept the gap. The alternative is to port Phase 2d and the Telegram signature to Rust now and add parity cases for each rule. Either way, the parity test should cover `docs/samples/readme_examples.jsonl`.
+
+**Against the goals** (Goals and non-goals, above):
+
+| Goal | Where it stands on Oct 28 |
+| --- | --- |
+| 1. Zero known-format canaries reach the provider, across every read path | Met in the test harness, against the mock provider: 0 received through the read hook, the gate (scripted reads, MCP images, the ChatGPT-login route) and `harpo guard up`. Not shown against a real provider. ML-only canaries do get through the gate (12 to 13 of 23 in the parser corpus) |
+| 2. Task resolve rate within 3 points with Guard on | Not measured (M3) |
+| 3. Under 50 ms p95 added per request | Follow-up turns 12.2 ms p95, first turns 347 ms p95, measured locally on Oct 20 to 21; not in CI |
+| 4. Fail closed | Shown end to end for a scanner error (g3) and in unit tests for an unusable or damaged audit log, unknown encodings and parse errors |
+| 5. Never store or log a plaintext secret | SEC-01 sweep: 0 canary values in every Harpo file and temp file, in both guard runs |
+| 6. Full protection for Claude Code and Codex; setup under 5 minutes | Both routed and protected in the harness; Codex needs the one-time `/hooks` trust; setup time by someone else not measured (FR-READ-03) |
+| 7. Publish a reproducible benchmark and an evasion suite | Detector benchmark published (README); evasion and prompt-injection suites not built (M3) |
 
 **Decided by Josh on Oct 21, 2026.** FR-GATE-02's acceptance points at the Gate design decisions, `docs/gate-transport.md` and the corpus tests. FR-READ-04 is reworded to the deny that shipped. The code stays in `cli/Harpocrates/`. The FR-CLEAN rows are confirmed. `zstandard` is a runtime dependency before Python 3.14 (gate decision 16). This branch gets CI through a draft pull request. The block message keeps its pointer to `harpo doctor`, which ships with G7. NFR-01 has a separate first-turn target. The parser corpus becomes the only source of each case's expectation. TEST-03 and TEST-04 are approved; TEST-02 is not.
 
