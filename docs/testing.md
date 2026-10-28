@@ -16,6 +16,8 @@ pip install -e ".[dev,explain,mcp]"
 
 **Model files.** The model files are in Git LFS. Run `git lfs pull`. An unfetched `cli/Harpocrates/ml/models/model.onnx` is a text file of about 130 bytes. Harpo refuses any model artifact whose SHA-256 does not match `onnx_model_hashes.json` (SEC-07).
 
+The FR-NAME-05 integration tests run `pre-commit try-repo`, which clones this checkout. On a machine whose git config skips LFS downloads (`filter.lfs.smudge = git-lfs smudge --skip`, set in `/etc/gitconfig` on some cloud containers), that clone holds the pointer file and both tests fail with the SHA-256 mismatch. Turn smudging on for the run: `GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=filter.lfs.smudge GIT_CONFIG_VALUE_0='git-lfs smudge -- %f' GIT_CONFIG_KEY_1=filter.lfs.process GIT_CONFIG_VALUE_1='git-lfs filter-process' pytest -q -m integration`.
+
 **Rust scanner.** For runs against the Rust scanner, build the release binary:
 
 ```bash
