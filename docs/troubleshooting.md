@@ -30,7 +30,7 @@ Fix: Use `harpo` and `harpo-mcp`. The old names still work for two minor release
 
 Cause: Harpo uses the module only when `harpo_native.patterns()` equals `detector.rule_patterns()` and its protocol version matches, so a build older than the Python code is ignored. `HARPO_NATIVE=0` also turns it off.
 
-Fix: Rebuild it with `pip install ./core` from the same checkout. `python -c "from Harpocrates.core import detector; print(detector._native_module())"` prints the module when it is in use and None when it is not.
+Fix: Install the release that matches Harpo with `pip install "harpo-scan[native]"`, or rebuild it with `pip install ./core` from the same checkout. `python -c "from Harpocrates.core import detector; print(detector._native_module())"` prints the module when it is in use and None when it is not.
 
 ## Scanning
 

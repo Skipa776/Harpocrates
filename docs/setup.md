@@ -9,12 +9,12 @@ What this protects today, and what it doesn't, is in the [threat model](threat-m
 There are two install paths. Install the CLI (it includes the read tool and the hooks):
 
 ```bash
-pip install "harpocrates[mcp]"      # CLI
+pip install "harpo-scan[mcp]"       # CLI
 # or, for development from a clone (dev adds the test tools; see testing.md):
 pip install -e ".[dev,explain,mcp]"
 ```
 
-**Rust rules, optional.** From a clone, `pip install ./core` builds `harpo_native` (needs a Rust toolchain; maturin is fetched for the build). With it installed, the read tool, the hook, the gate and `harpo scan`'s Python engine run the regex and entropy rules in Rust, in process; the ML step stays in Python. Without it they run the same rules in Python. Harpo uses the module only when its rules equal the Python ones, so a stale build falls back to Python instead of scanning differently; `HARPO_NATIVE=0` turns it off. `cargo build --release --manifest-path core/Cargo.toml` builds the separate scanner binary that `harpo scan --engine rust` runs.
+**Rust rules, optional.** `pip install "harpo-scan[native]"` installs `harpo_native`, prebuilt for Linux and macOS on x86_64 and arm64 (elsewhere pip builds it, which needs a Rust toolchain); from a clone, `pip install ./core` builds it. With it installed, the read tool, the hook, the gate and `harpo scan`'s Python engine run the regex and entropy rules in Rust, in process; the ML step stays in Python. Without it they run the same rules in Python. Harpo uses the module only when its rules equal the Python ones, so a stale build falls back to Python instead of scanning differently; `HARPO_NATIVE=0` turns it off. `cargo build --release --manifest-path core/Cargo.toml` builds the separate scanner binary that `harpo scan --engine rust` runs.
 
 **CLI path (FR-INSTALL-01).** Then write the setup into each agent's own config:
 
@@ -110,7 +110,7 @@ The single list lives in `cli/Harpocrates/harness.py`, and tests check that both
 - Heredoc bodies, which are checked line by line as commands;
 - `env`, `printenv`, and `$VAR` references to environment variables that hold secrets. The refusal names the variable, never its value.
 
-**What still gets through until the egress gate ships:** a script that opens files itself (`python x.py`, `node -e`), `find -exec cat`, `xargs cat` fed by a pipe, a here-string into a shell (`bash <<< '...'`), `zgrep`, `ugrep` and `pcregrep`, and `git diff` or `git log -p` output.
+**What still gets through without the egress gate:** a script that opens files itself (`python x.py`, `node -e`), `find -exec cat`, `xargs cat` fed by a pipe, a here-string into a shell (`bash <<< '...'`), `zgrep`, `ugrep` and `pcregrep`, and `git diff` or `git log -p` output.
 
 **The Grep tool.** Its input is structured, so the hook checks only the files its pattern matches. Install [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) so those matches are exactly what Claude's Grep would find. Without it, the hook uses Python's regex engine in a child process with a 5-second limit. A pattern it can't evaluate the same way counts as matching every file in scope, and so does a timeout: grep's basic-regex syntax and POSIX classes like `[[:alpha:]]` both fall into this. A search over more than 2,000 files is refused outright, after the scoping above. The agent should use `safe_grep` on a narrower path.
 

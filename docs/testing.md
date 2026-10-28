@@ -45,12 +45,15 @@ Never log either CLI in. Every suite uses fake keys. When a CLI is missing, the 
 | Rust format | `cargo fmt --manifest-path core/Cargo.toml --check` | |
 | Rust lint | `cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings` | |
 | Rust tests | `cargo test --manifest-path core/Cargo.toml` | |
-| Integration | `pytest -q -m integration` | Builds a wheel and runs real agents where installed. TEST-03 (`test_test_03_*`) installs the wheel in a fresh venv, so it needs the package index. |
+| Integration | `pytest -q -m integration` | Builds a wheel and runs real agents where installed; CI installs Claude Code 2.1.312 and Codex 0.163.0, so the agent suites run there against the mock. TEST-03 (`test_test_03_*`) installs the wheel in a fresh venv, so it needs the package index. |
+| NFR-01 latency | `python -m bench.check_latency --recordings DIR/mock` | Replays the sessions that `python -m bench.canary_harness --mode agent --agent all --out-dir DIR` records, through the real scanner. Fails when the follow-up p95 is 50 ms or more, or the first-turn p95 is 500 ms or more. Runs in CI's integration job and does not block yet. |
 | Plugin | `claude plugin test plugins/harpocrates-prompt` | CI pins Claude Code 2.1.302 for this job. |
 
-**Expected skips.** When run as root, 5 tests skip because root ignores file modes. One test needs a case-insensitive file system (the macOS default). Any other skip needs a reason.
+**Expected skips.** When run as root, 5 tests skip because root ignores file modes. One test needs a case-insensitive file system (the macOS default). CI's macOS job runs it. Any other skip needs a reason.
 
 **CI triggers.** `.github/workflows/ci.yml` runs on pushes to `main`, `feature/**` and `feat/**`, and on pull requests. A branch with another name gets no CI run until it has a pull request.
+
+**CI jobs.** `lint-and-test` runs the unit suite with coverage on Python 3.10, 3.11 and 3.14, and ruff and the docstring check on 3.11. `unit-macos` runs the unit suite on macOS. `python-on-rust` runs it on the Rust rules. `integration` runs the integration tests with both agent CLIs installed, then the NFR-01 latency check. `rust` and `plugin-tests` run the Rust checks and the plugin test. `publish.yml` builds every package, including the `harpo-native` wheels, on pull requests that change packaging, and publishes to PyPI on a `v*` tag.
 
 ## 3. End-to-end suites
 
@@ -82,13 +85,13 @@ Never log either CLI in. Every suite uses fake keys. When a CLI is missing, the 
 | `python -m bench.gate_scan_latency --recordings DIR/mock` | Replays recorded sessions through the real scanner. First turns, with a cold cache, are reported separately from follow-up turns. |
 | `python -m bench.gate_encoded_fp --recordings DIR/mock` | Counts requests the FR-GATE-11 rule would block. Every hit must be a real canary. |
 
-In these commands, `DIR` is the output directory of an end-to-end run (see Output above). NFR-01's target is 50 ms p95 added per request.
+In these commands, `DIR` is the output directory of an end-to-end run (see Output above). NFR-01's targets are 50 ms p95 added per follow-up request and 500 ms p95 for a session's first request; `python -m bench.check_latency` judges both.
 
 ## 5. Not covered by the automated suites
 
 - Live sessions against a real provider. `bench/live_canary_check.py` needs a logged-in agent and is run by hand.
 - The fresh-machine setup by someone else (FR-READ-03).
 - The one-time Codex `/hooks` trust.
-- Paths that only exist on macOS.
+- The integration and end-to-end suites on macOS (CI runs only the unit suite there).
 
 Results of the latest verification run are in [the design doc's Progress section](design.md#progress-oct-21-2026).

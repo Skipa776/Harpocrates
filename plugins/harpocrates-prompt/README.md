@@ -36,7 +36,7 @@ The Harpo CLI hook must be installed, because it is what produces the
 verdict this plugin asks about. Install the CLI (it includes the read tool and the hooks):
 
 ```
-pip install "harpocrates[mcp]"
+pip install "harpo-scan[mcp]"
 harpo install
 ```
 
