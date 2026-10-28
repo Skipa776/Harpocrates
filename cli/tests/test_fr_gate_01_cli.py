@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import signal
 import socket
 import subprocess
@@ -21,13 +22,15 @@ from Harpocrates.gate.session_token import TOKEN_HEADER, new_token, write_token_
 
 
 def start(child_python, *args: str) -> subprocess.Popen:
+    env = {**os.environ, "PYTHONFAULTHANDLER": "1"}  # a SIGABRT prints every thread's stack (see listening_url)
     return subprocess.Popen(child_python("Harpocrates.gate", *args), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True)
+                            text=True, env=env)
 
 
 def listening_url(proc: subprocess.Popen) -> str:
-    """Read the one JSON line the gate prints once it serves; kill the process if it never does, and say why."""
-    timer = threading.Timer(20, proc.kill)
+    """Read the one JSON line the gate prints once it serves; if it never does, abort the process so its stack shows
+    where it waited, and say why."""
+    timer = threading.Timer(20, proc.send_signal, (signal.SIGABRT,))
     timer.start()
     try:
         line = proc.stdout.readline()
@@ -39,7 +42,7 @@ def listening_url(proc: subprocess.Popen) -> str:
         proc.kill()
         _, err = proc.communicate(timeout=15)
         raise AssertionError(f"no listening line (exit status {proc.returncode}); first line {line[:120]!r}, "
-                             f"stderr ends {err[-800:]!r}") from error
+                             f"stderr ends {err[-3000:]!r}") from error
 
 
 def stop(proc: subprocess.Popen, sig: int = signal.SIGTERM) -> tuple[int, str]:

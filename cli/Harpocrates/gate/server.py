@@ -3,6 +3,7 @@ the checks in order. Every error path ends in a block; there is no override."""
 from __future__ import annotations
 
 import socket
+import socketserver
 import sys
 import threading
 import time
@@ -47,6 +48,16 @@ class GateServer(ThreadingHTTPServer):
 
     daemon_threads = True
     request_queue_size = 64
+
+    def server_bind(self) -> None:
+        """
+        Description: Bind as HTTPServer does, without its reverse DNS lookup of the address (socket.getfqdn), which can
+            block for many seconds on macOS. Only the CGI handler reads server_name.
+        Parameters: None
+        Output: None. Raises OSError when the port is taken.
+        """
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     def __init__(self, config: GateConfig, token: str, scan_step: ScanStep, log: RequestLog, zstd: Optional[Zstd],
                  audit_dir: Optional[Path] = None) -> None:
