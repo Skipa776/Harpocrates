@@ -41,7 +41,7 @@ Never log either CLI in. Every suite uses fake keys. When a CLI is missing, the 
 | Lint | `ruff check .` | Use the dev extra's ruff (`python -m ruff check .`) if another ruff is first on PATH. |
 | Docstrings | `python scripts/check_docstrings.py --enforce` | Modules listed under `[tool.harpo.docstrings]` in pyproject.toml (DOC-DOCSTRING-01). |
 | Unit tests and coverage | `pytest -q -m "not integration" --cov --cov-report=term` | Fails below `fail_under = 90` in pyproject.toml (TEST-01). |
-| Unit tests on the Rust scanner | `HARPOCRATES_REQUIRE_RUST=1 pytest -q -m "not integration" --cov` | Run after the release build (FR-CORE-01). |
+| Unit tests on the Rust scanner | `HARPOCRATES_REQUIRE_RUST=1 pytest -q -m "not integration" --cov` | Run after the release build (FR-CORE-01). `test_fr_core_01_rust_parity.py` compares the engines' patterns (`harpocrates-rust-scanner patterns`) and their raw candidates, field by field, on a fixture with a line for every rule. |
 | Rust format | `cargo fmt --manifest-path core/Cargo.toml --check` | |
 | Rust lint | `cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings` | |
 | Rust tests | `cargo test --manifest-path core/Cargo.toml` | |

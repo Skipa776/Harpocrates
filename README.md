@@ -2,7 +2,7 @@
 
 <h1 align="center">Harpo</h1>
 
-Harpo is a secrets scanner and a guard that keeps secrets out of AI coding agents (Claude Code and Codex). The scanner combines regex patterns, Shannon entropy and a bundled ML model, with no network calls. The guard puts two layers around the agent: a read tool and hook that keep secrets out of what the agent reads, and an egress gate that scans every request the agent sends to its model provider.
+Harpo is a secrets scanner and a guard that keeps secrets out of AI coding agents (Claude Code and Codex). The scanner finds candidates with regex patterns and Shannon entropy, then a bundled ML model decides on the ones no pattern settles, with no network calls. The guard puts two layers around the agent: a read tool and hook that keep secrets out of what the agent reads, and an egress gate that scans every request the agent sends to its model provider.
 
 **Status.** v1.3.0 on PyPI has the scanner, the read tool and the hook. The egress gate, `harpo guard`, `harpo doctor` and the audit logs are built and tested on the `r0/cleanup` branch ([draft PR #41](https://github.com/Skipa776/Harpocrates/pull/41)) and are not released yet. Requirements, decisions and progress are tracked in [docs/design.md](docs/design.md).
 
@@ -10,7 +10,7 @@ Harpo is a secrets scanner and a guard that keeps secrets out of AI coding agent
 
 | Layer | What it does | Status | Evidence |
 |---|---|---|---|
-| Scanner (`harpo scan`, pre-commit) | Regex and Shannon entropy, then a bundled XGBoost model (ONNX) decides. No network calls. | Released (v1.3.0) | 95.0% recall and 90.4% precision on a 4,352-record held-out benchmark, at the recall-first threshold. |
+| Scanner (`harpo scan`, pre-commit) | Regex and Shannon entropy (in a Rust binary when one is built, else in Python), then a bundled XGBoost model (ONNX, frozen at v17) decides. No network calls. | Released (v1.3.0); the Rust core's full rule set is unreleased | 95.0% recall and 90.4% precision on a 4,352-record held-out benchmark, at the recall-first threshold. That set is half secrets; on real code most alarms are false (see [Precision on real code](#precision-on-real-code)). |
 | Read tool (`safe_read`, `safe_grep`) and read hook | The agent's reads of secret-bearing files are refused. The agent reads them through an MCP tool that returns placeholders. | Released | Scripted sessions of the real Claude Code and Codex CLIs against a local mock provider: 0 of 22 known-format canaries received; 10 of 22 without Harpo. |
 | Egress gate | A localhost proxy that parses every request to the model provider, replaces secrets with placeholders, and blocks what it cannot rewrite safely. Fails closed. | Built, unreleased | 0 of 57 known-format canaries received in a corpus of real request shapes, on two seeds; 0 received in every gated agent session. |
 | `harpo guard up` / `down`, `harpo doctor` | Routes both agents through the gate from their own settings files, and restores them byte-identical. | Built, unreleased | Both agents routed by `guard up` alone: 0 of 11 known-format received, and `harpo doctor` passed. After `guard down`, the files are byte-identical and the same reads leak 5 of 11. |
@@ -53,8 +53,8 @@ flowchart LR
 
 - The agent-session results in At a glance, with Claude Code 2.1.306 and codex-cli 0.163.0, on Oct 21, 2026. Every run uses generated fake canaries, throwaway home folders and a local mock provider; no real credential and no real provider is involved. Commands and results are in [docs/testing.md](docs/testing.md) and the design doc's Progress section.
 - Fail closed: when the scanner errors, both agents are shown the block, and 0 requests reach the provider.
-- The gate adds 12.2 ms p95 on follow-up turns and 347 ms p95 on first turns with a cold cache (measured locally, Apple M3 Pro).
-- 3,530 unit tests on both scan engines, 93.8% line coverage (floor 90% in CI), 13 integration tests (three of them install the built wheel in a fresh venv and run it in a throwaway home), and 23 Rust tests. CI runs the Rust checks, both engines' unit suites, the integration tests and the plugin tests on every push to the pull request.
+- The gate adds 12.2 ms p95 on follow-up turns and 347 ms p95 on first turns with a cold cache (measured locally on an Apple M3 Pro, Oct 20 to 21; not yet in CI).
+- 3,533 unit tests on both scan engines, 93.8% line coverage (floor 90% in CI), 13 integration tests (three of them install the built wheel in a fresh venv and run it in a throwaway home), and 23 Rust tests. CI runs the Rust checks, both engines' unit suites, the integration tests and the plugin tests on every push to the pull request.
 
 **Not proven or not done:**
 
@@ -63,7 +63,8 @@ flowchart LR
 - Secrets with no known format (the model's job) do get through the gate: 12 to 13 of 23 such canaries in the request corpus.
 - The read hook covers a fixed list of shell read commands. `python -c "print(open('.env').read())"` gets past it, and the gate then sees the request.
 - Traffic the agent sends anywhere other than its model API (for example, `curl` to another server) is out of scope.
-- The Rust scan engine misses 19 of the Python engine's 159 findings on this repo (no structured-candidate phase yet). It is used only when built from source.
+- The Rust core is used only by `harpo scan`, and only when built from source (a pip install runs the Python rules). The read tool, the hook and the gate run the same rules in Python, in process, where a subprocess per request would cost latency. Both engines give identical candidates on this repository and on a fixture for every rule; outside ASCII, a few character tests (what counts as a digit or a letter) are Rust's nearest equivalents of Python's and could differ on unusual characters.
+- The model is frozen at v17. ML work stopped on Oct 28, 2026, so its known misses (below) will not be retrained away, and the planned review of the real-code negatives will not happen.
 - Task success with the guard on, an evasion suite, and setup time measured by someone else are planned (M3), not done.
 
 ## Demos
@@ -115,7 +116,7 @@ $ python -c "from Harpocrates.mcp.server import safe_read; print(safe_read('.env
 
 ## Model card
 
-- **Model:** v17 (detector v1.2)
+- **Model:** v17 (detector v1.2), frozen: no further training is planned.
 - **Architecture:** XGBoost (600 trees, depth 7), inference via ONNX Runtime. The input vector has 64 features, but the trees split on 53 of them. The 10 variable-name features are zeroed in training because they were a shortcut: removing them raised validation AUC. The model therefore judges the value and its surroundings, never the name (`pass`, `greeting` and `x` score alike). One more feature, `value_is_dotted_quad_or_host`, is never chosen.
 - **Distribution:** bundled in the package — no training needed, no network calls. Harpo turns off ONNX Runtime's built-in Microsoft telemetry, which is on by default since ONNX Runtime 1.31. If you import onnxruntime yourself before Harpo in the same process, export ORT_DISABLE_TELEMETRY=1.
 - **Training data:** synthetic + LLM-written code + real open-source negatives (157,066 candidate rows)
@@ -141,7 +142,7 @@ Known limits:
 - Regex hits skip the model. Documentation-style example keys that match a provider regex are always flagged. This sets a floor on the false-positive rate: 2.8% on the benchmark and 1.6% on open-source code, whatever the threshold.
 - Recall ceiling (the share of secrets the scanner turns into a candidate at all): 95.5% benchmark / 99.5% OSS.
 
-Evaluation data was never used for training. The benchmark has been scored for several model versions, so it is now retired for choosing models; future models are selected on leave-one-LLM-family-out validation and real-code alarm rates.
+Evaluation data was never used for training. The benchmark has been scored for several model versions, so it is no longer a clean test for choosing a model; since no new model is planned, it stays as the published measure of v17.
 
 ## Install
 
@@ -250,7 +251,7 @@ harpo scan ./my_project --history
 harpo scan ./my_project --engine rust   # needs cargo build --release --manifest-path core/Cargo.toml
 ```
 
-`--engine rust` changes only how candidates are found; the ML step is the same Python code. In auto mode, `harpo scan` uses the Rust binary when one is built in the checkout or on the PATH; a pip install has none and runs Python. The Rust engine is about 12x faster but finds less: on this repository (310 files, Oct 28), Python reports 159 findings in 7.3 s and Rust 140 in 0.6 s. Rust lacks the Telegram signature and the structured-candidate phase (connection strings, password literals, bearer tokens and similar), so it misses findings Python makes: here 17 ML candidates and the Telegram bot token from [Real-world cases](#real-world-cases-none-of-the-others-catch). Until it catches up, prefer `--engine python` where recall matters.
+`--engine rust` changes only where the regex and entropy rules run; the ML step is the same Python code. In auto mode, `harpo scan` uses the Rust binary when one is built in the checkout or on the PATH; a pip install has none and runs Python. The Rust core has every rule of the Python detector, with the same pattern text (`harpocrates-rust-scanner patterns` lists them, and a test compares the two lists). On this repository (310 files, a 4-core Linux container, Oct 28) both engines report the same 2,236 raw candidates, field by field, and the same 159 findings after the model. Without the model, Rust takes 0.8 s and Python 5.0 s; with it, 1.9 s and 6.5 s, since the model runs in Python either way.
 
 Exclude files and directories with `--ignore`, a comma-separated list:
 
@@ -284,7 +285,7 @@ Failure handling: if the model can't load, for example because its hash doesn't 
 
 ## Benchmarks
 
-Five scanners, same files, full scans. Two test sets, never used for training or tuning: a 4,352-record benchmark written by LLMs that generated none of the training data (half the records carry a secret, half a harmless look-alike), and 3,000 records from 42 permissively licensed GitHub repos with fake secrets inserted and real high-entropy strings as negatives. Recall and precision columns are benchmark first, then open-source code.
+Measured at v1.3.0 with model v17 and not re-run since. Each later change to the detector was checked to leave its findings on this repository's files unchanged; the one intended change, scanning files over 10 MB whole (FR-CORE-05), does not touch these short records. Five scanners, same files, full scans. Two test sets, never used for training or tuning: a 4,352-record benchmark written by LLMs that generated none of the training data (half the records carry a secret, half a harmless look-alike), and 3,000 records from 42 permissively licensed GitHub repos with fake secrets inserted and real high-entropy strings as negatives. Recall and precision columns are benchmark first, then open-source code.
 
 | Scanner | Recall | Precision | False-positive rate | Recall | Precision | AUC (benchmark / OSS) |
 |---|---|---|---|---|---|---|
@@ -310,7 +311,7 @@ Five scanners, same files, full scans. Two test sets, never used for training or
 
 - **Against gitleaks (5.7% false positives):** the commit threshold is at 5.1%, with 93.9% recall against gitleaks' 52.3%.
 - **Against TruffleHog (0.9%):** Harpo can't get that low. Regex hits bypass the model, and 58 of the 65 regex false positives are documentation example keys. That floors the rate at 2.8%, where recall is 43.8%, about TruffleHog's level at three times its false-positive rate.
-- **The model itself is not the limit:** counting only the model's false positives, it reaches 91.9% recall at 0.9%. Sending regex hits on example keys through the model would remove the floor; that isn't done yet.
+- **The model itself is not the limit:** counting only the model's false positives, it reaches 91.9% recall at 0.9%. Sending regex hits on example keys through the model would remove the floor; with ML work stopped, that is not planned.
 
 ### Precision on real code
 
@@ -379,7 +380,7 @@ Two held-out sets. Neither was used for training, and neither was used to choose
 
 ### Known biases and gaps
 
-- **The real-code negatives were never reviewed.** The planned check of at least 500 samples (DATA-05) has not been done, so some "negatives" may be real secrets, and the review queues are unread.
+- **The real-code negatives were never reviewed.** The check of at least 500 samples (DATA-05) was not done and, with ML work stopped, will not be, so some "negatives" may be real secrets, and the review queues are unread.
 - **The negatives favor gitleaks.** Real strings gitleaks flagged were removed before scoring, so gitleaks can't produce a false positive on real code. Its 100.0% open-source precision partly reflects this.
 - **The negatives are hard for Harpo.** The real-code negatives are strings Harpo's own extractor picks up, which other scanners may never flag. This penalizes Harpo's precision relative to the others.
 - **The secrets are planted.** Each one is a new line inserted into code that has nothing to do with it. That makes it easier to spot than a secret a developer actually wrote.
@@ -408,7 +409,7 @@ What to do: install the new package with `pip install harpo-scan` once it is pub
 
 ## Past versions
 
-- **Unreleased (`r0/cleanup`):** the egress gate (Anthropic Messages and OpenAI Responses, including streaming, gzip and zstd bodies, media and base64 inside text); `harpo guard up` / `down`, `harpo doctor` and `harpo proof`; the findings and proof logs; whole-file scans under a 64 MB memory cap; the rename to Harpo.
+- **Unreleased (`r0/cleanup`):** the egress gate (Anthropic Messages and OpenAI Responses, including streaming, gzip and zstd bodies, media and base64 inside text); `harpo guard up` / `down`, `harpo doctor` and `harpo proof`; the findings and proof logs; whole-file scans under a 64 MB memory cap; every regex and entropy rule in the Rust core, matching the Python detector; the rename to Harpo.
 - **v1.3.0:** agent protection reworked: reads of secret-bearing files are refused (use `safe_read`), edits ask once per file and session; `harpocrates install` / `uninstall` for Claude Code and Codex; allowlist names (`harpocrates allow --name`); Claude Code plugin `harpocrates-prompt` with `/harpocrates` allowlist commands; hook hardening.
 - **v1.2.0** (model v17): higher recall, read tool for AI agents, calibrated confidence. `--ml` was removed so the model always runs (drop `--ml` from scripts and pre-commit `args`; it is now an error); the REST API, LLM verifier, and legacy training CLI were removed.
 - **v0.4:** redesigned 64-feature vector, TreeSHAP `--explain`, severity calibration.
