@@ -12,4 +12,4 @@ os.environ["ORT_DISABLE_TELEMETRY"] = "1"
 
 __all__ = ["__version__"]
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"

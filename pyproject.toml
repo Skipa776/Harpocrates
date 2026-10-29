@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harpo-scan"
-version = "1.4.0"
+version = "1.4.1"
 description = "Secrets scanner and guard for AI coding agents: regex, entropy and a bundled ML model, a redacting read tool and hook, and a fail-closed egress gate"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -50,7 +50,7 @@ explain = [
     "xgboost>=2.0.0,<4",
 ]
 # the regex and entropy rules in Rust, in process (prebuilt for Linux and macOS)
-native = ["harpo-native==1.4.0"]
+native = ["harpo-native==1.4.1"]
 # deprecated alias of explain, remove after two minor releases
 train = [
     "xgboost>=2.0.0,<4",

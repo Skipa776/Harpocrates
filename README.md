@@ -4,7 +4,7 @@
 
 Harpo is a secrets scanner and a guard that keeps secrets out of AI coding agents (Claude Code and Codex). The scanner finds candidates with regex patterns and Shannon entropy, then a bundled ML model decides on the ones no pattern settles, with no network calls. The guard puts two layers around the agent: a read tool and hook that keep secrets out of what the agent reads, and an egress gate that scans every request the agent sends to its model provider.
 
-**Status.** Version 1.4.0 (`pip install harpo-scan`) is complete: the scanner, the read tool and hook, the egress gate, `harpo guard`, `harpo doctor`, the audit logs and the Rust rules. Development has stopped; what I would build next is under [If I kept going](#if-i-kept-going). Harpo has had no outside security review, and no agent session through the gate has reached a real model provider yet; the gate's results come from a local mock (see [What is proven and what is not](#what-is-proven-and-what-is-not)). Requirements, decisions and progress are in [docs/design.md](https://github.com/Skipa776/Harpocrates/blob/main/docs/design.md).
+**Status.** Version 1.4.1 (`pip install harpo-scan`) is complete: the scanner, the read tool and hook, the egress gate, `harpo guard`, `harpo doctor`, the audit logs and the Rust rules. Development has stopped; what I would build next is under [If I kept going](#if-i-kept-going). Harpo has had no outside security review, and no agent session through the gate has reached a real model provider yet; the gate's results come from a local mock (see [What is proven and what is not](#what-is-proven-and-what-is-not)). Requirements, decisions and progress are in [docs/design.md](https://github.com/Skipa776/Harpocrates/blob/main/docs/design.md).
 
 ## At a glance
 
@@ -216,7 +216,7 @@ Add to `.pre-commit-config.yaml`, then run `pre-commit install`:
 ```yaml
 repos:
   - repo: https://github.com/Skipa776/Harpocrates
-    rev: v1.4.0
+    rev: v1.4.1
     hooks:
       - id: harpo
         args: ["--ignore", "graphify-out,*.lock"]   # optional
@@ -413,6 +413,7 @@ What to do: install the new package with `pip install harpo-scan`, then re-run `
 
 ## Past versions
 
+- **v1.4.1:** README fixes: the PyPI page now shows the images and its links work, and the package summary names the gate. No code changes.
 - **v1.4.0:** the egress gate (Anthropic Messages and OpenAI Responses, including streaming, gzip and zstd bodies, media and base64 inside text); `harpo guard up` / `down`, `harpo doctor` and `harpo proof`; the findings and proof logs; whole-file scans under a 64 MB memory cap; every regex and entropy rule in the Rust core, matching the Python detector, as a binary and as an in-process module (`harpo_native`); the rename to Harpo.
 - **v1.3.0:** agent protection reworked: reads of secret-bearing files are refused (use `safe_read`), edits ask once per file and session; `harpocrates install` / `uninstall` for Claude Code and Codex; allowlist names (`harpocrates allow --name`); Claude Code plugin `harpocrates-prompt` with `/harpocrates` allowlist commands; hook hardening.
 - **v1.2.0** (model v17): higher recall, read tool for AI agents, calibrated confidence. `--ml` was removed so the model always runs (drop `--ml` from scripts and pre-commit `args`; it is now an error); the REST API, LLM verifier, and legacy training CLI were removed.
